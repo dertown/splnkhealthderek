@@ -1,0 +1,12 @@
+<nav search_view="search" color="#171D21">
+  <view name="executive_overview" default="true" />
+  <view name="host_heartbeat" />
+  <view name="hec_performance" />
+  <view name="sc4s_edge" />
+  <collection label="Search">
+    <view name="search" />
+    <view name="reports" />
+    <view name="alerts" />
+    <view name="dashboards" />
+  </collection>
+</nav>

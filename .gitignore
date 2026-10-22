@@ -1,0 +1,10 @@
+local/
+metadata/local.meta
+*.pyc
+__pycache__/
+.DS_Store
+*.tgz
+*.spl
+lookups/*.csv.bak
+.idea/
+.vscode/

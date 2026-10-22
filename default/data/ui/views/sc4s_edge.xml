@@ -1,0 +1,692 @@
+<dashboard version="2" theme="dark">
+  <label>SC4S Syslog & Edge/Ingest Processors</label>
+  <description>Syslog/SC4S sources and Edge/Ingest Processor in-flight metrics.</description>
+  <definition><![CDATA[
+{
+  "title": "SC4S Syslog & Edge/Ingest Processors",
+  "description": "Syslog/SC4S source volume plus Edge Processor in-flight vs indexed volume and filter efficiency.",
+  "defaults": {
+    "dataSources": {
+      "ds.search": {
+        "options": {
+          "queryParameters": {
+            "earliest": "$global_time.earliest$",
+            "latest": "$global_time.latest$"
+          }
+        }
+      }
+    }
+  },
+  "inputs": {
+    "input_global_trp": {
+      "type": "input.timerange",
+      "title": "Time range",
+      "options": {
+        "token": "global_time",
+        "defaultValue": "-4h@h,now"
+      }
+    }
+  },
+  "dataSources": {
+    "ds_sc4s_time": {
+      "type": "ds.search",
+      "name": "SC4S / syslog over time",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` `exec_health_sc4s` by _time span=5m sourcetype\n| timechart span=5m sum(events) as events by sourcetype",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_sc4s_hosts": {
+      "type": "ds.search",
+      "name": "Events per syslog source",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` `exec_health_sc4s` by host sourcetype\n| sort 0 -events\n| head 50\n| eval _color_rank=3",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_sc4s_errors": {
+      "type": "ds.search",
+      "name": "SC4S container issues",
+      "options": {
+        "query": "search index=* `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR \"connection refused\" OR hang OR dropped)\n| stats count as issues by host, sourcetype\n| eval _color_rank=if(issues>0, 1, 3)\n| sort 0 -issues",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_sc4s_err_time": {
+      "type": "ds.search",
+      "name": "SC4S issues over time",
+      "options": {
+        "query": "search index=* `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR \"connection refused\")\n| timechart span=5m count as sc4s_issues",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_edge_summary": {
+      "type": "ds.search",
+      "name": "Edge Processor summary",
+      "options": {
+        "query": "| mstats rate(processor_events_in_total) as events_in_eps, rate(processor_events_out_total) as events_out_eps, rate(processor_bytes_in_total) as bytes_in_eps, rate(processor_bytes_out_total) as bytes_out_eps where `exec_health_edge_mstats`\n| appendpipe [ stats count | where count=0 | eval events_in_eps=0, events_out_eps=0, bytes_in_eps=0, bytes_out_eps=0 ]\n| eval filter_efficiency_pct=if(events_in_eps>0, round(((events_in_eps-events_out_eps)/events_in_eps)*100, 2), 0)\n| eval events_in_eps=round(events_in_eps, 2), events_out_eps=round(events_out_eps, 2)\n| eval bytes_in_mbps=round(bytes_in_eps/1024/1024, 3)",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_edge_tp": {
+      "type": "ds.search",
+      "name": "Edge throughput by host",
+      "options": {
+        "query": "| mstats rate(processor_events_in_total) as events_in_eps, rate(processor_events_out_total) as events_out_eps, rate(processor_bytes_in_total) as bytes_in_eps, rate(processor_bytes_out_total) as bytes_out_eps where `exec_health_edge_mstats` by host span=5m\n| eval filter_efficiency_pct=if(events_in_eps>0, round(((events_in_eps-events_out_eps)/events_in_eps)*100, 2), 0)\n| eval dropped_or_filtered_eps=round(events_in_eps-events_out_eps, 2)\n| eval events_in_eps=round(events_in_eps, 2), events_out_eps=round(events_out_eps, 2)\n| eval _color_rank=case(events_in_eps>0 AND events_out_eps=0, 1, filter_efficiency_pct>50, 2, 1=1, 3)",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_edge_queue": {
+      "type": "ds.search",
+      "name": "Edge queues and export errors",
+      "options": {
+        "query": "| mstats latest(queue_size_bytes) as queue_size_bytes, latest(exporter_queue_size) as exporter_queue_size, sum(export_destination_errors_total) as export_errors where index=_metrics sourcetype=edge-metrics by host\n| eval queue_mb=round(queue_size_bytes/1024/1024, 2)\n| eval _color_rank=if(export_errors>0, 1, 3)",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_edge_logs": {
+      "type": "ds.search",
+      "name": "Edge / ingest processor logs",
+      "options": {
+        "query": "search index=_internal (source=\"*edge.log\" OR sourcetype=edge OR sourcetype=splunkd_ui_res OR sourcetype=*edge*processor* OR component=IngestActions OR component=IngestProcessor)\n| eval is_drop=if(match(_raw, \"(?i)drop|filter|sending_queue is full\"), 1, 0)\n| stats count as events, sum(is_drop) as drop_mentions by sourcetype, host\n| eval _color_rank=if(drop_mentions>0, 1, 3)\n| sort 0 -drop_mentions, -events",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_indexed": {
+      "type": "ds.search",
+      "name": "Indexed events reaching indexers",
+      "options": {
+        "query": "| tstats count as indexed_events where index=`exec_health_idx` by _time span=5m\n| timechart span=5m sum(indexed_events) as indexed_events",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_ingest_actions": {
+      "type": "ds.search",
+      "name": "Ingest Actions / pipeline drops",
+      "options": {
+        "query": "search index=_internal ((sourcetype=splunkd (component=IngestActions OR component=IngestProcessor)) OR (source=*metrics.log group=pipeline))\n| eval dropped=coalesce(dropped_events, dropped, blocked, 0)\n| timechart span=5m sum(dropped) as dropped_events, count as pipeline_events",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    }
+  },
+  "visualizations": {
+    "viz_header": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "# SC4S and Edge / Ingest Processors\nLeft side watches **syslog/SC4S** volume per source host (load-balancer hang = flatline). Right side compares **Edge Processor in vs out** (`mstats` on `sourcetype=edge-metrics`) with **events reaching indexers**.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_ep_in": {
+      "type": "splunk.singlevalue",
+      "title": "Edge events in / sec",
+      "dataSources": {
+        "primary": "ds_edge_summary"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"events_in_eps\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 2,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_ep_out": {
+      "type": "splunk.singlevalue",
+      "title": "Edge events out / sec",
+      "dataSources": {
+        "primary": "ds_edge_summary"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"events_out_eps\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 2,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_filter": {
+      "type": "splunk.singlevalue",
+      "title": "Filter efficiency",
+      "dataSources": {
+        "primary": "ds_edge_summary"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"filter_efficiency_pct\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 1,
+        "majorFontSize": 32,
+        "unit": " %",
+        "unitPosition": "after",
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_mbps": {
+      "type": "splunk.singlevalue",
+      "title": "Edge bytes in",
+      "dataSources": {
+        "primary": "ds_edge_summary"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"bytes_in_mbps\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 3,
+        "majorFontSize": 32,
+        "unit": " MB/s",
+        "unitPosition": "after",
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_sc4s_time": {
+      "type": "splunk.area",
+      "title": "SC4S / syslog events by sourcetype",
+      "dataSources": {
+        "primary": "ds_sc4s_time"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "events / 5m",
+        "areaOpacity": 0.35,
+        "nullValueDisplay": "connect"
+      }
+    },
+    "viz_indexed": {
+      "type": "splunk.line",
+      "title": "Events reaching indexers (tstats)",
+      "dataSources": {
+        "primary": "ds_indexed"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "indexed events / 5m",
+        "nullValueDisplay": "connect",
+        "lineWidth": 2,
+        "markerDisplay": "off"
+      }
+    },
+    "viz_sc4s_hosts": {
+      "type": "splunk.table",
+      "title": "Events per source (host)",
+      "dataSources": {
+        "primary": "ds_sc4s_hosts"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 20,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_sc4s_err_time": {
+      "type": "splunk.line",
+      "title": "SC4S error / warn rate",
+      "dataSources": {
+        "primary": "ds_sc4s_err_time"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "issues",
+        "nullValueDisplay": "connect",
+        "lineWidth": 2,
+        "markerDisplay": "off"
+      }
+    },
+    "viz_sc4s_errors": {
+      "type": "splunk.table",
+      "title": "SC4S container / syslog issues",
+      "dataSources": {
+        "primary": "ds_sc4s_errors"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_edge_tp": {
+      "type": "splunk.table",
+      "title": "Edge Processor in vs out (filter efficiency)",
+      "dataSources": {
+        "primary": "ds_edge_tp"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_edge_queue": {
+      "type": "splunk.table",
+      "title": "Edge queues and destination errors",
+      "dataSources": {
+        "primary": "ds_edge_queue"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_ingest": {
+      "type": "splunk.line",
+      "title": "Ingest Actions / pipeline dropped events",
+      "dataSources": {
+        "primary": "ds_ingest_actions"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "dropped",
+        "nullValueDisplay": "connect",
+        "lineWidth": 2,
+        "markerDisplay": "off"
+      }
+    },
+    "viz_edge_logs": {
+      "type": "splunk.table",
+      "title": "Edge / Ingest Processor _internal logs",
+      "dataSources": {
+        "primary": "ds_edge_logs"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_footer": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Edge metrics require the `_metrics` index and `sourcetype=edge-metrics`. If those panels are empty, the deployment is not emitting Edge Processor metrics \u2014 use `_internal` logs instead. **Filter efficiency** = `(events_in - events_out) / events_in`. High values mean pipelines are dropping or routing away from indexers. SC4S sourcetypes vary by install; override macro `exec_health_sc4s` if your stream uses a custom sourcetype.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    }
+  },
+  "layout": {
+    "type": "grid",
+    "globalInputs": [
+      "input_global_trp"
+    ],
+    "structure": [
+      {
+        "item": "viz_header",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "w": 1200,
+          "h": 100
+        }
+      },
+      {
+        "item": "viz_ep_in",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 100,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_ep_out",
+        "type": "block",
+        "position": {
+          "x": 300,
+          "y": 100,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_filter",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 100,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_mbps",
+        "type": "block",
+        "position": {
+          "x": 900,
+          "y": 100,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_sc4s_time",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 250,
+          "w": 600,
+          "h": 280
+        }
+      },
+      {
+        "item": "viz_indexed",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 250,
+          "w": 600,
+          "h": 280
+        }
+      },
+      {
+        "item": "viz_sc4s_hosts",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 530,
+          "w": 600,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_edge_tp",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 530,
+          "w": 600,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_sc4s_err_time",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 830,
+          "w": 600,
+          "h": 250
+        }
+      },
+      {
+        "item": "viz_sc4s_errors",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 830,
+          "w": 600,
+          "h": 250
+        }
+      },
+      {
+        "item": "viz_ingest",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1080,
+          "w": 600,
+          "h": 260
+        }
+      },
+      {
+        "item": "viz_edge_queue",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 1080,
+          "w": 600,
+          "h": 260
+        }
+      },
+      {
+        "item": "viz_edge_logs",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1340,
+          "w": 1200,
+          "h": 280
+        }
+      },
+      {
+        "item": "viz_footer",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1620,
+          "w": 1200,
+          "h": 120
+        }
+      }
+    ]
+  }
+}
+]]></definition>
+</dashboard>

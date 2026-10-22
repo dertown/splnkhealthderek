@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "2.0.0",
+  "info": {
+    "title": "Splunk Executive Health",
+    "id": {
+      "group": null,
+      "name": "splunk_exec_health",
+      "version": "1.0.0"
+    },
+    "author": [
+      {
+        "name": "SplunkHealth",
+        "email": null,
+        "company": null
+      }
+    ],
+    "releaseDate": "2026-10-22",
+    "description": "Executive-level Splunk infrastructure health: ingestion vs 7-day moving average, host heartbeat vs data, HEC token anomalies, SC4S syslog, and Edge/Ingest Processor throughput.",
+    "classification": {
+      "intendedAudience": "IT",
+      "categories": ["IT Operations", "Utility"],
+      "developmentStatus": "Production/Stable"
+    },
+    "commonInformationModels": null,
+    "license": {
+      "name": "Apache-2.0",
+      "text": null,
+      "uri": "http://www.apache.org/licenses/LICENSE-2.0"
+    },
+    "privacyPolicy": {
+      "name": null,
+      "text": null,
+      "uri": null
+    },
+    "releaseNotes": {
+      "name": null,
+      "text": "./README.md",
+      "uri": null
+    }
+  },
+  "dependencies": {},
+  "tasks": [],
+  "inputGroups": {},
+  "incompatibleApps": {},
+  "platformRequirements": {
+    "splunk": {
+      "Enterprise": "*",
+      "Cloud": "*"
+    }
+  }
+}

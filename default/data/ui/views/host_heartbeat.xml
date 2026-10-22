@@ -1,0 +1,504 @@
+<dashboard version="2" theme="dark">
+  <label>Host Heartbeat & Ingestion Latency</label>
+  <description>Last data vs last heartbeat and 24-hour volume baselines.</description>
+  <definition><![CDATA[
+{
+  "title": "Host Heartbeat & Ingestion Latency",
+  "description": "Last indexed data vs last _internal heartbeat, plus 24-hour streamstats baselines.",
+  "defaults": {
+    "dataSources": {
+      "ds.search": {
+        "options": {
+          "queryParameters": {
+            "earliest": "$global_time.earliest$",
+            "latest": "$global_time.latest$"
+          }
+        }
+      }
+    }
+  },
+  "inputs": {
+    "input_global_trp": {
+      "type": "input.timerange",
+      "title": "Time range",
+      "options": {
+        "token": "global_time",
+        "defaultValue": "-24h@h,now"
+      }
+    },
+    "input_host": {
+      "type": "input.dropdown",
+      "title": "Host",
+      "options": {
+        "token": "host_filter",
+        "defaultValue": "*",
+        "items": "> frame(label, value) | prepend(prependItems)"
+      },
+      "dataSources": {
+        "primary": "ds_host_list"
+      },
+      "context": {
+        "prependItems": [
+          {
+            "label": "All hosts",
+            "value": "*"
+          }
+        ]
+      }
+    }
+  },
+  "dataSources": {
+    "ds_host_list": {
+      "type": "ds.search",
+      "name": "Host picker",
+      "options": {
+        "query": "| tstats count where index=`exec_health_idx` by host\n| rename host as label\n| eval value=label\n| table label, value\n| sort label",
+        "refresh": "15m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-24h",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_phone_home": {
+      "type": "ds.search",
+      "name": "Last data vs heartbeat",
+      "options": {
+        "query": "| tstats latest(_time) as last_data where index=`exec_health_idx` host=$host_filter$ by host\n| append [\n    | tstats latest(_time) as last_heartbeat where index=_internal host=$host_filter$ by host\n]\n| stats max(last_data) as last_data, max(last_heartbeat) as last_heartbeat by host\n| eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat\n| eval last_data_received=strftime(last_data, \"%Y-%m-%d %H:%M:%S\")\n| eval last_internal_heartbeat=strftime(last_heartbeat, \"%Y-%m-%d %H:%M:%S\")\n| eval data_age=tostring(data_age_sec, \"duration\"), heartbeat_age=tostring(heartbeat_age_sec, \"duration\")\n| eval state=case(\n    isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"HEARTBEAT ONLY\",\n    data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"DATA SILENT\",\n    (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_silence_sec`) AND data_age_sec > `exec_health_silence_sec`, \"HOST DOWN\",\n    data_age_sec > 900, \"DELAYED\",\n    1=1, \"OK\")\n| eval _color_rank=case(state=\"HOST DOWN\" OR state=\"DATA SILENT\" OR state=\"HEARTBEAT ONLY\", 1, state=\"DELAYED\", 2, 1=1, 3)\n| table host, last_data_received, last_internal_heartbeat, data_age, heartbeat_age, state, _color_rank\n| sort _color_rank, host",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_state_counts": {
+      "type": "ds.search",
+      "name": "Host state counts",
+      "options": {
+        "query": "| tstats latest(_time) as last_data where index=`exec_health_idx` host=$host_filter$ by host\n| append [\n    | tstats latest(_time) as last_heartbeat where index=_internal host=$host_filter$ by host\n]\n| stats max(last_data) as last_data, max(last_heartbeat) as last_heartbeat by host\n| eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat\n| eval state=case(\n    isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"HEARTBEAT ONLY\",\n    data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"DATA SILENT\",\n    (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_silence_sec`) AND data_age_sec > `exec_health_silence_sec`, \"HOST DOWN\",\n    data_age_sec > 900, \"DELAYED\",\n    1=1, \"OK\")\n| stats count as hosts by state",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_state_ok": {
+      "type": "ds.chain",
+      "name": "Hosts OK",
+      "options": {
+        "extend": "ds_state_counts",
+        "query": "| append [| makeresults | eval state=\"OK\", hosts=0] | where state=\"OK\" | stats max(hosts) as hosts"
+      }
+    },
+    "ds_state_delayed": {
+      "type": "ds.chain",
+      "name": "Hosts delayed",
+      "options": {
+        "extend": "ds_state_counts",
+        "query": "| append [| makeresults | eval state=\"DELAYED\", hosts=0] | where state=\"DELAYED\" | stats max(hosts) as hosts"
+      }
+    },
+    "ds_state_silent": {
+      "type": "ds.chain",
+      "name": "Hosts data silent",
+      "options": {
+        "extend": "ds_state_counts",
+        "query": "| eval keep=if(state=\"DATA SILENT\" OR state=\"HEARTBEAT ONLY\", 1, 0) | stats sum(eval(if(keep=1, hosts, 0))) as hosts | eval hosts=coalesce(hosts, 0)"
+      }
+    },
+    "ds_state_down": {
+      "type": "ds.chain",
+      "name": "Hosts down",
+      "options": {
+        "extend": "ds_state_counts",
+        "query": "| append [| makeresults | eval state=\"HOST DOWN\", hosts=0] | where state=\"HOST DOWN\" | stats max(hosts) as hosts"
+      }
+    },
+    "ds_baseline": {
+      "type": "ds.search",
+      "name": "24h streamstats baseline",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` host=$host_filter$ earliest=-24h latest=now by host _time span=15m\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol by host\n| eval sigma=`exec_health_sigma`, lower_bound=round(mean_vol-(sigma*stdev_vol), 1)\n| eval baseline_state=case(isnull(mean_vol), \"WARMUP\", isnotnull(stdev_vol) AND events < lower_bound AND mean_vol>10, \"ALERT\", 1=1, \"OK\")\n| sort 0 -_time\n| dedup host\n| eval current_eps=round(events/900, 2), baseline_eps=round(mean_vol/900, 2)\n| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)\n| eval _color_rank=case(baseline_state=\"ALERT\", 1, baseline_state=\"WARMUP\", 2, 1=1, 3)\n| table host, events, mean_vol, stdev_vol, lower_bound, current_eps, baseline_eps, z_score, baseline_state, _color_rank\n| sort _color_rank, host",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-24h",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_host_volume": {
+      "type": "ds.search",
+      "name": "Host volume over time",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` host=$host_filter$ by _time span=15m host\n| timechart span=15m sum(events) as events by host",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_metadata": {
+      "type": "ds.search",
+      "name": "metadata type=hosts",
+      "options": {
+        "query": "| metadata type=hosts index=`exec_health_idx`\n| eval last_seen=strftime(lastTime, \"%Y-%m-%d %H:%M:%S\"), first_seen=strftime(firstTime, \"%Y-%m-%d %H:%M:%S\"), age=tostring(now()-lastTime, \"duration\")\n| eval _color_rank=if((now()-lastTime)>`exec_health_silence_sec`, 1, 3)\n| table host, first_seen, last_seen, totalCount, age, _color_rank\n| sort _color_rank, host",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    }
+  },
+  "visualizations": {
+    "viz_header": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "# Server phone-home vs data\nA host can still write `_internal` heartbeats while **indexed data** has stopped. Baseline alerts fire when the latest 15-minute volume is **2 standard deviations** below that host's 24-hour `streamstats` mean.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_ok": {
+      "type": "splunk.singlevalue",
+      "title": "OK",
+      "dataSources": {
+        "primary": "ds_state_ok"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"hosts\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_delayed": {
+      "type": "splunk.singlevalue",
+      "title": "Delayed (>15m)",
+      "dataSources": {
+        "primary": "ds_state_delayed"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"hosts\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_silent": {
+      "type": "splunk.singlevalue",
+      "title": "Data silent / heartbeat only",
+      "dataSources": {
+        "primary": "ds_state_silent"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"hosts\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_down": {
+      "type": "splunk.singlevalue",
+      "title": "Host down",
+      "dataSources": {
+        "primary": "ds_state_down"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"hosts\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_table": {
+      "type": "splunk.table",
+      "title": "Last data received vs last internal heartbeat",
+      "dataSources": {
+        "primary": "ds_phone_home"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 30,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_baseline": {
+      "type": "splunk.table",
+      "title": "Per-host 24-hour mean / stdev (streamstats window=96 @ 15m)",
+      "dataSources": {
+        "primary": "ds_baseline"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 30,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_volume": {
+      "type": "splunk.area",
+      "title": "Ingestion volume by host",
+      "dataSources": {
+        "primary": "ds_host_volume"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "events / 15m",
+        "areaOpacity": 0.35,
+        "nullValueDisplay": "connect"
+      }
+    },
+    "viz_meta": {
+      "type": "splunk.table",
+      "title": "Metadata inventory (type=hosts)",
+      "dataSources": {
+        "primary": "ds_metadata"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 20,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_footer": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "`tstats latest(_time)` is the source of truth for last data / last heartbeat. `| metadata type=hosts` is shown for inventory comparison. Override `exec_health_silence_sec` (default 3600) and `exec_health_sigma` (default 2) as needed.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    }
+  },
+  "layout": {
+    "type": "grid",
+    "globalInputs": [
+      "input_global_trp",
+      "input_host"
+    ],
+    "structure": [
+      {
+        "item": "viz_header",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "w": 1200,
+          "h": 90
+        }
+      },
+      {
+        "item": "viz_ok",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 90,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_delayed",
+        "type": "block",
+        "position": {
+          "x": 300,
+          "y": 90,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_silent",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 90,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_down",
+        "type": "block",
+        "position": {
+          "x": 900,
+          "y": 90,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_table",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 240,
+          "w": 1200,
+          "h": 340
+        }
+      },
+      {
+        "item": "viz_baseline",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 580,
+          "w": 1200,
+          "h": 320
+        }
+      },
+      {
+        "item": "viz_volume",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 900,
+          "w": 1200,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_meta",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1200,
+          "w": 1200,
+          "h": 280
+        }
+      },
+      {
+        "item": "viz_footer",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1480,
+          "w": 1200,
+          "h": 90
+        }
+      }
+    ]
+  }
+}
+]]></definition>
+</dashboard>

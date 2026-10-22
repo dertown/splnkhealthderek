@@ -1,0 +1,726 @@
+<dashboard version="2" theme="dark">
+  <label>Executive Health Overview</label>
+  <description>Traffic-light Splunk infrastructure health for executives.</description>
+  <definition><![CDATA[
+{
+  "title": "Executive Health Overview",
+  "description": "Traffic-light health for Splunk ingestion, clustering, and host baselines.",
+  "defaults": {
+    "dataSources": {
+      "ds.search": {
+        "options": {
+          "queryParameters": {
+            "earliest": "$global_time.earliest$",
+            "latest": "$global_time.latest$"
+          }
+        }
+      }
+    }
+  },
+  "inputs": {
+    "input_global_trp": {
+      "type": "input.timerange",
+      "title": "Time range",
+      "options": {
+        "token": "global_time",
+        "defaultValue": "-24h@h,now"
+      }
+    }
+  },
+  "dataSources": {
+    "ds_health_components": {
+      "type": "ds.search",
+      "name": "Health components",
+      "options": {
+        "query": "search index=_internal sourcetype=splunkd component=HealthReporter\n| eval health_val=lower(coalesce(health, color, \"unknown\"))\n| stats latest(health_val) as health_val by feature\n| eval component=\"instance:\"+feature, score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n| table component, score\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-15m latest=now\n    | eval component=\"ingestion_live_15m\", score=if(events>0, 2, 0)\n    | table component, score\n]\n| append [\n    search `exec_health_license_usage` earliest=-8d@d latest=@d\n    | eval GB=b/1024/1024/1024\n    | bin _time span=1d\n    | stats sum(GB) as daily_GB by _time\n    | streamstats window=7 current=f avg(daily_GB) as ma_7d\n    | sort 0 -_time\n    | head 1\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-daily_GB)/ma_7d)*100, 1), 0)\n    | eval component=\"ingest_vs_7d_ma\", score=case(isnull(ma_7d) OR ma_7d=0, 2, drop_pct>=`exec_health_drop_red_pct`, 0, drop_pct>=`exec_health_drop_yellow_pct`, 1, 1=1, 2)\n    | table component, score\n]\n| append [\n    | tstats latest(_time) as last_data where index=`exec_health_idx` earliest=-24h latest=now by host\n    | eval silent=if((now()-last_data)>`exec_health_silence_sec`, 1, 0)\n    | stats count as hosts, sum(silent) as silent_hosts\n    | eval silent_ratio=if(hosts>0, silent_hosts/hosts, 1)\n    | eval component=\"host_silence\", score=case(hosts=0, 0, silent_hosts=0, 2, silent_ratio>0.2, 0, 1=1, 1)\n    | table component, score\n]\n| eval _color_rank=case(score<=0, 1, score<2, 2, 1=1, 3)",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-15m",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_overall_health": {
+      "type": "ds.chain",
+      "name": "Overall health",
+      "options": {
+        "extend": "ds_health_components",
+        "query": "| stats min(score) as overall_score\n| eval overall_status=case(overall_score>=2, \"GREEN\", overall_score>=1, \"YELLOW\", 1=1, \"RED\")\n| eval overall_score=coalesce(overall_score, 0)\n| appendpipe [ stats count | where count=0 | eval overall_score=1, overall_status=\"YELLOW\" ]"
+      }
+    },
+    "ds_license_daily": {
+      "type": "ds.search",
+      "name": "License GB/day vs 7d MA",
+      "options": {
+        "query": "search `exec_health_license_usage`\n| eval daily_GB=round(b/1024/1024/1024, 4)\n| bin _time span=1d\n| stats sum(daily_GB) as daily_GB by _time\n| streamstats window=7 current=f avg(daily_GB) as ma_7d\n| eval ma_7d=round(ma_7d, 3), daily_GB=round(daily_GB, 3)\n| eval variance_pct=if(ma_7d>0, round(((daily_GB-ma_7d)/ma_7d)*100, 1), 0)\n| eval health_score=case(isnull(ma_7d), 2, daily_GB < ma_7d*(1-`exec_health_drop_red_pct`/100), 0, daily_GB < ma_7d*(1-`exec_health_drop_yellow_pct`/100), 1, 1=1, 2)\n| eval health_label=case(health_score=0, \"RED\", health_score=1, \"YELLOW\", 1=1, \"GREEN\")\n| sort _time",
+        "refresh": "15m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-8d@d",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_indexer_cluster": {
+      "type": "ds.search",
+      "name": "Indexer cluster peers",
+      "options": {
+        "query": "| rest /services/cluster/master/peers count=0\n| stats count as peers, count(eval(match(coalesce(status, \"\"), \"(?i)up|heartbeat|batched\"))) as peers_up\n| eval health_score=case(peers=0, 1, peers_up=peers, 2, peers_up=0, 0, 1=1, 1)\n| eval clustering_status=case(peers=0, \"N/A\", peers_up=peers, \"GREEN\", peers_up=0, \"RED\", 1=1, \"YELLOW\")\n| eval status_detail=peers_up.\" / \".peers.\" peers up\"\n| appendpipe [\n    stats count\n    | where count=0\n    | eval clustering_status=\"N/A\", health_score=1, peers=0, peers_up=0, status_detail=\"Not clustered / no CM REST\"\n]",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-15m",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_shc": {
+      "type": "ds.search",
+      "name": "Search head cluster",
+      "options": {
+        "query": "| rest /services/shcluster/captain/members count=0\n| stats count as members, count(eval(match(coalesce(status, 'status.label', \"\"), \"(?i)up|ok\"))) as members_up\n| eval health_score=case(members=0, 1, members_up=members, 2, members_up=0, 0, 1=1, 1)\n| eval shc_status=case(members=0, \"N/A\", members_up=members, \"GREEN\", members_up=0, \"RED\", 1=1, \"YELLOW\")\n| eval status_detail=members_up.\" / \".members.\" members up\"\n| appendpipe [\n    stats count\n    | where count=0\n    | eval shc_status=\"N/A\", health_score=1, members=0, members_up=0, status_detail=\"Standalone / no SHC REST\"\n]",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-15m",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_silent": {
+      "type": "ds.search",
+      "name": "Silent hosts",
+      "options": {
+        "query": "| tstats latest(_time) as last_data where index=`exec_health_idx` by host\n| eval silent=if((now()-last_data)>`exec_health_silence_sec`, 1, 0)\n| stats count as hosts, sum(silent) as silent_hosts\n| appendpipe [ stats count | where count=0 | eval hosts=0, silent_hosts=0 ]\n| eval health_score=case(hosts=0, 0, silent_hosts=0, 2, silent_hosts/hosts>0.2, 0, 1=1, 1)",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-24h",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_live": {
+      "type": "ds.search",
+      "name": "Live indexed events 15m",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` earliest=-15m latest=now\n| appendpipe [ stats count | where count=0 | eval events=0 ]\n| eval events_per_sec=round(events/900, 1)",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-15m",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_top_indexes": {
+      "type": "ds.search",
+      "name": "Top indexes by GB",
+      "options": {
+        "query": "search `exec_health_license_usage`\n| eval GB=round(b/1024/1024/1024, 3)\n| stats sum(GB) as GB by idx\n| rename idx as index\n| sort 0 -GB\n| head 20\n| eval _color_rank=3",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_introspection": {
+      "type": "ds.search",
+      "name": "Hostwide introspection",
+      "options": {
+        "query": "search index=_introspection sourcetype=splunk_resource_usage component=Hostwide\n| eval cpu_pct=coalesce(cpu_system_pct, 0)+coalesce(cpu_user_pct, 0)\n| eval mem_used_gb=round(coalesce(mem_used, 0)/1024/1024/1024, 2)\n| stats avg(cpu_pct) as avg_cpu_pct, max(cpu_pct) as max_cpu_pct, latest(mem_used_gb) as mem_used_gb by host\n| eval avg_cpu_pct=round(avg_cpu_pct, 1), max_cpu_pct=round(max_cpu_pct, 1)\n| eval _color_rank=case(max_cpu_pct>=90, 1, max_cpu_pct>=75, 2, 1=1, 3)\n| sort 0 -max_cpu_pct",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_host_alerts": {
+      "type": "ds.search",
+      "name": "Host 2-sigma alerts",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` earliest=-24h latest=now by host _time span=15m\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol by host\n| eval sigma=`exec_health_sigma`, lower_bound=round(mean_vol-(sigma*stdev_vol), 1)\n| eval baseline_state=case(isnull(mean_vol), \"WARMUP\", isnotnull(stdev_vol) AND events < lower_bound AND mean_vol>10, \"ALERT\", 1=1, \"OK\")\n| sort 0 -_time\n| dedup host\n| where baseline_state=\"ALERT\"\n| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)\n| eval _color_rank=1\n| table host, events, mean_vol, stdev_vol, lower_bound, z_score, baseline_state, _color_rank\n| sort host",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-24h",
+          "latest": "now"
+        }
+      }
+    }
+  },
+  "visualizations": {
+    "viz_header": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "# Executive Health Overview\nTraffic lights combine instance HealthReporter, live ingestion, 7-day volume baseline, and silent hosts. **GREEN** = within baseline \u00b7 **YELLOW** = watch \u00b7 **RED** = action required.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_overall": {
+      "type": "splunk.singlevalue",
+      "title": "Overall health",
+      "dataSources": {
+        "primary": "ds_overall_health"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"overall_status\")",
+        "majorColor": "> primary | seriesByName(\"overall_score\") | rangeValue(healthColors)",
+        "backgroundColor": "transparent",
+        "majorFontSize": 36
+      },
+      "context": {
+        "healthColors": [
+          {
+            "value": "#DC4E41",
+            "to": 0.5
+          },
+          {
+            "value": "#F8BE34",
+            "from": 0.5,
+            "to": 1.5
+          },
+          {
+            "value": "#53A051",
+            "from": 1.5
+          }
+        ]
+      }
+    },
+    "viz_gb": {
+      "type": "splunk.singlevalue",
+      "title": "Ingestion (complete days)",
+      "dataSources": {
+        "primary": "ds_license_daily"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"daily_GB\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 2,
+        "majorFontSize": 32,
+        "unit": " GB",
+        "unitPosition": "after",
+        "sparklineValues": "> primary | seriesByName(\"daily_GB\")",
+        "sparklineDisplay": "below",
+        "showSparklineAreaGraph": true,
+        "trendDisplay": "percent",
+        "trendValue": "> sparklineValues | delta(-2)"
+      }
+    },
+    "viz_var": {
+      "type": "splunk.singlevalue",
+      "title": "vs 7-day moving average",
+      "dataSources": {
+        "primary": "ds_license_daily"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"variance_pct\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"health_score\") | lastPoint() | rangeValue(healthColors)",
+        "unit": "%",
+        "unitPosition": "after",
+        "sparklineDisplay": "off",
+        "trendDisplay": "off",
+        "numberPrecision": 1,
+        "majorFontSize": 32
+      },
+      "context": {
+        "healthColors": [
+          {
+            "value": "#DC4E41",
+            "to": 0.5
+          },
+          {
+            "value": "#F8BE34",
+            "from": 0.5,
+            "to": 1.5
+          },
+          {
+            "value": "#53A051",
+            "from": 1.5
+          }
+        ]
+      }
+    },
+    "viz_live": {
+      "type": "splunk.singlevalue",
+      "title": "Indexed events (15m)",
+      "dataSources": {
+        "primary": "ds_live"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"events\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_idx_cluster": {
+      "type": "splunk.singlevalue",
+      "title": "Indexer clustering",
+      "dataSources": {
+        "primary": "ds_indexer_cluster"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"clustering_status\")",
+        "majorColor": "> primary | seriesByName(\"health_score\") | rangeValue(healthColors)",
+        "backgroundColor": "transparent",
+        "majorFontSize": 36
+      },
+      "context": {
+        "healthColors": [
+          {
+            "value": "#DC4E41",
+            "to": 0.5
+          },
+          {
+            "value": "#F8BE34",
+            "from": 0.5,
+            "to": 1.5
+          },
+          {
+            "value": "#53A051",
+            "from": 1.5
+          }
+        ]
+      }
+    },
+    "viz_shc": {
+      "type": "splunk.singlevalue",
+      "title": "Search head cluster",
+      "dataSources": {
+        "primary": "ds_shc"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"shc_status\")",
+        "majorColor": "> primary | seriesByName(\"health_score\") | rangeValue(healthColors)",
+        "backgroundColor": "transparent",
+        "majorFontSize": 36
+      },
+      "context": {
+        "healthColors": [
+          {
+            "value": "#DC4E41",
+            "to": 0.5
+          },
+          {
+            "value": "#F8BE34",
+            "from": 0.5,
+            "to": 1.5
+          },
+          {
+            "value": "#53A051",
+            "from": 1.5
+          }
+        ]
+      }
+    },
+    "viz_silent": {
+      "type": "splunk.singlevalue",
+      "title": "Silent hosts (>1h no data)",
+      "dataSources": {
+        "primary": "ds_silent"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"silent_hosts\")",
+        "majorColor": "> primary | seriesByName(\"health_score\") | rangeValue(healthColors)",
+        "sparklineDisplay": "off",
+        "trendDisplay": "off",
+        "majorFontSize": 32
+      },
+      "context": {
+        "healthColors": [
+          {
+            "value": "#DC4E41",
+            "to": 0.5
+          },
+          {
+            "value": "#F8BE34",
+            "from": 0.5,
+            "to": 1.5
+          },
+          {
+            "value": "#53A051",
+            "from": 1.5
+          }
+        ]
+      }
+    },
+    "viz_ingest_chart": {
+      "type": "splunk.line",
+      "title": "Daily ingestion vs 7-day moving average",
+      "dataSources": {
+        "primary": "ds_license_daily"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "GB / day",
+        "nullValueDisplay": "connect",
+        "lineWidth": 2,
+        "markerDisplay": "off"
+      }
+    },
+    "viz_top_indexes": {
+      "type": "splunk.table",
+      "title": "Top indexes by license usage (GB)",
+      "dataSources": {
+        "primary": "ds_top_indexes"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_intro": {
+      "type": "splunk.table",
+      "title": "Indexer/SH resource usage (_introspection)",
+      "dataSources": {
+        "primary": "ds_introspection"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_host_alerts": {
+      "type": "splunk.table",
+      "title": "Hosts below 2\u03c3 24-hour baseline (latest 15m)",
+      "dataSources": {
+        "primary": "ds_host_alerts"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 25,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_components": {
+      "type": "splunk.table",
+      "title": "Health component scores",
+      "dataSources": {
+        "primary": "ds_health_components"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 20,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_footer": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Baselines use **streamstats** (host volume) and **predict**/moving average (daily GB), not static thresholds. Cluster tiles show **N/A** on standalone or Splunk Cloud stacks without cluster REST. Tune `exec_health_*` macros in Settings > Advanced search > Search macros. Saved alerts ship **disabled** \u2014 enable them after configuring email in Splunk (do not put webhook URLs or passwords in this app).",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    }
+  },
+  "layout": {
+    "type": "grid",
+    "globalInputs": [
+      "input_global_trp"
+    ],
+    "structure": [
+      {
+        "item": "viz_header",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "w": 1200,
+          "h": 90
+        }
+      },
+      {
+        "item": "viz_overall",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 90,
+          "w": 300,
+          "h": 180
+        }
+      },
+      {
+        "item": "viz_gb",
+        "type": "block",
+        "position": {
+          "x": 300,
+          "y": 90,
+          "w": 300,
+          "h": 180
+        }
+      },
+      {
+        "item": "viz_var",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 90,
+          "w": 300,
+          "h": 180
+        }
+      },
+      {
+        "item": "viz_live",
+        "type": "block",
+        "position": {
+          "x": 900,
+          "y": 90,
+          "w": 300,
+          "h": 180
+        }
+      },
+      {
+        "item": "viz_idx_cluster",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 270,
+          "w": 400,
+          "h": 160
+        }
+      },
+      {
+        "item": "viz_shc",
+        "type": "block",
+        "position": {
+          "x": 400,
+          "y": 270,
+          "w": 400,
+          "h": 160
+        }
+      },
+      {
+        "item": "viz_silent",
+        "type": "block",
+        "position": {
+          "x": 800,
+          "y": 270,
+          "w": 400,
+          "h": 160
+        }
+      },
+      {
+        "item": "viz_ingest_chart",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 430,
+          "w": 1200,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_top_indexes",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 730,
+          "w": 600,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_intro",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 730,
+          "w": 600,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_host_alerts",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1030,
+          "w": 700,
+          "h": 320
+        }
+      },
+      {
+        "item": "viz_components",
+        "type": "block",
+        "position": {
+          "x": 700,
+          "y": 1030,
+          "w": 500,
+          "h": 320
+        }
+      },
+      {
+        "item": "viz_footer",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1350,
+          "w": 1200,
+          "h": 110
+        }
+      }
+    ]
+  }
+}
+]]></definition>
+</dashboard>

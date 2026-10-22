@@ -1,0 +1,430 @@
+<dashboard version="2" theme="dark">
+  <label>HEC Token Performance</label>
+  <description>HTTP Event Collector throughput and silence detection.</description>
+  <definition><![CDATA[
+{
+  "title": "HEC Token Performance",
+  "description": "HTTP Event Collector throughput per token with 1-hour rolling-window silence detection.",
+  "defaults": {
+    "dataSources": {
+      "ds.search": {
+        "options": {
+          "queryParameters": {
+            "earliest": "$global_time.earliest$",
+            "latest": "$global_time.latest$"
+          }
+        }
+      }
+    }
+  },
+  "inputs": {
+    "input_global_trp": {
+      "type": "input.timerange",
+      "title": "Time range",
+      "options": {
+        "token": "global_time",
+        "defaultValue": "-4h@h,now"
+      }
+    }
+  },
+  "dataSources": {
+    "ds_hec_time": {
+      "type": "ds.search",
+      "name": "HEC events by token",
+      "options": {
+        "query": "search `exec_health_hec_metrics`\n| eval token=coalesce(series, name, token)\n| lookup hec_token_map token OUTPUT token_name, owner\n| eval token_label=coalesce(token_name, token)\n| timechart span=5m sum(ev) as events by token_label",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_hec_state": {
+      "type": "ds.search",
+      "name": "HEC token state",
+      "options": {
+        "query": "search `exec_health_hec_metrics`\n| eval token=coalesce(series, name, token)\n| lookup hec_token_map token OUTPUT token_name, owner\n| eval token_label=coalesce(token_name, token)\n| bin _time span=1m\n| stats sum(ev) as events, sum(kb) as kb by _time, token, token_label, owner\n| streamstats window=60 avg(events) as avg_1h by token\n| eval is_silent=if(events=0, 1, 0)\n| streamstats window=`exec_health_hec_silence_min` sum(is_silent) as silent_minutes by token\n| sort 0 -_time\n| dedup token\n| eval avg_1h_eps=round(avg_1h, 2), kb=round(kb, 1)\n| eval hec_state=case(\n    avg_1h_eps >= `exec_health_hec_baseline_eps` AND silent_minutes >= `exec_health_hec_silence_min`, \"ALERT\",\n    avg_1h_eps >= 10 AND silent_minutes >= `exec_health_hec_silence_min`, \"YELLOW\",\n    1=1, \"OK\")\n| eval _color_rank=case(hec_state=\"ALERT\", 1, hec_state=\"YELLOW\", 2, 1=1, 3)\n| table token, token_label, owner, events, avg_1h_eps, silent_minutes, kb, hec_state, _color_rank\n| sort _color_rank, token_label",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-2h",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_hec_totals": {
+      "type": "ds.search",
+      "name": "HEC totals",
+      "options": {
+        "query": "search `exec_health_hec_metrics`\n| stats sum(ev) as events, dc(series) as tokens, sum(kb) as kb\n| appendpipe [ stats count | where count=0 | eval events=0, tokens=0, kb=0 ]\n| eval events_per_sec=round(events/3600, 1)\n| eval gb=round(kb/1024/1024, 3)",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-1h",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_hec_handler": {
+      "type": "ds.search",
+      "name": "HttpInputDataHandler by token",
+      "options": {
+        "query": "search `exec_health_hec_handler`\n| eval token=coalesce(token, token_name, series)\n| eval is_error=if(match(coalesce(log_level, \"\"), \"(?i)error|warn\") OR match(_raw, \"(?i)error|fail|reject\"), 1, 0)\n| stats count as events, sum(is_error) as errors by token\n| eval _color_rank=if(errors>0, 1, 3)\n| sort 0 -errors, -events",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_hec_errors": {
+      "type": "ds.search",
+      "name": "HttpInputDataHandler issues",
+      "options": {
+        "query": "search `exec_health_hec_handler` (log_level=ERROR OR log_level=WARN OR error OR fail OR reject)\n| timechart span=5m count as handler_issues",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_hec_alert_count": {
+      "type": "ds.chain",
+      "name": "HEC alert count",
+      "options": {
+        "extend": "ds_hec_state",
+        "query": "| where hec_state=\"ALERT\" | stats count as alerts | appendpipe [ stats count | where count=0 | eval alerts=0 ]"
+      }
+    }
+  },
+  "visualizations": {
+    "viz_header": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "# HEC token performance\nThroughput comes from `metrics.log` `group=http` (series = token). A token that usually sends **100+ events/sec** (macro `exec_health_hec_baseline_eps`) and stays at **0 for 5 minutes** is **ALERT**. Map token GUIDs to names in `lookups/hec_token_map.csv` \u2014 do not put HEC secrets in that file, only display names.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_tokens": {
+      "type": "splunk.singlevalue",
+      "title": "Active tokens (1h)",
+      "dataSources": {
+        "primary": "ds_hec_totals"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"tokens\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_eps": {
+      "type": "splunk.singlevalue",
+      "title": "HEC events / sec (1h)",
+      "dataSources": {
+        "primary": "ds_hec_totals"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"events_per_sec\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 1,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_gb": {
+      "type": "splunk.singlevalue",
+      "title": "HEC volume (1h)",
+      "dataSources": {
+        "primary": "ds_hec_totals"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"gb\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 3,
+        "majorFontSize": 32,
+        "unit": " GB",
+        "unitPosition": "after",
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_alerts": {
+      "type": "splunk.singlevalue",
+      "title": "Tokens in ALERT",
+      "dataSources": {
+        "primary": "ds_hec_alert_count"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"alerts\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_time": {
+      "type": "splunk.area",
+      "title": "HEC events by token",
+      "dataSources": {
+        "primary": "ds_hec_time"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "events / 5m",
+        "areaOpacity": 0.35,
+        "nullValueDisplay": "connect"
+      }
+    },
+    "viz_state": {
+      "type": "splunk.table",
+      "title": "Token vs 1-hour rolling window",
+      "dataSources": {
+        "primary": "ds_hec_state"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 25,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_errors": {
+      "type": "splunk.line",
+      "title": "HttpInputDataHandler errors / warnings",
+      "dataSources": {
+        "primary": "ds_hec_errors"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "issues",
+        "nullValueDisplay": "connect",
+        "lineWidth": 2,
+        "markerDisplay": "off"
+      }
+    },
+    "viz_handler": {
+      "type": "splunk.table",
+      "title": "HttpInputDataHandler activity by token",
+      "dataSources": {
+        "primary": "ds_hec_handler"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 20,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_footer": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Populate `hec_token_map.csv` with `token,token_name,owner`. Never store the HEC token **value** (the secret) in the lookup \u2014 only the token name or UUID that already appears in `_internal` metrics.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    }
+  },
+  "layout": {
+    "type": "grid",
+    "globalInputs": [
+      "input_global_trp"
+    ],
+    "structure": [
+      {
+        "item": "viz_header",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "w": 1200,
+          "h": 110
+        }
+      },
+      {
+        "item": "viz_tokens",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 110,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_eps",
+        "type": "block",
+        "position": {
+          "x": 300,
+          "y": 110,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_gb",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 110,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_alerts",
+        "type": "block",
+        "position": {
+          "x": 900,
+          "y": 110,
+          "w": 300,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_time",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 260,
+          "w": 1200,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_state",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 560,
+          "w": 1200,
+          "h": 320
+        }
+      },
+      {
+        "item": "viz_errors",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 880,
+          "w": 600,
+          "h": 280
+        }
+      },
+      {
+        "item": "viz_handler",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 880,
+          "w": 600,
+          "h": 280
+        }
+      },
+      {
+        "item": "viz_footer",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1160,
+          "w": 1200,
+          "h": 90
+        }
+      }
+    ]
+  }
+}
+]]></definition>
+</dashboard>
