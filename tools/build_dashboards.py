@@ -396,41 +396,67 @@ Q_HOST_ALERTS = r"""
 | sort host
 """.strip()
 
-Q_TOPO_CLASSIFY = (
-    r'| eval ingest_path=case('
-    r'match(sourcetype, "(?i)sc4s|syslog"), "SC4S / syslog", '
-    r'match(sourcetype, "(?i)httpevent|^aws:|^azure:|^gcp:|^google:|kube:container"), "HEC / API / cloud", '
-    r'match(sourcetype, "(?i)edge.?processor|ingest.?processor"), "Edge / Ingest Processor", '
-    r'match(sourcetype, "(?i)wineventlog|WinHostMon|XmlWinEventLog|^Perfmon"), "Windows UF", '
-    r'1=1, "UF / HF / other")'
+Q_TOPO_ENRICH = r"""
+| rex field=source "(?i)(?<net_proto>tcp|udp):(?<net_port>\d+)"
+| eval net_label=case(
+    lower(net_proto)="udp" AND isnotnull(net_port), "UDP:".net_port,
+    lower(net_proto)="tcp" AND isnotnull(net_port), "TCP:".net_port,
+    1=1, null())
+| append [
+    search index=_internal source=*metrics.log group=tcpin_connections
+    | eval host=coalesce(sourceHost, hostname)
+    | eval fwd=lower(trim(coalesce(fwdType, "")))
+    | eval forwarder_class=case(
+        match(fwd, "^(uf|lwf)$"), "UF",
+        match(fwd, "^(full|hf|hwf)$"), "HF",
+        1=1, null())
+    | where isnotnull(host) AND isnotnull(forwarder_class)
+    | stats latest(forwarder_class) as forwarder_class by host
+]
+| eventstats latest(forwarder_class) as forwarder_class by host
+| where isnotnull(events)
+| eval ingest_path=case(
+    match(sourcetype, "(?i)httpevent|^aws:|^azure:|^gcp:|^google:|kube:container"), "HEC / API / cloud",
+    match(sourcetype, "(?i)edge.?processor|ingest.?processor"), "Edge / Ingest Processor",
+    match(sourcetype, "(?i)sc4s"), "SC4S",
+    forwarder_class="UF", "UF",
+    forwarder_class="HF", "HF",
+    isnotnull(net_label), net_label,
+    match(sourcetype, "(?i)wineventlog|WinHostMon|XmlWinEventLog|^Perfmon"), "UF",
+    1=1, "Other")
+""".strip()
+
+Q_TOPO_PATHS = (
+    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n| stats sum(events) as events by host, ingest_path, index"
+    + "\n| sort 0 -events"
+    + "\n| head 100"
+    + "\n| rename host as data_source, index as splunk_index"
+    + "\n| eval _color_rank=3"
+    + "\n| table data_source, ingest_path, splunk_index, events, _color_rank"
 )
 
-Q_TOPO_PATHS = f"""
-| tstats count as events where index=`exec_health_idx` by host sourcetype index
-{Q_TOPO_CLASSIFY}
-| stats sum(events) as events by host, ingest_path, index
-| sort 0 -events
-| head 100
-| rename host as data_source, index as splunk_index
-| eval _color_rank=3
-| table data_source, ingest_path, splunk_index, events, _color_rank
-""".strip()
-
-Q_TOPO_OVERVIEW = f"""
-| tstats count as events where index=`exec_health_idx` by host sourcetype index
-{Q_TOPO_CLASSIFY}
-| stats sum(events) as events by host, ingest_path, index
-| sort 0 -events
-| head 40
-| rename host as data_source, index as splunk_index
-| table data_source, ingest_path, splunk_index
-""".strip()
+Q_TOPO_OVERVIEW = (
+    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n| stats sum(events) as events by host, ingest_path, index"
+    + "\n| sort 0 -events"
+    + "\n| head 40"
+    + "\n| rename host as data_source, index as splunk_index"
+    + "\n| table data_source, ingest_path, splunk_index"
+)
 
 Q_TCPIN_PATHS = r"""
 search index=_internal source=*metrics.log group=tcpin_connections
 | eval data_source=coalesce(sourceHost, hostname)
 | eval receiver=coalesce(destHost, splunk_server)
-| eval connection=coalesce(fwdType, connectionType, "s2s")
+| eval fwd=lower(trim(coalesce(fwdType, "")))
+| eval connection=case(
+    match(fwd, "^(uf|lwf)$"), "UF",
+    match(fwd, "^(full|hf|hwf)$"), "HF",
+    match(lower(coalesce(connectionType, "")), "raw"), "TCP raw",
+    1=1, coalesce(fwdType, connectionType, "s2s"))
 | where isnotnull(data_source) AND isnotnull(receiver)
 | stats sum(kb) as kb, sum(tcp_eps) as eps by data_source, connection, receiver
 | eval kb=round(kb, 1), eps=round(eps, 2)
@@ -1074,9 +1100,9 @@ def data_topology() -> dict:
             "viz_hec": table("HEC tokens as data sources", "ds_hec_paths", count=15),
             "viz_tcpin_table": table("Forwarder connections (metrics.log tcpin)", "ds_tcpin", count=15),
             "viz_footer": md(
-                "Ingest path is inferred from **sourcetype** (syslog/SC4S, HEC/cloud, Windows UF, otherwise UF/HF). "
-                "Server-to-indexer links come from `group=tcpin_connections` in `_internal` — empty on stacks that do not log those metrics to the search tier. "
-                "Narrow `exec_health_idx` if the source list is too large."
+                "Ingest path: **UF** / **HF** from `tcpin_connections` `fwdType`; leftover network inputs are labeled **TCP:port** or **UDP:port** from `source` (for example `udp:514`). "
+                "HEC, SC4S, and Edge stay as their own paths. "
+                "Server-to-indexer links come from `_internal` `group=tcpin_connections`. Narrow `exec_health_idx` if the source list is too large."
             ),
         },
         "layout": grid(
@@ -1100,7 +1126,7 @@ def data_topology() -> dict:
     }
 
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -1141,12 +1167,15 @@ def about() -> dict:
             ),
             "viz_cloud": md(
                 "## Splunk Cloud compatibility\n"
+                "- Search-head app only (`targetWorkloads: _search_heads` in `app.manifest`)\n"
                 "- No cluster-manager or search-head-cluster REST (those endpoints 403 on Cloud)\n"
                 "- Instance health from `_internal` HealthReporter; search-head load from `_introspection`\n"
-                "- No custom Python in the install package (avoids AppInspect manual checks)\n"
+                "- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n"
                 "- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n"
                 "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n\n"
-                "Install on Cloud as **sc_admin** via **Apps → Manage apps → Install app from file**."
+                "Self-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** "
+                "(`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via "
+                "**Apps → Manage apps → Install app from file**."
             ),
             "viz_security": md(
                 "## Security\n"
@@ -1187,7 +1216,7 @@ def readme() -> dict:
                 "- **Host Heartbeat & Ingestion Latency** — last indexed data vs last `_internal` heartbeat; 24-hour 2σ volume baseline\n"
                 "- **HEC Token Performance** — events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n"
                 "- **SC4S Syslog & Edge/Ingest Processors** — syslog sources, Edge in vs out, filter efficiency\n"
-                "- **Data Topology** — sources → ingest path → index, and forwarder → indexer\n\n"
+                "- **Data Topology** — sources → UF / HF / TCP:port / UDP:port → index, and forwarder → indexer\n\n"
                 "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
             ),
             "viz_heartbeat": md(

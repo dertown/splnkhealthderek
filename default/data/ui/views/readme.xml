@@ -20,7 +20,7 @@
     "viz_dashboards": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## Dashboards\n- **Splunk Health Derek+** \u2014 overall GREEN / YELLOW / RED, GB/day vs 7-day average, instance health, search-head load, silent hosts, data topology preview\n- **Host Heartbeat & Ingestion Latency** \u2014 last indexed data vs last `_internal` heartbeat; 24-hour 2\u03c3 volume baseline\n- **HEC Token Performance** \u2014 events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n- **SC4S Syslog & Edge/Ingest Processors** \u2014 syslog sources, Edge in vs out, filter efficiency\n- **Data Topology** \u2014 sources \u2192 ingest path \u2192 index, and forwarder \u2192 indexer\n\n**GREEN** = within baseline \u00b7 **YELLOW** = watch \u00b7 **RED** = action required.",
+        "markdown": "## Dashboards\n- **Splunk Health Derek+** \u2014 overall GREEN / YELLOW / RED, GB/day vs 7-day average, instance health, search-head load, silent hosts, data topology preview\n- **Host Heartbeat & Ingestion Latency** \u2014 last indexed data vs last `_internal` heartbeat; 24-hour 2\u03c3 volume baseline\n- **HEC Token Performance** \u2014 events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n- **SC4S Syslog & Edge/Ingest Processors** \u2014 syslog sources, Edge in vs out, filter efficiency\n- **Data Topology** \u2014 sources \u2192 UF / HF / TCP:port / UDP:port \u2192 index, and forwarder \u2192 indexer\n\n**GREEN** = within baseline \u00b7 **YELLOW** = watch \u00b7 **RED** = action required.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }

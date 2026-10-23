@@ -16,7 +16,7 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 | **Host Heartbeat & Ingestion Latency** | Last indexed data vs last `_internal` heartbeat, `metadata type=hosts` inventory, 24-hour 2σ baseline table |
 | **HEC Token Performance** | Events per HEC token, 1-hour rolling window, flag if a ~100 eps token sits at 0 for 5+ minutes |
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
-| **Data Topology** | Link graph and Sankey of data sources → ingest path → index, plus forwarder → indexer from `_internal` tcpin connections |
+| **Data Topology** | Link graph and Sankey of data sources → UF / HF / TCP:port / UDP:port / HEC / SC4S → index, plus forwarder → indexer |
 
 Saved searches (all **disabled** on install):
 
@@ -25,7 +25,7 @@ Saved searches (all **disabled** on install):
 - HEC token silence
 - Host still heartbeating but not sending data
 
-The app does not use cluster-manager REST, SHC captain REST, custom Python, or MLTK. That keeps Splunk Cloud AppInspect self-service install viable (no manual-check Python `open()` paths).
+The app does not use cluster-manager REST, SHC captain REST, custom Python, modular inputs, `indexes.conf`, or MLTK. `app.manifest` targets search heads only. That keeps Splunk Cloud AppInspect self-service install viable (0 failures, 0 errors, 0 manual checks on `private_app` / `private_victoria` / `private_classic`).
 
 ## Data sources
 
@@ -46,11 +46,11 @@ The viewing role needs search access to `_internal` and `_introspection`. Add `_
 
 ### Splunk Cloud
 
-Use the packaged `.spl` (no `local/`, no `tools/` Python, no `.git`):
+Use the packaged `.spl` (search-head only, no `local/`, no `tools/` Python, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.2.1.spl`.
+3. Upload `dist/splunk_exec_health-1.2.2.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -132,4 +132,11 @@ Dashboard Studio XML is generated from `tools/build_dashboards.py` (development 
 
 ```bash
 python3 tools/build_dashboards.py
+bash tools/package.sh
+```
+
+`tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, no Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
+
+```bash
+splunk-appinspect inspect dist/splunk_exec_health-1.2.2.spl --included-tags private_app
 ```

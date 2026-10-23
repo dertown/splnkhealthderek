@@ -32,7 +32,7 @@
       "type": "ds.search",
       "name": "Indexed source \u2192 ingest \u2192 index",
       "options": {
-        "query": "| tstats count as events where index=`exec_health_idx` by host sourcetype index\n| eval ingest_path=case(match(sourcetype, \"(?i)sc4s|syslog\"), \"SC4S / syslog\", match(sourcetype, \"(?i)httpevent|^aws:|^azure:|^gcp:|^google:|kube:container\"), \"HEC / API / cloud\", match(sourcetype, \"(?i)edge.?processor|ingest.?processor\"), \"Edge / Ingest Processor\", match(sourcetype, \"(?i)wineventlog|WinHostMon|XmlWinEventLog|^Perfmon\"), \"Windows UF\", 1=1, \"UF / HF / other\")\n| stats sum(events) as events by host, ingest_path, index\n| sort 0 -events\n| head 100\n| rename host as data_source, index as splunk_index\n| eval _color_rank=3\n| table data_source, ingest_path, splunk_index, events, _color_rank",
+        "query": "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n| rex field=source \"(?i)(?<net_proto>tcp|udp):(?<net_port>\\d+)\"\n| eval net_label=case(\n    lower(net_proto)=\"udp\" AND isnotnull(net_port), \"UDP:\".net_port,\n    lower(net_proto)=\"tcp\" AND isnotnull(net_port), \"TCP:\".net_port,\n    1=1, null())\n| append [\n    search index=_internal source=*metrics.log group=tcpin_connections\n    | eval host=coalesce(sourceHost, hostname)\n    | eval fwd=lower(trim(coalesce(fwdType, \"\")))\n    | eval forwarder_class=case(\n        match(fwd, \"^(uf|lwf)$\"), \"UF\",\n        match(fwd, \"^(full|hf|hwf)$\"), \"HF\",\n        1=1, null())\n    | where isnotnull(host) AND isnotnull(forwarder_class)\n    | stats latest(forwarder_class) as forwarder_class by host\n]\n| eventstats latest(forwarder_class) as forwarder_class by host\n| where isnotnull(events)\n| eval ingest_path=case(\n    match(sourcetype, \"(?i)httpevent|^aws:|^azure:|^gcp:|^google:|kube:container\"), \"HEC / API / cloud\",\n    match(sourcetype, \"(?i)edge.?processor|ingest.?processor\"), \"Edge / Ingest Processor\",\n    match(sourcetype, \"(?i)sc4s\"), \"SC4S\",\n    forwarder_class=\"UF\", \"UF\",\n    forwarder_class=\"HF\", \"HF\",\n    isnotnull(net_label), net_label,\n    match(sourcetype, \"(?i)wineventlog|WinHostMon|XmlWinEventLog|^Perfmon\"), \"UF\",\n    1=1, \"Other\")\n| stats sum(events) as events by host, ingest_path, index\n| sort 0 -events\n| head 100\n| rename host as data_source, index as splunk_index\n| eval _color_rank=3\n| table data_source, ingest_path, splunk_index, events, _color_rank",
         "refresh": "5m",
         "refreshType": "delay"
       }
@@ -65,7 +65,7 @@
       "type": "ds.search",
       "name": "Forwarder \u2192 indexer connections",
       "options": {
-        "query": "search index=_internal source=*metrics.log group=tcpin_connections\n| eval data_source=coalesce(sourceHost, hostname)\n| eval receiver=coalesce(destHost, splunk_server)\n| eval connection=coalesce(fwdType, connectionType, \"s2s\")\n| where isnotnull(data_source) AND isnotnull(receiver)\n| stats sum(kb) as kb, sum(tcp_eps) as eps by data_source, connection, receiver\n| eval kb=round(kb, 1), eps=round(eps, 2)\n| sort 0 -kb\n| head 80\n| eval _color_rank=3\n| table data_source, connection, receiver, kb, eps, _color_rank",
+        "query": "search index=_internal source=*metrics.log group=tcpin_connections\n| eval data_source=coalesce(sourceHost, hostname)\n| eval receiver=coalesce(destHost, splunk_server)\n| eval fwd=lower(trim(coalesce(fwdType, \"\")))\n| eval connection=case(\n    match(fwd, \"^(uf|lwf)$\"), \"UF\",\n    match(fwd, \"^(full|hf|hwf)$\"), \"HF\",\n    match(lower(coalesce(connectionType, \"\")), \"raw\"), \"TCP raw\",\n    1=1, coalesce(fwdType, connectionType, \"s2s\"))\n| where isnotnull(data_source) AND isnotnull(receiver)\n| stats sum(kb) as kb, sum(tcp_eps) as eps by data_source, connection, receiver\n| eval kb=round(kb, 1), eps=round(eps, 2)\n| sort 0 -kb\n| head 80\n| eval _color_rank=3\n| table data_source, connection, receiver, kb, eps, _color_rank",
         "refresh": "5m",
         "refreshType": "delay"
       }
@@ -426,7 +426,7 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Ingest path is inferred from **sourcetype** (syslog/SC4S, HEC/cloud, Windows UF, otherwise UF/HF). Server-to-indexer links come from `group=tcpin_connections` in `_internal` \u2014 empty on stacks that do not log those metrics to the search tier. Narrow `exec_health_idx` if the source list is too large.",
+        "markdown": "Ingest path: **UF** / **HF** from `tcpin_connections` `fwdType`; leftover network inputs are labeled **TCP:port** or **UDP:port** from `source` (for example `udp:514`). HEC, SC4S, and Edge stay as their own paths. Server-to-indexer links come from `_internal` `group=tcpin_connections`. Narrow `exec_health_idx` if the source list is too large.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
