@@ -1,5 +1,5 @@
 <dashboard version="2" theme="dark">
-  <label>SC4S Syslog & Edge/Ingest Processors</label>
+  <label>SC4S Syslog &amp; Edge/Ingest Processors</label>
   <description>Syslog/SC4S sources and Edge/Ingest Processor in-flight metrics.</description>
   <definition><![CDATA[
 {
@@ -50,7 +50,7 @@
       "type": "ds.search",
       "name": "SC4S container issues",
       "options": {
-        "query": "search index=* `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR \"connection refused\" OR hang OR dropped)\n| stats count as issues by host, sourcetype\n| eval _color_rank=if(issues>0, 1, 3)\n| sort 0 -issues",
+        "query": "search index=`exec_health_sc4s_idx` `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR \"connection refused\" OR hang OR dropped)\n| stats count as issues by host, sourcetype\n| eval _color_rank=if(issues>0, 1, 3)\n| sort 0 -issues",
         "refresh": "5m",
         "refreshType": "delay"
       }
@@ -59,7 +59,7 @@
       "type": "ds.search",
       "name": "SC4S issues over time",
       "options": {
-        "query": "search index=* `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR \"connection refused\")\n| timechart span=5m count as sc4s_issues",
+        "query": "search index=`exec_health_sc4s_idx` `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR \"connection refused\")\n| timechart span=5m count as sc4s_issues",
         "refresh": "5m",
         "refreshType": "delay"
       }
@@ -523,7 +523,7 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Edge metrics require the `_metrics` index and `sourcetype=edge-metrics`. If those panels are empty, the deployment is not emitting Edge Processor metrics \u2014 use `_internal` logs instead. **Filter efficiency** = `(events_in - events_out) / events_in`. High values mean pipelines are dropping or routing away from indexers. SC4S sourcetypes vary by install; override macro `exec_health_sc4s` if your stream uses a custom sourcetype.",
+        "markdown": "Edge metrics require the `_metrics` index and `sourcetype=edge-metrics` (grant the viewing role access to `_metrics` on Splunk Cloud). If those panels are empty or error, Edge Processor is not writing metrics to this stack \u2014 use `_internal` logs instead. **Filter efficiency** = `(events_in - events_out) / events_in`. High values mean pipelines are dropping or routing away from indexers. SC4S error scans use macro `exec_health_sc4s_idx` (default `*`). Narrow it on Cloud to avoid expensive `index=*` event searches.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -531,9 +531,6 @@
   },
   "layout": {
     "type": "grid",
-    "globalInputs": [
-      "input_global_trp"
-    ],
     "structure": [
       {
         "item": "viz_header",
@@ -685,6 +682,9 @@
           "h": 120
         }
       }
+    ],
+    "globalInputs": [
+      "input_global_trp"
     ]
   }
 }

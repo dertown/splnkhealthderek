@@ -1,0 +1,585 @@
+<dashboard version="2" theme="dark">
+  <label>Data Topology</label>
+  <description>Network topology of data sources, ingest paths, and Splunk receivers.</description>
+  <definition><![CDATA[
+{
+  "title": "Data Topology",
+  "description": "Network topology of data sources, ingest paths, and Splunk receivers.",
+  "defaults": {
+    "dataSources": {
+      "ds.search": {
+        "options": {
+          "queryParameters": {
+            "earliest": "$global_time.earliest$",
+            "latest": "$global_time.latest$"
+          }
+        }
+      }
+    }
+  },
+  "inputs": {
+    "input_global_trp": {
+      "type": "input.timerange",
+      "title": "Time range",
+      "options": {
+        "token": "global_time",
+        "defaultValue": "-4h@h,now"
+      }
+    }
+  },
+  "dataSources": {
+    "ds_topo_paths": {
+      "type": "ds.search",
+      "name": "Indexed source \u2192 ingest \u2192 index",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` by host sourcetype index\n| eval ingest_path=case(match(sourcetype, \"(?i)sc4s|syslog\"), \"SC4S / syslog\", match(sourcetype, \"(?i)httpevent|^aws:|^azure:|^gcp:|^google:|kube:container\"), \"HEC / API / cloud\", match(sourcetype, \"(?i)edge.?processor|ingest.?processor\"), \"Edge / Ingest Processor\", match(sourcetype, \"(?i)wineventlog|WinHostMon|XmlWinEventLog|^Perfmon\"), \"Windows UF\", 1=1, \"UF / HF / other\")\n| stats sum(events) as events by host, ingest_path, index\n| sort 0 -events\n| head 100\n| rename host as data_source, index as splunk_index\n| eval _color_rank=3\n| table data_source, ingest_path, splunk_index, events, _color_rank",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_topo_sankey": {
+      "type": "ds.chain",
+      "name": "Indexed flow sankey",
+      "options": {
+        "extend": "ds_topo_paths",
+        "query": "| eval source=data_source, target=ingest_path, value=events\n| appendpipe [\n    eval source=ingest_path, target=splunk_index, value=events\n    | fields source, target, value\n]\n| stats sum(value) as value by source, target\n| eval value=tonumber(value)\n| where value>0 AND isnotnull(source) AND isnotnull(target)\n| table source, target, value"
+      }
+    },
+    "ds_topo_counts": {
+      "type": "ds.chain",
+      "name": "Topology counts",
+      "options": {
+        "extend": "ds_topo_paths",
+        "query": "| stats dc(data_source) as sources, dc(ingest_path) as ingest_paths, dc(splunk_index) as indexes, sum(events) as events"
+      }
+    },
+    "ds_topo_methods": {
+      "type": "ds.chain",
+      "name": "Events by ingest path",
+      "options": {
+        "extend": "ds_topo_paths",
+        "query": "| stats sum(events) as events by ingest_path | sort 0 -events"
+      }
+    },
+    "ds_tcpin": {
+      "type": "ds.search",
+      "name": "Forwarder \u2192 indexer connections",
+      "options": {
+        "query": "search index=_internal source=*metrics.log group=tcpin_connections\n| eval data_source=coalesce(sourceHost, hostname)\n| eval receiver=coalesce(destHost, splunk_server)\n| eval connection=coalesce(fwdType, connectionType, \"s2s\")\n| where isnotnull(data_source) AND isnotnull(receiver)\n| stats sum(kb) as kb, sum(tcp_eps) as eps by data_source, connection, receiver\n| eval kb=round(kb, 1), eps=round(eps, 2)\n| sort 0 -kb\n| head 80\n| eval _color_rank=3\n| table data_source, connection, receiver, kb, eps, _color_rank",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_tcpin_sankey": {
+      "type": "ds.chain",
+      "name": "Forwarder flow sankey",
+      "options": {
+        "extend": "ds_tcpin",
+        "query": "| eval source=data_source, target=receiver, value=kb\n| where isnotnull(source) AND isnotnull(target) AND value>0\n| stats sum(value) as value by source, target\n| fields source, target, value"
+      }
+    },
+    "ds_tcpin_counts": {
+      "type": "ds.chain",
+      "name": "Forwarder connection counts",
+      "options": {
+        "extend": "ds_tcpin",
+        "query": "| stats dc(data_source) as forwarders, dc(receiver) as receivers, sum(kb) as kb"
+      }
+    },
+    "ds_hec_paths": {
+      "type": "ds.search",
+      "name": "HEC tokens as sources",
+      "options": {
+        "query": "search `exec_health_hec_metrics`\n| eval token=coalesce(series, name, token)\n| lookup hec_token_map token OUTPUT token_name, owner\n| eval data_source=coalesce(token_name, token)\n| stats sum(ev) as events, sum(kb) as kb by data_source\n| eval ingest_path=\"HEC\", splunk_index=\"HTTP Event Collector\", _color_rank=3\n| sort 0 -events\n| head 40\n| table data_source, ingest_path, splunk_index, events, kb, _color_rank",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_topo_link": {
+      "type": "ds.chain",
+      "name": "Indexed topology nodes only",
+      "options": {
+        "extend": "ds_topo_paths",
+        "query": "| table data_source, ingest_path, splunk_index"
+      }
+    },
+    "ds_tcpin_link": {
+      "type": "ds.chain",
+      "name": "Forwarder topology nodes only",
+      "options": {
+        "extend": "ds_tcpin",
+        "query": "| table data_source, connection, receiver"
+      }
+    }
+  },
+  "visualizations": {
+    "viz_header": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "# Data topology\nHow servers and data sources reach Splunk: **data source \u2192 ingest path \u2192 index**, plus **forwarder \u2192 indexer** from `_internal` `tcpin_connections`. Click a node to highlight its links.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_sources": {
+      "type": "splunk.singlevalue",
+      "title": "Data sources",
+      "dataSources": {
+        "primary": "ds_topo_counts"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"sources\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_paths": {
+      "type": "splunk.singlevalue",
+      "title": "Ingest paths",
+      "dataSources": {
+        "primary": "ds_topo_counts"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"ingest_paths\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_indexes": {
+      "type": "splunk.singlevalue",
+      "title": "Destination indexes",
+      "dataSources": {
+        "primary": "ds_topo_counts"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"indexes\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_fwds": {
+      "type": "splunk.singlevalue",
+      "title": "Forwarders (tcpin)",
+      "dataSources": {
+        "primary": "ds_tcpin_counts"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"forwarders\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_link": {
+      "type": "splunk.linkgraph",
+      "title": "Sources \u2192 ingest path \u2192 Splunk index",
+      "dataSources": {
+        "primary": "ds_topo_link"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "fieldOrder": [
+          "data_source",
+          "ingest_path",
+          "splunk_index"
+        ],
+        "linkColor": "#009CEB",
+        "nodeHighlightColor": "#7B56DB",
+        "nodeWidth": 170,
+        "nodeHeight": 22,
+        "nodeSpacingX": 40,
+        "nodeSpacingY": 12,
+        "resultLimit": 40,
+        "showNodeCounts": true,
+        "showValueCounts": true
+      }
+    },
+    "viz_sankey": {
+      "type": "splunk.sankey",
+      "title": "Volume flow (events) through ingest paths",
+      "dataSources": {
+        "primary": "ds_topo_sankey"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "linkColorMode": "source"
+      }
+    },
+    "viz_methods": {
+      "type": "splunk.column",
+      "title": "Indexed events by ingest path",
+      "dataSources": {
+        "primary": "ds_topo_methods"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "events",
+        "dataValuesDisplay": "off"
+      }
+    },
+    "viz_table": {
+      "type": "splunk.table",
+      "title": "Top source \u2192 path \u2192 index flows",
+      "dataSources": {
+        "primary": "ds_topo_paths"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 20,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_tcpin_link": {
+      "type": "splunk.linkgraph",
+      "title": "Servers: forwarder \u2192 connection type \u2192 indexer",
+      "dataSources": {
+        "primary": "ds_tcpin_link"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "fieldOrder": [
+          "data_source",
+          "connection",
+          "receiver"
+        ],
+        "linkColor": "#009CEB",
+        "nodeHighlightColor": "#7B56DB",
+        "nodeWidth": 170,
+        "nodeHeight": 22,
+        "nodeSpacingX": 40,
+        "nodeSpacingY": 12,
+        "resultLimit": 40,
+        "showNodeCounts": true,
+        "showValueCounts": true
+      }
+    },
+    "viz_tcpin_sankey": {
+      "type": "splunk.sankey",
+      "title": "Forwarder \u2192 indexer volume (KB)",
+      "dataSources": {
+        "primary": "ds_tcpin_sankey"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "linkColorMode": "source"
+      }
+    },
+    "viz_hec": {
+      "type": "splunk.table",
+      "title": "HEC tokens as data sources",
+      "dataSources": {
+        "primary": "ds_hec_paths"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_tcpin_table": {
+      "type": "splunk.table",
+      "title": "Forwarder connections (metrics.log tcpin)",
+      "dataSources": {
+        "primary": "ds_tcpin"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "global",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_footer": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Ingest path is inferred from **sourcetype** (syslog/SC4S, HEC/cloud, Windows UF, otherwise UF/HF). Server-to-indexer links come from `group=tcpin_connections` in `_internal` \u2014 empty on stacks that do not log those metrics to the search tier. Narrow `exec_health_idx` if the source list is too large.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    }
+  },
+  "layout": {
+    "type": "grid",
+    "structure": [
+      {
+        "item": "viz_header",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "w": 1200,
+          "h": 90
+        }
+      },
+      {
+        "item": "viz_sources",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 90,
+          "w": 300,
+          "h": 140
+        }
+      },
+      {
+        "item": "viz_paths",
+        "type": "block",
+        "position": {
+          "x": 300,
+          "y": 90,
+          "w": 300,
+          "h": 140
+        }
+      },
+      {
+        "item": "viz_indexes",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 90,
+          "w": 300,
+          "h": 140
+        }
+      },
+      {
+        "item": "viz_fwds",
+        "type": "block",
+        "position": {
+          "x": 900,
+          "y": 90,
+          "w": 300,
+          "h": 140
+        }
+      },
+      {
+        "item": "viz_link",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 230,
+          "w": 1200,
+          "h": 380
+        }
+      },
+      {
+        "item": "viz_sankey",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 610,
+          "w": 700,
+          "h": 320
+        }
+      },
+      {
+        "item": "viz_methods",
+        "type": "block",
+        "position": {
+          "x": 700,
+          "y": 610,
+          "w": 500,
+          "h": 320
+        }
+      },
+      {
+        "item": "viz_table",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 930,
+          "w": 1200,
+          "h": 280
+        }
+      },
+      {
+        "item": "viz_tcpin_link",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1210,
+          "w": 1200,
+          "h": 360
+        }
+      },
+      {
+        "item": "viz_tcpin_sankey",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1570,
+          "w": 600,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_hec",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 1570,
+          "w": 600,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_tcpin_table",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1870,
+          "w": 1200,
+          "h": 280
+        }
+      },
+      {
+        "item": "viz_footer",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 2150,
+          "w": 1200,
+          "h": 100
+        }
+      }
+    ],
+    "globalInputs": [
+      "input_global_trp"
+    ]
+  }
+}
+]]></definition>
+</dashboard>

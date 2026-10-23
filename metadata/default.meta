@@ -1,23 +1,23 @@
 []
-access = read : [ * ], write : [ admin, power ]
+access = read : [ * ], write : [ admin, power, sc_admin ]
 export = none
 
 [views]
-access = read : [ * ], write : [ admin, power ]
+access = read : [ * ], write : [ admin, power, sc_admin ]
 export = none
 
 [savedsearches]
-access = read : [ * ], write : [ admin ]
+access = read : [ * ], write : [ admin, sc_admin ]
 export = none
 
 [macros]
-access = read : [ * ], write : [ admin ]
+access = read : [ * ], write : [ admin, sc_admin ]
 export = none
 
 [lookups]
-access = read : [ * ], write : [ admin ]
+access = read : [ * ], write : [ admin, sc_admin ]
 export = none
 
 [transforms]
-access = read : [ * ], write : [ admin ]
+access = read : [ * ], write : [ admin, sc_admin ]
 export = none

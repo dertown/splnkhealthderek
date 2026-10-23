@@ -3,6 +3,11 @@
   <view name="host_heartbeat" />
   <view name="hec_performance" />
   <view name="sc4s_edge" />
+  <view name="data_topology" />
+  <collection label="Help">
+    <view name="readme" />
+    <view name="about" />
+  </collection>
   <collection label="Search">
     <view name="search" />
     <view name="reports" />

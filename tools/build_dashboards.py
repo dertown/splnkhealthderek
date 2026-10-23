@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 ROOT = Path(__file__).resolve().parents[1]
 VIEWS = ROOT / "default" / "data" / "ui" / "views"
@@ -31,8 +33,8 @@ def wrap(label: str, description: str, definition: dict) -> str:
     body = json.dumps(definition, indent=2)
     return (
         f'<dashboard version="2" theme="dark">\n'
-        f"  <label>{label}</label>\n"
-        f"  <description>{description}</description>\n"
+        f"  <label>{xml_escape(label)}</label>\n"
+        f"  <description>{xml_escape(description)}</description>\n"
         f"  <definition><![CDATA[\n{body}\n]]></definition>\n"
         f"</dashboard>\n"
     )
@@ -220,9 +222,49 @@ def block(item: str, x: int, y: int, w: int, h: int) -> dict:
     return {"item": item, "type": "block", "position": {"x": x, "y": y, "w": w, "h": h}}
 
 
-def grid(structure: list, extra_inputs: list | None = None) -> dict:
-    inputs = ["input_global_trp"] + (extra_inputs or [])
-    return {"type": "grid", "globalInputs": inputs, "structure": structure}
+def linkgraph(title: str, ds_id: str, field_order: list[str]) -> dict:
+    return {
+        "type": "splunk.linkgraph",
+        "title": title,
+        "dataSources": {"primary": ds_id},
+        "showLastUpdated": True,
+        "showProgressBar": True,
+        "options": {
+            # Must be a JSON array. A comma-separated string makes Dashboard Studio
+            # throw "f.forEach is not a function" because getField() is an array.
+            "fieldOrder": field_order,
+            "linkColor": "#009CEB",
+            "nodeHighlightColor": "#7B56DB",
+            "nodeWidth": 170,
+            "nodeHeight": 22,
+            "nodeSpacingX": 40,
+            "nodeSpacingY": 12,
+            "resultLimit": 40,
+            "showNodeCounts": True,
+            "showValueCounts": True,
+        },
+    }
+
+
+def sankey(title: str, ds_id: str) -> dict:
+    return {
+        "type": "splunk.sankey",
+        "title": title,
+        "dataSources": {"primary": ds_id},
+        "showLastUpdated": True,
+        "showProgressBar": True,
+        "options": {
+            "linkColorMode": "source",
+        },
+    }
+
+
+def grid(structure: list, extra_inputs: list | None = None, include_time: bool = True) -> dict:
+    inputs = (["input_global_trp"] if include_time else []) + (extra_inputs or [])
+    layout: dict = {"type": "grid", "structure": structure}
+    if inputs:
+        layout["globalInputs"] = inputs
+    return layout
 
 
 # ---------------------------------------------------------------------------
@@ -277,28 +319,32 @@ search `exec_health_license_usage`
 """.strip()
 
 Q_INDEXER_CLUSTER = r"""
-| rest /services/cluster/master/peers count=0
-| stats count as peers, count(eval(match(coalesce(status, ""), "(?i)up|heartbeat|batched"))) as peers_up
-| eval health_score=case(peers=0, 1, peers_up=peers, 2, peers_up=0, 0, 1=1, 1)
-| eval clustering_status=case(peers=0, "N/A", peers_up=peers, "GREEN", peers_up=0, "RED", 1=1, "YELLOW")
-| eval status_detail=peers_up." / ".peers." peers up"
+search index=_internal sourcetype=splunkd component=HealthReporter
+| eval health_val=lower(coalesce(health, color, "unknown"))
+| stats latest(health_val) as health_val by feature
+| eval score=case(health_val="green", 2, health_val="yellow", 1, health_val="red", 0, 1=1, 1)
+| stats min(score) as health_score, count as features, count(eval(score<2)) as unhealthy
+| eval clustering_status=case(health_score>=2, "GREEN", health_score>=1, "YELLOW", 1=1, "RED")
+| eval status_detail=unhealthy." / ".features." features not green"
 | appendpipe [
     stats count
     | where count=0
-    | eval clustering_status="N/A", health_score=1, peers=0, peers_up=0, status_detail="Not clustered / no CM REST"
+    | eval clustering_status="N/A", health_score=1, status_detail="No HealthReporter events"
 ]
 """.strip()
 
 Q_SHC = r"""
-| rest /services/shcluster/captain/members count=0
-| stats count as members, count(eval(match(coalesce(status, 'status.label', ""), "(?i)up|ok"))) as members_up
-| eval health_score=case(members=0, 1, members_up=members, 2, members_up=0, 0, 1=1, 1)
-| eval shc_status=case(members=0, "N/A", members_up=members, "GREEN", members_up=0, "RED", 1=1, "YELLOW")
-| eval status_detail=members_up." / ".members." members up"
+search index=_introspection sourcetype=splunk_resource_usage component=Hostwide
+| eval cpu_pct=coalesce(cpu_system_pct, 0)+coalesce(cpu_user_pct, 0)
+| stats avg(cpu_pct) as avg_cpu, dc(host) as hosts
+| eval avg_cpu=round(avg_cpu, 1)
+| eval health_score=case(avg_cpu>=90, 0, avg_cpu>=75, 1, 1=1, 2)
+| eval shc_status=case(health_score=2, "GREEN", health_score=1, "YELLOW", 1=1, "RED")
+| eval status_detail=avg_cpu."% CPU across ".hosts." host(s)"
 | appendpipe [
     stats count
     | where count=0
-    | eval shc_status="N/A", health_score=1, members=0, members_up=0, status_detail="Standalone / no SHC REST"
+    | eval shc_status="N/A", health_score=1, status_detail="No _introspection data"
 ]
 """.strip()
 
@@ -350,10 +396,66 @@ Q_HOST_ALERTS = r"""
 | sort host
 """.strip()
 
+Q_TOPO_CLASSIFY = (
+    r'| eval ingest_path=case('
+    r'match(sourcetype, "(?i)sc4s|syslog"), "SC4S / syslog", '
+    r'match(sourcetype, "(?i)httpevent|^aws:|^azure:|^gcp:|^google:|kube:container"), "HEC / API / cloud", '
+    r'match(sourcetype, "(?i)edge.?processor|ingest.?processor"), "Edge / Ingest Processor", '
+    r'match(sourcetype, "(?i)wineventlog|WinHostMon|XmlWinEventLog|^Perfmon"), "Windows UF", '
+    r'1=1, "UF / HF / other")'
+)
+
+Q_TOPO_PATHS = f"""
+| tstats count as events where index=`exec_health_idx` by host sourcetype index
+{Q_TOPO_CLASSIFY}
+| stats sum(events) as events by host, ingest_path, index
+| sort 0 -events
+| head 100
+| rename host as data_source, index as splunk_index
+| eval _color_rank=3
+| table data_source, ingest_path, splunk_index, events, _color_rank
+""".strip()
+
+Q_TOPO_OVERVIEW = f"""
+| tstats count as events where index=`exec_health_idx` by host sourcetype index
+{Q_TOPO_CLASSIFY}
+| stats sum(events) as events by host, ingest_path, index
+| sort 0 -events
+| head 40
+| rename host as data_source, index as splunk_index
+| table data_source, ingest_path, splunk_index
+""".strip()
+
+Q_TCPIN_PATHS = r"""
+search index=_internal source=*metrics.log group=tcpin_connections
+| eval data_source=coalesce(sourceHost, hostname)
+| eval receiver=coalesce(destHost, splunk_server)
+| eval connection=coalesce(fwdType, connectionType, "s2s")
+| where isnotnull(data_source) AND isnotnull(receiver)
+| stats sum(kb) as kb, sum(tcp_eps) as eps by data_source, connection, receiver
+| eval kb=round(kb, 1), eps=round(eps, 2)
+| sort 0 -kb
+| head 80
+| eval _color_rank=3
+| table data_source, connection, receiver, kb, eps, _color_rank
+""".strip()
+
+Q_HEC_PATHS = r"""
+search `exec_health_hec_metrics`
+| eval token=coalesce(series, name, token)
+| lookup hec_token_map token OUTPUT token_name, owner
+| eval data_source=coalesce(token_name, token)
+| stats sum(ev) as events, sum(kb) as kb by data_source
+| eval ingest_path="HEC", splunk_index="HTTP Event Collector", _color_rank=3
+| sort 0 -events
+| head 40
+| table data_source, ingest_path, splunk_index, events, kb, _color_rank
+""".strip()
+
 
 def executive_overview() -> dict:
     return {
-        "title": "Executive Health Overview",
+        "title": "Splunk Health Derek+",
         "description": "Traffic-light health for Splunk ingestion, clustering, and host baselines.",
         "defaults": defaults(),
         "inputs": {"input_global_trp": timerange("-24h@h,now")},
@@ -377,10 +479,11 @@ def executive_overview() -> dict:
             "ds_top_indexes": ds("Top indexes by GB", Q_TOP_INDEXES),
             "ds_introspection": ds("Hostwide introspection", Q_INTROSPECTION),
             "ds_host_alerts": ds("Host 2-sigma alerts", Q_HOST_ALERTS, "-24h", "now"),
+            "ds_topo_overview": ds("Data topology preview", Q_TOPO_OVERVIEW),
         },
         "visualizations": {
             "viz_header": md(
-                "# Executive Health Overview\n"
+                "# Splunk Health Derek+\n"
                 "Traffic lights combine instance HealthReporter, live ingestion, 7-day volume baseline, and silent hosts. "
                 "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
             ),
@@ -405,8 +508,8 @@ def executive_overview() -> dict:
                 "context": {"healthColors": HEALTH_COLORS},
             },
             "viz_live": single_number("Indexed events (15m)", "ds_live", "events", "", spark=None, precision=0),
-            "viz_idx_cluster": single_status("Indexer clustering", "ds_indexer_cluster", "clustering_status", "health_score"),
-            "viz_shc": single_status("Search head cluster", "ds_shc", "shc_status", "health_score"),
+            "viz_idx_cluster": single_status("Instance health", "ds_indexer_cluster", "clustering_status", "health_score"),
+            "viz_shc": single_status("Search head load", "ds_shc", "shc_status", "health_score"),
             "viz_silent": {
                 "type": "splunk.singlevalue",
                 "title": "Silent hosts (>1h no data)",
@@ -423,13 +526,30 @@ def executive_overview() -> dict:
                 "context": {"healthColors": HEALTH_COLORS},
             },
             "viz_ingest_chart": line("Daily ingestion vs 7-day moving average", "ds_license_daily", "GB / day"),
+            "viz_topo": {
+                **linkgraph(
+                    "Data topology — sources → ingest path → index (open Data Topology for the full map)",
+                    "ds_topo_overview",
+                    ["data_source", "ingest_path", "splunk_index"],
+                ),
+                "eventHandlers": [
+                    {
+                        "type": "drilldown.linkToDashboard",
+                        "options": {
+                            "app": "splunk_exec_health",
+                            "dashboard": "data_topology",
+                            "newTab": False,
+                        },
+                    }
+                ],
+            },
             "viz_top_indexes": table("Top indexes by license usage (GB)", "ds_top_indexes", count=15),
             "viz_intro": table("Indexer/SH resource usage (_introspection)", "ds_introspection", count=15),
             "viz_host_alerts": table("Hosts below 2σ 24-hour baseline (latest 15m)", "ds_host_alerts", count=25),
             "viz_components": table("Health component scores", "ds_health_components", count=20),
             "viz_footer": md(
                 "Baselines use **streamstats** (host volume) and **predict**/moving average (daily GB), not static thresholds. "
-                "Cluster tiles show **N/A** on standalone or Splunk Cloud stacks without cluster REST. "
+                "Instance health is **HealthReporter** in `_internal`; search-head load is `_introspection` (no cluster-manager REST — Splunk Cloud compatible). "
                 "Tune `exec_health_*` macros in Settings > Advanced search > Search macros. "
                 "Saved alerts ship **disabled** — enable them after configuring email in Splunk (do not put webhook URLs or passwords in this app)."
             ),
@@ -445,11 +565,12 @@ def executive_overview() -> dict:
                 block("viz_shc", 400, 270, 400, 160),
                 block("viz_silent", 800, 270, 400, 160),
                 block("viz_ingest_chart", 0, 430, 1200, 300),
-                block("viz_top_indexes", 0, 730, 600, 300),
-                block("viz_intro", 600, 730, 600, 300),
-                block("viz_host_alerts", 0, 1030, 700, 320),
-                block("viz_components", 700, 1030, 500, 320),
-                block("viz_footer", 0, 1350, 1200, 110),
+                block("viz_topo", 0, 730, 1200, 340),
+                block("viz_top_indexes", 0, 1070, 600, 300),
+                block("viz_intro", 600, 1070, 600, 300),
+                block("viz_host_alerts", 0, 1370, 700, 320),
+                block("viz_components", 700, 1370, 500, 320),
+                block("viz_footer", 0, 1690, 1200, 110),
             ]
         ),
     }
@@ -745,14 +866,14 @@ Q_SC4S_HOSTS = r"""
 """.strip()
 
 Q_SC4S_ERRORS = r"""
-search index=* `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR "connection refused" OR hang OR dropped)
+search index=`exec_health_sc4s_idx` `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR "connection refused" OR hang OR dropped)
 | stats count as issues by host, sourcetype
 | eval _color_rank=if(issues>0, 1, 3)
 | sort 0 -issues
 """.strip()
 
 Q_SC4S_ERR_TIME = r"""
-search index=* `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR "connection refused")
+search index=`exec_health_sc4s_idx` `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR "connection refused")
 | timechart span=5m count as sc4s_issues
 """.strip()
 
@@ -836,10 +957,10 @@ def sc4s_edge() -> dict:
             "viz_ingest": line("Ingest Actions / pipeline dropped events", "ds_ingest_actions", "dropped"),
             "viz_edge_logs": table("Edge / Ingest Processor _internal logs", "ds_edge_logs", count=15),
             "viz_footer": md(
-                "Edge metrics require the `_metrics` index and `sourcetype=edge-metrics`. "
-                "If those panels are empty, the deployment is not emitting Edge Processor metrics — use `_internal` logs instead. "
+                "Edge metrics require the `_metrics` index and `sourcetype=edge-metrics` (grant the viewing role access to `_metrics` on Splunk Cloud). "
+                "If those panels are empty or error, Edge Processor is not writing metrics to this stack — use `_internal` logs instead. "
                 "**Filter efficiency** = `(events_in - events_out) / events_in`. High values mean pipelines are dropping or routing away from indexers. "
-                "SC4S sourcetypes vary by install; override macro `exec_health_sc4s` if your stream uses a custom sourcetype."
+                "SC4S error scans use macro `exec_health_sc4s_idx` (default `*`). Narrow it on Cloud to avoid expensive `index=*` event searches."
             ),
         },
         "layout": grid(
@@ -864,11 +985,282 @@ def sc4s_edge() -> dict:
     }
 
 
+def data_topology() -> dict:
+    return {
+        "title": "Data Topology",
+        "description": "Network topology of data sources, ingest paths, and Splunk receivers.",
+        "defaults": defaults(),
+        "inputs": {"input_global_trp": timerange("-4h@h,now")},
+        "dataSources": {
+            "ds_topo_paths": ds("Indexed source → ingest → index", Q_TOPO_PATHS),
+            "ds_topo_sankey": chain(
+                "Indexed flow sankey",
+                "ds_topo_paths",
+                """
+| eval source=data_source, target=ingest_path, value=events
+| appendpipe [
+    eval source=ingest_path, target=splunk_index, value=events
+    | fields source, target, value
+]
+| stats sum(value) as value by source, target
+| eval value=tonumber(value)
+| where value>0 AND isnotnull(source) AND isnotnull(target)
+| table source, target, value
+""".strip(),
+            ),
+            "ds_topo_counts": chain(
+                "Topology counts",
+                "ds_topo_paths",
+                "| stats dc(data_source) as sources, dc(ingest_path) as ingest_paths, dc(splunk_index) as indexes, sum(events) as events",
+            ),
+            "ds_topo_methods": chain(
+                "Events by ingest path",
+                "ds_topo_paths",
+                "| stats sum(events) as events by ingest_path | sort 0 -events",
+            ),
+            "ds_tcpin": ds("Forwarder → indexer connections", Q_TCPIN_PATHS),
+            "ds_tcpin_sankey": chain(
+                "Forwarder flow sankey",
+                "ds_tcpin",
+                """
+| eval source=data_source, target=receiver, value=kb
+| where isnotnull(source) AND isnotnull(target) AND value>0
+| stats sum(value) as value by source, target
+| fields source, target, value
+""".strip(),
+            ),
+            "ds_tcpin_counts": chain(
+                "Forwarder connection counts",
+                "ds_tcpin",
+                "| stats dc(data_source) as forwarders, dc(receiver) as receivers, sum(kb) as kb",
+            ),
+            "ds_hec_paths": ds("HEC tokens as sources", Q_HEC_PATHS),
+            "ds_topo_link": chain(
+                "Indexed topology nodes only",
+                "ds_topo_paths",
+                "| table data_source, ingest_path, splunk_index",
+            ),
+            "ds_tcpin_link": chain(
+                "Forwarder topology nodes only",
+                "ds_tcpin",
+                "| table data_source, connection, receiver",
+            ),
+        },
+        "visualizations": {
+            "viz_header": md(
+                "# Data topology\n"
+                "How servers and data sources reach Splunk: **data source → ingest path → index**, "
+                "plus **forwarder → indexer** from `_internal` `tcpin_connections`. "
+                "Click a node to highlight its links."
+            ),
+            "viz_sources": single_number("Data sources", "ds_topo_counts", "sources", "", None, 0),
+            "viz_paths": single_number("Ingest paths", "ds_topo_counts", "ingest_paths", "", None, 0),
+            "viz_indexes": single_number("Destination indexes", "ds_topo_counts", "indexes", "", None, 0),
+            "viz_fwds": single_number("Forwarders (tcpin)", "ds_tcpin_counts", "forwarders", "", None, 0),
+            "viz_link": linkgraph(
+                "Sources → ingest path → Splunk index",
+                "ds_topo_link",
+                ["data_source", "ingest_path", "splunk_index"],
+            ),
+            "viz_sankey": sankey("Volume flow (events) through ingest paths", "ds_topo_sankey"),
+            "viz_methods": column("Indexed events by ingest path", "ds_topo_methods", "events"),
+            "viz_table": table("Top source → path → index flows", "ds_topo_paths", count=20),
+            "viz_tcpin_link": linkgraph(
+                "Servers: forwarder → connection type → indexer",
+                "ds_tcpin_link",
+                ["data_source", "connection", "receiver"],
+            ),
+            "viz_tcpin_sankey": sankey("Forwarder → indexer volume (KB)", "ds_tcpin_sankey"),
+            "viz_hec": table("HEC tokens as data sources", "ds_hec_paths", count=15),
+            "viz_tcpin_table": table("Forwarder connections (metrics.log tcpin)", "ds_tcpin", count=15),
+            "viz_footer": md(
+                "Ingest path is inferred from **sourcetype** (syslog/SC4S, HEC/cloud, Windows UF, otherwise UF/HF). "
+                "Server-to-indexer links come from `group=tcpin_connections` in `_internal` — empty on stacks that do not log those metrics to the search tier. "
+                "Narrow `exec_health_idx` if the source list is too large."
+            ),
+        },
+        "layout": grid(
+            [
+                block("viz_header", 0, 0, 1200, 90),
+                block("viz_sources", 0, 90, 300, 140),
+                block("viz_paths", 300, 90, 300, 140),
+                block("viz_indexes", 600, 90, 300, 140),
+                block("viz_fwds", 900, 90, 300, 140),
+                block("viz_link", 0, 230, 1200, 380),
+                block("viz_sankey", 0, 610, 700, 320),
+                block("viz_methods", 700, 610, 500, 320),
+                block("viz_table", 0, 930, 1200, 280),
+                block("viz_tcpin_link", 0, 1210, 1200, 360),
+                block("viz_tcpin_sankey", 0, 1570, 600, 300),
+                block("viz_hec", 600, 1570, 600, 300),
+                block("viz_tcpin_table", 0, 1870, 1200, 280),
+                block("viz_footer", 0, 2150, 1200, 100),
+            ]
+        ),
+    }
+
+
+APP_VERSION = "1.2.1"
+APP_ID = "splunk_exec_health"
+APP_LABEL = "Splunk Health Derek+"
+
+
+def about() -> dict:
+    return {
+        "title": "About",
+        "description": f"About {APP_LABEL}",
+        "defaults": {},
+        "inputs": {},
+        "dataSources": {},
+        "visualizations": {
+            "viz_header": md(
+                f"# About {APP_LABEL}\n"
+                "Executive traffic-light health for Splunk Cloud Platform and Splunk Enterprise. "
+                "This page is the in-app About view; open **README** in the Help menu for setup and tuning."
+            ),
+            "viz_what": md(
+                "## What this app does\n"
+                f"**{APP_LABEL}** watches whether data is still arriving, not only whether servers ping.\n\n"
+                "- **Ingestion vs baseline** — daily GB compared to a 7-day moving average, not a static GB cap\n"
+                "- **Heartbeat vs data** — `_internal` phone-home versus last indexed event (`tstats`)\n"
+                "- **HEC tokens** — rolling 1-hour throughput and silence detection\n"
+                "- **SC4S / syslog** — events per source so a hung collector is visible\n"
+                "- **Edge / Ingest Processors** — in vs out, filter efficiency, dropped or queued data\n\n"
+                "It is an executive overlay. It does **not** replace the Cloud Monitoring Console or Monitoring Console."
+            ),
+            "viz_identity": md(
+                "## App identity\n"
+                f"- **Display name:** {APP_LABEL}\n"
+                f"- **App id:** `{APP_ID}`\n"
+                f"- **Version:** {APP_VERSION}\n"
+                "- **Author:** SplunkHealth\n"
+                "- **License:** Apache License 2.0 (`LICENSE` in the app package)\n"
+                "- **UI:** Dashboard Studio (dark theme)\n"
+                "- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\n"
+                "The folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`."
+            ),
+            "viz_cloud": md(
+                "## Splunk Cloud compatibility\n"
+                "- No cluster-manager or search-head-cluster REST (those endpoints 403 on Cloud)\n"
+                "- Instance health from `_internal` HealthReporter; search-head load from `_introspection`\n"
+                "- No custom Python in the install package (avoids AppInspect manual checks)\n"
+                "- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n"
+                "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n\n"
+                "Install on Cloud as **sc_admin** via **Apps → Manage apps → Install app from file**."
+            ),
+            "viz_security": md(
+                "## Security\n"
+                "This app does **not** store SMTP passwords, Slack webhooks, API tokens, HEC token secrets, "
+                "certificates, or other credentials. Map HEC token **names** only in `lookups/hec_token_map.csv`. "
+                "Configure email or Slack on the saved search in Splunk Web after you enable it."
+            ),
+        },
+        "layout": grid(
+            [
+                block("viz_header", 0, 0, 1200, 100),
+                block("viz_what", 0, 100, 600, 380),
+                block("viz_identity", 600, 100, 600, 380),
+                block("viz_cloud", 0, 480, 600, 280),
+                block("viz_security", 600, 480, 600, 280),
+            ],
+            include_time=False,
+        ),
+    }
+
+
+def readme() -> dict:
+    return {
+        "title": "README",
+        "description": f"How to use {APP_LABEL}",
+        "defaults": {},
+        "inputs": {},
+        "dataSources": {},
+        "visualizations": {
+            "viz_header": md(
+                f"# README — {APP_LABEL}\n"
+                "How to read the dashboards, which indexes to grant, and how to tune macros and alerts. "
+                "Open **About** for version, license, and Cloud packaging details."
+            ),
+            "viz_dashboards": md(
+                "## Dashboards\n"
+                f"- **{APP_LABEL}** — overall GREEN / YELLOW / RED, GB/day vs 7-day average, instance health, search-head load, silent hosts, data topology preview\n"
+                "- **Host Heartbeat & Ingestion Latency** — last indexed data vs last `_internal` heartbeat; 24-hour 2σ volume baseline\n"
+                "- **HEC Token Performance** — events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n"
+                "- **SC4S Syslog & Edge/Ingest Processors** — syslog sources, Edge in vs out, filter efficiency\n"
+                "- **Data Topology** — sources → ingest path → index, and forwarder → indexer\n\n"
+                "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
+            ),
+            "viz_heartbeat": md(
+                "## Heartbeat vs data\n"
+                "- **OK** — recent indexed data\n"
+                "- **DELAYED** — data older than 15 minutes\n"
+                "- **DATA SILENT** — `_internal` heartbeat is fresh, indexed data is not\n"
+                "- **HEARTBEAT ONLY** — heartbeat exists, no indexed data in range\n"
+                "- **HOST DOWN** — neither heartbeat nor data\n\n"
+                "DATA SILENT is the failure this app is built to catch: the forwarder is up, the pipeline is not."
+            ),
+            "viz_indexes": md(
+                "## Indexes and role access\n"
+                "Grant the viewing role search on:\n\n"
+                "- `_internal` — heartbeats, license usage, HealthReporter, HEC metrics\n"
+                "- `_introspection` — CPU / memory\n"
+                "- `_metrics` — Edge Processor (optional)\n"
+                "- Customer event indexes used in `exec_health_idx` (default `*`)\n\n"
+                "On Splunk Cloud, `sc_admin` already has the internal indexes. Narrow `exec_health_idx` and "
+                "`exec_health_sc4s_idx` if `index=*` is too wide for your workload limits."
+            ),
+            "viz_macros": md(
+                "## Macros (Settings → Search macros)\n"
+                "- `exec_health_idx` — `*` — index glob for `tstats`\n"
+                "- `exec_health_sc4s_idx` — `*` — index glob for SC4S error event searches\n"
+                "- `exec_health_sigma` — `2` — stdevs below host mean → ALERT\n"
+                "- `exec_health_silence_sec` — `3600` — seconds without data → DATA SILENT\n"
+                "- `exec_health_heartbeat_sec` — `600` — seconds without `_internal` → missing heartbeat\n"
+                "- `exec_health_drop_red_pct` — `50` — % below 7-day MA → RED\n"
+                "- `exec_health_drop_yellow_pct` — `20` — % below 7-day MA → YELLOW\n"
+                "- `exec_health_hec_baseline_eps` — `100` — rolling EPS before HEC silence is RED\n"
+                "- `exec_health_hec_silence_min` — `5` — silent minutes to flag a HEC token\n"
+                "- `exec_health_sc4s` — syslog / SC4S sourcetype filter\n"
+                "- `exec_health_edge_mstats` — `index=_metrics sourcetype=edge-metrics`"
+            ),
+            "viz_alerts": md(
+                "## Alerts\n"
+                "Saved searches ship **disabled** (`enableSched = 0`) with **no email action**.\n\n"
+                "1. Confirm the searches return expected rows on your stack\n"
+                "2. **Settings → Searches, reports, and alerts** (this app) → enable\n"
+                "3. Attach email or Slack **in Splunk Web** — do not put webhook URLs or passwords in this app\n\n"
+                "Searches:\n"
+                "- Ingestion below `predict()` 95% lower bound (every 15 minutes)\n"
+                "- Host volume 2σ drop\n"
+                "- HEC token silence\n"
+                "- Host data silent with heartbeat"
+            ),
+            "viz_hec": md(
+                "## HEC token names\n"
+                "Optional lookup `lookups/hec_token_map.csv` columns: `token`, `token_name`, `owner`. "
+                "Store only the identifier that already appears in `_internal` metrics — **never** the HEC token secret."
+            ),
+        },
+        "layout": grid(
+            [
+                block("viz_header", 0, 0, 1200, 100),
+                block("viz_dashboards", 0, 100, 600, 320),
+                block("viz_heartbeat", 600, 100, 600, 320),
+                block("viz_indexes", 0, 420, 600, 300),
+                block("viz_macros", 600, 420, 600, 300),
+                block("viz_alerts", 0, 720, 600, 320),
+                block("viz_hec", 600, 720, 600, 320),
+            ],
+            include_time=False,
+        ),
+    }
+
+
 def main() -> None:
     VIEWS.mkdir(parents=True, exist_ok=True)
     dashboards = {
         "executive_overview.xml": (
-            "Executive Health Overview",
+            "Splunk Health Derek+",
             "Traffic-light Splunk infrastructure health for executives.",
             executive_overview(),
         ),
@@ -887,11 +1279,28 @@ def main() -> None:
             "Syslog/SC4S sources and Edge/Ingest Processor in-flight metrics.",
             sc4s_edge(),
         ),
+        "data_topology.xml": (
+            "Data Topology",
+            "Network topology of data sources, ingest paths, and Splunk receivers.",
+            data_topology(),
+        ),
+        "readme.xml": (
+            "README",
+            f"How to use {APP_LABEL}: dashboards, indexes, macros, and alerts.",
+            readme(),
+        ),
+        "about.xml": (
+            "About",
+            f"About {APP_LABEL}: version, license, and Splunk Cloud compatibility.",
+            about(),
+        ),
     }
     for filename, (label, desc, definition) in dashboards.items():
         path = VIEWS / filename
-        path.write_text(wrap(label, desc, definition), encoding="utf-8")
+        xml_text = wrap(label, desc, definition)
+        path.write_text(xml_text, encoding="utf-8")
         json.loads(json.dumps(definition))
+        ET.fromstring(xml_text)
         print(f"wrote {path.relative_to(ROOT)}")
 
 

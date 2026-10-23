@@ -1,5 +1,5 @@
 <dashboard version="2" theme="dark">
-  <label>Host Heartbeat & Ingestion Latency</label>
+  <label>Host Heartbeat &amp; Ingestion Latency</label>
   <description>Last data vs last heartbeat and 24-hour volume baselines.</description>
   <definition><![CDATA[
 {
@@ -392,10 +392,6 @@
   },
   "layout": {
     "type": "grid",
-    "globalInputs": [
-      "input_global_trp",
-      "input_host"
-    ],
     "structure": [
       {
         "item": "viz_header",
@@ -497,6 +493,10 @@
           "h": 90
         }
       }
+    ],
+    "globalInputs": [
+      "input_global_trp",
+      "input_host"
     ]
   }
 }

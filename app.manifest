@@ -1,11 +1,11 @@
 {
   "schemaVersion": "2.0.0",
   "info": {
-    "title": "Splunk Executive Health",
+    "title": "Splunk Health Derek+",
     "id": {
       "group": null,
       "name": "splunk_exec_health",
-      "version": "1.0.0"
+      "version": "1.2.1"
     },
     "author": [
       {
@@ -24,7 +24,7 @@
     "commonInformationModels": null,
     "license": {
       "name": "Apache-2.0",
-      "text": null,
+      "text": "./LICENSE",
       "uri": "http://www.apache.org/licenses/LICENSE-2.0"
     },
     "privacyPolicy": {

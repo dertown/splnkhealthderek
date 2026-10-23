@@ -1,9 +1,9 @@
 <dashboard version="2" theme="dark">
-  <label>Executive Health Overview</label>
+  <label>Splunk Health Derek+</label>
   <description>Traffic-light Splunk infrastructure health for executives.</description>
   <definition><![CDATA[
 {
-  "title": "Executive Health Overview",
+  "title": "Splunk Health Derek+",
   "description": "Traffic-light health for Splunk ingestion, clustering, and host baselines.",
   "defaults": {
     "dataSources": {
@@ -66,7 +66,7 @@
       "type": "ds.search",
       "name": "Indexer cluster peers",
       "options": {
-        "query": "| rest /services/cluster/master/peers count=0\n| stats count as peers, count(eval(match(coalesce(status, \"\"), \"(?i)up|heartbeat|batched\"))) as peers_up\n| eval health_score=case(peers=0, 1, peers_up=peers, 2, peers_up=0, 0, 1=1, 1)\n| eval clustering_status=case(peers=0, \"N/A\", peers_up=peers, \"GREEN\", peers_up=0, \"RED\", 1=1, \"YELLOW\")\n| eval status_detail=peers_up.\" / \".peers.\" peers up\"\n| appendpipe [\n    stats count\n    | where count=0\n    | eval clustering_status=\"N/A\", health_score=1, peers=0, peers_up=0, status_detail=\"Not clustered / no CM REST\"\n]",
+        "query": "search index=_internal sourcetype=splunkd component=HealthReporter\n| eval health_val=lower(coalesce(health, color, \"unknown\"))\n| stats latest(health_val) as health_val by feature\n| eval score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n| stats min(score) as health_score, count as features, count(eval(score<2)) as unhealthy\n| eval clustering_status=case(health_score>=2, \"GREEN\", health_score>=1, \"YELLOW\", 1=1, \"RED\")\n| eval status_detail=unhealthy.\" / \".features.\" features not green\"\n| appendpipe [\n    stats count\n    | where count=0\n    | eval clustering_status=\"N/A\", health_score=1, status_detail=\"No HealthReporter events\"\n]",
         "refresh": "5m",
         "refreshType": "delay",
         "queryParameters": {
@@ -79,7 +79,7 @@
       "type": "ds.search",
       "name": "Search head cluster",
       "options": {
-        "query": "| rest /services/shcluster/captain/members count=0\n| stats count as members, count(eval(match(coalesce(status, 'status.label', \"\"), \"(?i)up|ok\"))) as members_up\n| eval health_score=case(members=0, 1, members_up=members, 2, members_up=0, 0, 1=1, 1)\n| eval shc_status=case(members=0, \"N/A\", members_up=members, \"GREEN\", members_up=0, \"RED\", 1=1, \"YELLOW\")\n| eval status_detail=members_up.\" / \".members.\" members up\"\n| appendpipe [\n    stats count\n    | where count=0\n    | eval shc_status=\"N/A\", health_score=1, members=0, members_up=0, status_detail=\"Standalone / no SHC REST\"\n]",
+        "query": "search index=_introspection sourcetype=splunk_resource_usage component=Hostwide\n| eval cpu_pct=coalesce(cpu_system_pct, 0)+coalesce(cpu_user_pct, 0)\n| stats avg(cpu_pct) as avg_cpu, dc(host) as hosts\n| eval avg_cpu=round(avg_cpu, 1)\n| eval health_score=case(avg_cpu>=90, 0, avg_cpu>=75, 1, 1=1, 2)\n| eval shc_status=case(health_score=2, \"GREEN\", health_score=1, \"YELLOW\", 1=1, \"RED\")\n| eval status_detail=avg_cpu.\"% CPU across \".hosts.\" host(s)\"\n| appendpipe [\n    stats count\n    | where count=0\n    | eval shc_status=\"N/A\", health_score=1, status_detail=\"No _introspection data\"\n]",
         "refresh": "5m",
         "refreshType": "delay",
         "queryParameters": {
@@ -144,13 +144,22 @@
           "latest": "now"
         }
       }
+    },
+    "ds_topo_overview": {
+      "type": "ds.search",
+      "name": "Data topology preview",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` by host sourcetype index\n| eval ingest_path=case(match(sourcetype, \"(?i)sc4s|syslog\"), \"SC4S / syslog\", match(sourcetype, \"(?i)httpevent|^aws:|^azure:|^gcp:|^google:|kube:container\"), \"HEC / API / cloud\", match(sourcetype, \"(?i)edge.?processor|ingest.?processor\"), \"Edge / Ingest Processor\", match(sourcetype, \"(?i)wineventlog|WinHostMon|XmlWinEventLog|^Perfmon\"), \"Windows UF\", 1=1, \"UF / HF / other\")\n| stats sum(events) as events by host, ingest_path, index\n| sort 0 -events\n| head 40\n| rename host as data_source, index as splunk_index\n| table data_source, ingest_path, splunk_index",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
     }
   },
   "visualizations": {
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Executive Health Overview\nTraffic lights combine instance HealthReporter, live ingestion, 7-day volume baseline, and silent hosts. **GREEN** = within baseline \u00b7 **YELLOW** = watch \u00b7 **RED** = action required.",
+        "markdown": "# Splunk Health Derek+\nTraffic lights combine instance HealthReporter, live ingestion, 7-day volume baseline, and silent hosts. **GREEN** = within baseline \u00b7 **YELLOW** = watch \u00b7 **RED** = action required.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -266,7 +275,7 @@
     },
     "viz_idx_cluster": {
       "type": "splunk.singlevalue",
-      "title": "Indexer clustering",
+      "title": "Instance health",
       "dataSources": {
         "primary": "ds_indexer_cluster"
       },
@@ -298,7 +307,7 @@
     },
     "viz_shc": {
       "type": "splunk.singlevalue",
-      "title": "Search head cluster",
+      "title": "Search head load",
       "dataSources": {
         "primary": "ds_shc"
       },
@@ -383,6 +392,41 @@
         "lineWidth": 2,
         "markerDisplay": "off"
       }
+    },
+    "viz_topo": {
+      "type": "splunk.linkgraph",
+      "title": "Data topology \u2014 sources \u2192 ingest path \u2192 index (open Data Topology for the full map)",
+      "dataSources": {
+        "primary": "ds_topo_overview"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "fieldOrder": [
+          "data_source",
+          "ingest_path",
+          "splunk_index"
+        ],
+        "linkColor": "#009CEB",
+        "nodeHighlightColor": "#7B56DB",
+        "nodeWidth": 170,
+        "nodeHeight": 22,
+        "nodeSpacingX": 40,
+        "nodeSpacingY": 12,
+        "resultLimit": 40,
+        "showNodeCounts": true,
+        "showValueCounts": true
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToDashboard",
+          "options": {
+            "app": "splunk_exec_health",
+            "dashboard": "data_topology",
+            "newTab": false
+          }
+        }
+      ]
     },
     "viz_top_indexes": {
       "type": "splunk.table",
@@ -567,7 +611,7 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Baselines use **streamstats** (host volume) and **predict**/moving average (daily GB), not static thresholds. Cluster tiles show **N/A** on standalone or Splunk Cloud stacks without cluster REST. Tune `exec_health_*` macros in Settings > Advanced search > Search macros. Saved alerts ship **disabled** \u2014 enable them after configuring email in Splunk (do not put webhook URLs or passwords in this app).",
+        "markdown": "Baselines use **streamstats** (host volume) and **predict**/moving average (daily GB), not static thresholds. Instance health is **HealthReporter** in `_internal`; search-head load is `_introspection` (no cluster-manager REST \u2014 Splunk Cloud compatible). Tune `exec_health_*` macros in Settings > Advanced search > Search macros. Saved alerts ship **disabled** \u2014 enable them after configuring email in Splunk (do not put webhook URLs or passwords in this app).",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -575,9 +619,6 @@
   },
   "layout": {
     "type": "grid",
-    "globalInputs": [
-      "input_global_trp"
-    ],
     "structure": [
       {
         "item": "viz_header",
@@ -670,11 +711,21 @@
         }
       },
       {
-        "item": "viz_top_indexes",
+        "item": "viz_topo",
         "type": "block",
         "position": {
           "x": 0,
           "y": 730,
+          "w": 1200,
+          "h": 340
+        }
+      },
+      {
+        "item": "viz_top_indexes",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1070,
           "w": 600,
           "h": 300
         }
@@ -684,7 +735,7 @@
         "type": "block",
         "position": {
           "x": 600,
-          "y": 730,
+          "y": 1070,
           "w": 600,
           "h": 300
         }
@@ -694,7 +745,7 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1030,
+          "y": 1370,
           "w": 700,
           "h": 320
         }
@@ -704,7 +755,7 @@
         "type": "block",
         "position": {
           "x": 700,
-          "y": 1030,
+          "y": 1370,
           "w": 500,
           "h": 320
         }
@@ -714,11 +765,14 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1350,
+          "y": 1690,
           "w": 1200,
           "h": 110
         }
       }
+    ],
+    "globalInputs": [
+      "input_global_trp"
     ]
   }
 }

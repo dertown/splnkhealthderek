@@ -1,0 +1,146 @@
+<dashboard version="2" theme="dark">
+  <label>README</label>
+  <description>How to use Splunk Health Derek+: dashboards, indexes, macros, and alerts.</description>
+  <definition><![CDATA[
+{
+  "title": "README",
+  "description": "How to use Splunk Health Derek+",
+  "defaults": {},
+  "inputs": {},
+  "dataSources": {},
+  "visualizations": {
+    "viz_header": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "# README \u2014 Splunk Health Derek+\nHow to read the dashboards, which indexes to grant, and how to tune macros and alerts. Open **About** for version, license, and Cloud packaging details.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_dashboards": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "## Dashboards\n- **Splunk Health Derek+** \u2014 overall GREEN / YELLOW / RED, GB/day vs 7-day average, instance health, search-head load, silent hosts, data topology preview\n- **Host Heartbeat & Ingestion Latency** \u2014 last indexed data vs last `_internal` heartbeat; 24-hour 2\u03c3 volume baseline\n- **HEC Token Performance** \u2014 events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n- **SC4S Syslog & Edge/Ingest Processors** \u2014 syslog sources, Edge in vs out, filter efficiency\n- **Data Topology** \u2014 sources \u2192 ingest path \u2192 index, and forwarder \u2192 indexer\n\n**GREEN** = within baseline \u00b7 **YELLOW** = watch \u00b7 **RED** = action required.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_heartbeat": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "## Heartbeat vs data\n- **OK** \u2014 recent indexed data\n- **DELAYED** \u2014 data older than 15 minutes\n- **DATA SILENT** \u2014 `_internal` heartbeat is fresh, indexed data is not\n- **HEARTBEAT ONLY** \u2014 heartbeat exists, no indexed data in range\n- **HOST DOWN** \u2014 neither heartbeat nor data\n\nDATA SILENT is the failure this app is built to catch: the forwarder is up, the pipeline is not.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_indexes": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "## Indexes and role access\nGrant the viewing role search on:\n\n- `_internal` \u2014 heartbeats, license usage, HealthReporter, HEC metrics\n- `_introspection` \u2014 CPU / memory\n- `_metrics` \u2014 Edge Processor (optional)\n- Customer event indexes used in `exec_health_idx` (default `*`)\n\nOn Splunk Cloud, `sc_admin` already has the internal indexes. Narrow `exec_health_idx` and `exec_health_sc4s_idx` if `index=*` is too wide for your workload limits.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_macros": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "## Macros (Settings \u2192 Search macros)\n- `exec_health_idx` \u2014 `*` \u2014 index glob for `tstats`\n- `exec_health_sc4s_idx` \u2014 `*` \u2014 index glob for SC4S error event searches\n- `exec_health_sigma` \u2014 `2` \u2014 stdevs below host mean \u2192 ALERT\n- `exec_health_silence_sec` \u2014 `3600` \u2014 seconds without data \u2192 DATA SILENT\n- `exec_health_heartbeat_sec` \u2014 `600` \u2014 seconds without `_internal` \u2192 missing heartbeat\n- `exec_health_drop_red_pct` \u2014 `50` \u2014 % below 7-day MA \u2192 RED\n- `exec_health_drop_yellow_pct` \u2014 `20` \u2014 % below 7-day MA \u2192 YELLOW\n- `exec_health_hec_baseline_eps` \u2014 `100` \u2014 rolling EPS before HEC silence is RED\n- `exec_health_hec_silence_min` \u2014 `5` \u2014 silent minutes to flag a HEC token\n- `exec_health_sc4s` \u2014 syslog / SC4S sourcetype filter\n- `exec_health_edge_mstats` \u2014 `index=_metrics sourcetype=edge-metrics`",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_alerts": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "## Alerts\nSaved searches ship **disabled** (`enableSched = 0`) with **no email action**.\n\n1. Confirm the searches return expected rows on your stack\n2. **Settings \u2192 Searches, reports, and alerts** (this app) \u2192 enable\n3. Attach email or Slack **in Splunk Web** \u2014 do not put webhook URLs or passwords in this app\n\nSearches:\n- Ingestion below `predict()` 95% lower bound (every 15 minutes)\n- Host volume 2\u03c3 drop\n- HEC token silence\n- Host data silent with heartbeat",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_hec": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "## HEC token names\nOptional lookup `lookups/hec_token_map.csv` columns: `token`, `token_name`, `owner`. Store only the identifier that already appears in `_internal` metrics \u2014 **never** the HEC token secret.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    }
+  },
+  "layout": {
+    "type": "grid",
+    "structure": [
+      {
+        "item": "viz_header",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 0,
+          "w": 1200,
+          "h": 100
+        }
+      },
+      {
+        "item": "viz_dashboards",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 100,
+          "w": 600,
+          "h": 320
+        }
+      },
+      {
+        "item": "viz_heartbeat",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 100,
+          "w": 600,
+          "h": 320
+        }
+      },
+      {
+        "item": "viz_indexes",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 420,
+          "w": 600,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_macros",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 420,
+          "w": 600,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_alerts",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 720,
+          "w": 600,
+          "h": 320
+        }
+      },
+      {
+        "item": "viz_hec",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 720,
+          "w": 600,
+          "h": 320
+        }
+      }
+    ]
+  }
+}
+]]></definition>
+</dashboard>

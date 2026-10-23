@@ -319,9 +319,6 @@
   },
   "layout": {
     "type": "grid",
-    "globalInputs": [
-      "input_global_trp"
-    ],
     "structure": [
       {
         "item": "viz_header",
@@ -423,6 +420,9 @@
           "h": 90
         }
       }
+    ],
+    "globalInputs": [
+      "input_global_trp"
     ]
   }
 }
