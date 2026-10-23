@@ -397,32 +397,54 @@ Q_HOST_ALERTS = r"""
 """.strip()
 
 Q_TOPO_ENRICH = r"""
-| rex field=source "(?i)(?<net_proto>tcp|udp):(?<net_port>\d+)"
+| rex field=source "(?i)(?:^|[^A-Za-z])(?<net_proto>tcp|udp)[:/](?<net_port>\d+)"
 | eval net_label=case(
     lower(net_proto)="udp" AND isnotnull(net_port), "UDP:".net_port,
     lower(net_proto)="tcp" AND isnotnull(net_port), "TCP:".net_port,
+    1=1, null())
+| eval os_class=case(
+    match(sourcetype, "(?i)wineventlog|WinHostMon|XmlWinEventLog|^Perfmon|WinRegistry|powershell|^windows:|MSAD:|DhcpSrvLog|^IIS"), "Windows",
+    match(source, "(?i)WinEventLog|Perfmon:|\\\\Windows\\\\"), "Windows",
+    match(sourcetype, "(?i)^linux_|^osnix|^unix:|^auditd|^journald|^selinux|^secure$|^messages$|^df$|^cpu$|^iostat|^vmstat|^interfaces|^lastlog|^openPorts|^hardware|^netstat|^yum"), "Linux",
+    match(source, "(?i)^/var/|^/opt/|^/etc/|^/usr/|^/home/"), "Linux",
     1=1, null())
 | append [
     search index=_internal source=*metrics.log group=tcpin_connections
     | eval host=coalesce(sourceHost, hostname)
     | eval fwd=lower(trim(coalesce(fwdType, "")))
+    | eval conn=lower(trim(coalesce(connectionType, "")))
     | eval forwarder_class=case(
         match(fwd, "^(uf|lwf)$"), "UF",
         match(fwd, "^(full|hf|hwf)$"), "HF",
         1=1, null())
-    | where isnotnull(host) AND isnotnull(forwarder_class)
-    | stats latest(forwarder_class) as forwarder_class by host
+    | eval metrics_net=if(isnull(forwarder_class) AND match(conn, "raw") AND isnum(coalesce(destPort, dest_port)), "TCP:".coalesce(destPort, dest_port), null())
+    | where isnotnull(host) AND (isnotnull(forwarder_class) OR isnotnull(metrics_net))
+    | stats latest(forwarder_class) as forwarder_class, latest(metrics_net) as metrics_net by host
 ]
-| eventstats latest(forwarder_class) as forwarder_class by host
+| append [
+    search index=_internal source=*metrics.log group=udpin_connections
+    | eval host=coalesce(sourceHost, hostname)
+    | eval metrics_net="UDP:".coalesce(destPort, dest_port, port)
+    | where isnotnull(host) AND match(metrics_net, "^UDP:[0-9]+$")
+    | stats latest(metrics_net) as metrics_net by host
+]
+| eventstats latest(forwarder_class) as forwarder_class, latest(metrics_net) as metrics_net by host
+| eventstats values(os_class) as os_classes by host
 | where isnotnull(events)
+| eval host_os=case(
+    isnotnull(mvfind(os_classes, "Windows")), "Windows",
+    isnotnull(mvfind(os_classes, "Linux")), "Linux",
+    1=1, os_class)
+| eval net_label=coalesce(net_label, metrics_net)
 | eval ingest_path=case(
     match(sourcetype, "(?i)httpevent|^aws:|^azure:|^gcp:|^google:|kube:container"), "HEC / API / cloud",
     match(sourcetype, "(?i)edge.?processor|ingest.?processor"), "Edge / Ingest Processor",
     match(sourcetype, "(?i)sc4s"), "SC4S",
-    forwarder_class="UF", "UF",
     forwarder_class="HF", "HF",
-    isnotnull(net_label), net_label,
-    match(sourcetype, "(?i)wineventlog|WinHostMon|XmlWinEventLog|^Perfmon"), "UF",
+    forwarder_class="UF" AND host_os="Windows", "Windows UF",
+    forwarder_class="UF", "Linux UF",
+    host_os="Windows", "Windows UF",
+    isnotnull(net_label), "Other ".net_label,
     1=1, "Other")
 """.strip()
 
@@ -1100,9 +1122,9 @@ def data_topology() -> dict:
             "viz_hec": table("HEC tokens as data sources", "ds_hec_paths", count=15),
             "viz_tcpin_table": table("Forwarder connections (metrics.log tcpin)", "ds_tcpin", count=15),
             "viz_footer": md(
-                "Ingest path: **UF** / **HF** from `tcpin_connections` `fwdType`; leftover network inputs are labeled **TCP:port** or **UDP:port** from `source` (for example `udp:514`). "
-                "HEC, SC4S, and Edge stay as their own paths. "
-                "Server-to-indexer links come from `_internal` `group=tcpin_connections`. Narrow `exec_health_idx` if the source list is too large."
+                "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. "
+                "**Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. "
+                "HEC, SC4S, and Edge stay as their own paths. Narrow `exec_health_idx` if the source list is too large."
             ),
         },
         "layout": grid(
@@ -1126,7 +1148,7 @@ def data_topology() -> dict:
     }
 
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -1216,7 +1238,7 @@ def readme() -> dict:
                 "- **Host Heartbeat & Ingestion Latency** — last indexed data vs last `_internal` heartbeat; 24-hour 2σ volume baseline\n"
                 "- **HEC Token Performance** — events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n"
                 "- **SC4S Syslog & Edge/Ingest Processors** — syslog sources, Edge in vs out, filter efficiency\n"
-                "- **Data Topology** — sources → UF / HF / TCP:port / UDP:port → index, and forwarder → indexer\n\n"
+                "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index, and forwarder → indexer\n\n"
                 "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
             ),
             "viz_heartbeat": md(
