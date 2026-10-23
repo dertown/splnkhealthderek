@@ -159,7 +159,7 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Splunk Health Derek+\nTraffic lights combine instance HealthReporter, live ingestion, 7-day volume baseline, and silent hosts. **GREEN** = within baseline \u00b7 **YELLOW** = watch \u00b7 **RED** = action required.",
+        "markdown": "# Splunk Health Derek+\nTraffic lights combine instance HealthReporter, live ingestion, 7-day volume baseline, and silent hosts. GREEN = within baseline \u00b7 YELLOW = watch \u00b7 RED = action required.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -173,25 +173,28 @@
       "showLastUpdated": true,
       "showProgressBar": true,
       "options": {
-        "majorValue": "> primary | seriesByName(\"overall_status\")",
-        "majorColor": "> primary | seriesByName(\"overall_score\") | rangeValue(healthColors)",
+        "majorValue": "> primary | seriesByName(\"overall_status\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"overall_status\") | lastPoint() | matchValue(statusColors)",
         "backgroundColor": "transparent",
         "majorFontSize": 36
       },
       "context": {
-        "healthColors": [
+        "statusColors": [
           {
-            "value": "#DC4E41",
-            "to": 0.5
+            "match": "GREEN",
+            "value": "#53A051"
           },
           {
-            "value": "#F8BE34",
-            "from": 0.5,
-            "to": 1.5
+            "match": "YELLOW",
+            "value": "#F8BE34"
           },
           {
-            "value": "#53A051",
-            "from": 1.5
+            "match": "RED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "N/A",
+            "value": "#F8BE34"
           }
         ]
       }
@@ -282,25 +285,28 @@
       "showLastUpdated": true,
       "showProgressBar": true,
       "options": {
-        "majorValue": "> primary | seriesByName(\"clustering_status\")",
-        "majorColor": "> primary | seriesByName(\"health_score\") | rangeValue(healthColors)",
+        "majorValue": "> primary | seriesByName(\"clustering_status\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"clustering_status\") | lastPoint() | matchValue(statusColors)",
         "backgroundColor": "transparent",
         "majorFontSize": 36
       },
       "context": {
-        "healthColors": [
+        "statusColors": [
           {
-            "value": "#DC4E41",
-            "to": 0.5
+            "match": "GREEN",
+            "value": "#53A051"
           },
           {
-            "value": "#F8BE34",
-            "from": 0.5,
-            "to": 1.5
+            "match": "YELLOW",
+            "value": "#F8BE34"
           },
           {
-            "value": "#53A051",
-            "from": 1.5
+            "match": "RED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "N/A",
+            "value": "#F8BE34"
           }
         ]
       }
@@ -314,25 +320,28 @@
       "showLastUpdated": true,
       "showProgressBar": true,
       "options": {
-        "majorValue": "> primary | seriesByName(\"shc_status\")",
-        "majorColor": "> primary | seriesByName(\"health_score\") | rangeValue(healthColors)",
+        "majorValue": "> primary | seriesByName(\"shc_status\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"shc_status\") | lastPoint() | matchValue(statusColors)",
         "backgroundColor": "transparent",
         "majorFontSize": 36
       },
       "context": {
-        "healthColors": [
+        "statusColors": [
           {
-            "value": "#DC4E41",
-            "to": 0.5
+            "match": "GREEN",
+            "value": "#53A051"
           },
           {
-            "value": "#F8BE34",
-            "from": 0.5,
-            "to": 1.5
+            "match": "YELLOW",
+            "value": "#F8BE34"
           },
           {
-            "value": "#53A051",
-            "from": 1.5
+            "match": "RED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "N/A",
+            "value": "#F8BE34"
           }
         ]
       }

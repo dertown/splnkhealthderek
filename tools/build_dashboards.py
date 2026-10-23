@@ -21,6 +21,14 @@ HEALTH_COLORS = [
     {"value": GREEN, "from": 1.5},
 ]
 
+# Map the status word itself to that word's color (GREEN is green, RED is red).
+STATUS_COLORS = [
+    {"match": "GREEN", "value": GREEN},
+    {"match": "YELLOW", "value": YELLOW},
+    {"match": "RED", "value": RED},
+    {"match": "N/A", "value": YELLOW},
+]
+
 # Row colors: 1=red/alert, 2=yellow, 3=green/ok
 ROW_COLORS = [
     {"from": 0, "to": 1.5, "value": "#5C1A1A"},
@@ -100,12 +108,12 @@ def single_status(title: str, ds_id: str, value_field: str, score_field: str) ->
         "showLastUpdated": True,
         "showProgressBar": True,
         "options": {
-            "majorValue": f"> primary | seriesByName(\"{value_field}\")",
-            "majorColor": f"> primary | seriesByName(\"{score_field}\") | rangeValue(healthColors)",
+            "majorValue": f"> primary | seriesByName(\"{value_field}\") | lastPoint()",
+            "majorColor": f"> primary | seriesByName(\"{value_field}\") | lastPoint() | matchValue(statusColors)",
             "backgroundColor": "transparent",
             "majorFontSize": 36,
         },
-        "context": {"healthColors": HEALTH_COLORS},
+        "context": {"statusColors": STATUS_COLORS},
     }
 
 
@@ -533,7 +541,7 @@ def executive_overview() -> dict:
             "viz_header": md(
                 "# Splunk Health Derek+\n"
                 "Traffic lights combine instance HealthReporter, live ingestion, 7-day volume baseline, and silent hosts. "
-                "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
+                "GREEN = within baseline · YELLOW = watch · RED = action required."
             ),
             "viz_overall": single_status("Overall health", "ds_overall_health", "overall_status", "overall_score"),
             "viz_gb": single_number("Ingestion (complete days)", "ds_license_daily", "daily_GB", " GB", spark="daily_GB", precision=2),
@@ -1148,7 +1156,7 @@ def data_topology() -> dict:
     }
 
 
-APP_VERSION = "1.2.3"
+APP_VERSION = "1.2.4"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
