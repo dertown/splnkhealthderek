@@ -32,7 +32,7 @@
       "type": "ds.search",
       "name": "Health components",
       "options": {
-        "query": "search index=_internal sourcetype=splunkd component=HealthReporter\n| eval health_val=lower(coalesce(health, color, \"unknown\"))\n| stats latest(health_val) as health_val by feature\n| eval component=\"instance:\"+feature, score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n| table component, score\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-15m latest=now\n    | eval component=\"ingestion_live_15m\", score=if(events>0, 2, 0)\n    | table component, score\n]\n| append [\n    search `exec_health_license_usage` earliest=-8d@d latest=@d\n    | eval GB=b/1024/1024/1024\n    | bin _time span=1d\n    | stats sum(GB) as daily_GB by _time\n    | streamstats window=7 current=f avg(daily_GB) as ma_7d\n    | sort 0 -_time\n    | head 1\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-daily_GB)/ma_7d)*100, 1), 0)\n    | eval component=\"ingest_vs_7d_ma\", score=case(isnull(ma_7d) OR ma_7d=0, 2, drop_pct>=`exec_health_drop_red_pct`, 0, drop_pct>=`exec_health_drop_yellow_pct`, 1, 1=1, 2)\n    | table component, score\n]\n| append [\n    | tstats latest(_time) as last_data where index=`exec_health_idx` earliest=-24h latest=now by host\n    | eval silent=if((now()-last_data)>`exec_health_silence_sec`, 1, 0)\n    | stats count as hosts, sum(silent) as silent_hosts\n    | eval silent_ratio=if(hosts>0, silent_hosts/hosts, 1)\n    | eval component=\"host_silence\", score=case(hosts=0, 0, silent_hosts=0, 2, silent_ratio>0.2, 0, 1=1, 1)\n    | table component, score\n]\n| eval _color_rank=case(score<=0, 1, score<2, 2, 1=1, 3)",
+        "query": "search `exec_health_health_report`\n| eval health_val=lower(coalesce(color, \"unknown\"))\n| stats latest(health_val) as health_val by host, feature\n| eval score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n| stats min(score) as score, count(eval(score<2)) as unhealthy_hosts by feature\n| eval component=\"instance:\".feature\n| table component, score\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-15m latest=now\n    | eval component=\"ingestion_live_15m\", score=if(events>0, 2, 0)\n    | table component, score\n]\n| append [\n    search `exec_health_license_usage` earliest=-8d@d latest=@d\n    | eval GB=b/1024/1024/1024\n    | bin _time span=1d\n    | stats sum(GB) as daily_GB by _time\n    | streamstats window=7 current=f avg(daily_GB) as ma_7d\n    | sort 0 -_time\n    | head 1\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-daily_GB)/ma_7d)*100, 1), 0)\n    | eval component=\"ingest_vs_7d_ma\", score=case(isnull(ma_7d) OR ma_7d=0, 2, drop_pct>=`exec_health_drop_red_pct`, 0, drop_pct>=`exec_health_drop_yellow_pct`, 1, 1=1, 2)\n    | table component, score\n]\n| append [\n    | tstats latest(_time) as last_data where index=`exec_health_idx` earliest=-24h latest=now by host\n    | eval silent=if((now()-last_data)>`exec_health_silence_sec`, 1, 0)\n    | stats count as hosts, sum(silent) as silent_hosts\n    | eval silent_ratio=if(hosts>0, silent_hosts/hosts, 1)\n    | eval component=\"host_silence\", score=case(hosts=0, 0, silent_hosts=0, 2, silent_ratio>0.2, 0, 1=1, 1)\n    | table component, score\n]\n| eval _color_rank=case(score<=0, 1, score<2, 2, 1=1, 3)",
         "refresh": "5m",
         "refreshType": "delay",
         "queryParameters": {
@@ -53,12 +53,12 @@
       "type": "ds.search",
       "name": "License GB/day vs 7d MA",
       "options": {
-        "query": "search `exec_health_license_usage`\n| eval daily_GB=round(b/1024/1024/1024, 4)\n| bin _time span=1d\n| stats sum(daily_GB) as daily_GB by _time\n| streamstats window=7 current=f avg(daily_GB) as ma_7d\n| eval ma_7d=round(ma_7d, 3), daily_GB=round(daily_GB, 3)\n| eval variance_pct=if(ma_7d>0, round(((daily_GB-ma_7d)/ma_7d)*100, 1), 0)\n| eval health_score=case(isnull(ma_7d), 2, daily_GB < ma_7d*(1-`exec_health_drop_red_pct`/100), 0, daily_GB < ma_7d*(1-`exec_health_drop_yellow_pct`/100), 1, 1=1, 2)\n| eval health_label=case(health_score=0, \"RED\", health_score=1, \"YELLOW\", 1=1, \"GREEN\")\n| sort _time",
+        "query": "search `exec_health_license_usage`\n| bin _time span=1d\n| stats sum(b) as bytes by _time\n| eval daily_GB=bytes/1024/1024/1024\n| streamstats window=7 current=f avg(daily_GB) as ma_7d\n| eval ma_7d=round(ma_7d, 3), daily_GB=round(daily_GB, 3)\n| eval variance_pct=if(ma_7d>0, round(((daily_GB-ma_7d)/ma_7d)*100, 1), 0)\n| eval health_score=case(isnull(ma_7d), 2, daily_GB < ma_7d*(1-`exec_health_drop_red_pct`/100), 0, daily_GB < ma_7d*(1-`exec_health_drop_yellow_pct`/100), 1, 1=1, 2)\n| eval health_label=case(health_score=0, \"RED\", health_score=1, \"YELLOW\", 1=1, \"GREEN\")\n| sort _time",
         "refresh": "15m",
         "refreshType": "delay",
         "queryParameters": {
-          "earliest": "-8d@d",
-          "latest": "now"
+          "earliest": "-15d@d",
+          "latest": "@d"
         }
       }
     },
@@ -66,7 +66,7 @@
       "type": "ds.search",
       "name": "Indexer cluster peers",
       "options": {
-        "query": "search index=_internal sourcetype=splunkd component=HealthReporter\n| eval health_val=lower(coalesce(health, color, \"unknown\"))\n| stats latest(health_val) as health_val by feature\n| eval score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n| stats min(score) as health_score, count as features, count(eval(score<2)) as unhealthy\n| eval clustering_status=case(health_score>=2, \"GREEN\", health_score>=1, \"YELLOW\", 1=1, \"RED\")\n| eval status_detail=unhealthy.\" / \".features.\" features not green\"\n| appendpipe [\n    stats count\n    | where count=0\n    | eval clustering_status=\"N/A\", health_score=1, status_detail=\"No HealthReporter events\"\n]",
+        "query": "search `exec_health_health_report`\n| eval health_val=lower(coalesce(color, \"unknown\"))\n| stats latest(health_val) as health_val by host, feature\n| eval score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n| stats min(score) as score, count(eval(score<2)) as unhealthy_hosts by feature\n| stats min(score) as health_score, count as features, count(eval(score<2)) as unhealthy\n| where features>0\n| eval clustering_status=case(health_score>=2, \"GREEN\", health_score>=1, \"YELLOW\", 1=1, \"RED\")\n| eval status_detail=unhealthy.\" / \".features.\" features not green\"\n| appendpipe [\n    stats count\n    | where count=0\n    | eval clustering_status=\"N/A\", health_score=1, status_detail=\"No health.log events\"\n]",
         "refresh": "5m",
         "refreshType": "delay",
         "queryParameters": {
@@ -79,7 +79,7 @@
       "type": "ds.search",
       "name": "Search head cluster",
       "options": {
-        "query": "search index=_introspection sourcetype=splunk_resource_usage component=Hostwide\n| eval cpu_pct=coalesce(cpu_system_pct, 0)+coalesce(cpu_user_pct, 0)\n| stats avg(cpu_pct) as avg_cpu, dc(host) as hosts\n| eval avg_cpu=round(avg_cpu, 1)\n| eval health_score=case(avg_cpu>=90, 0, avg_cpu>=75, 1, 1=1, 2)\n| eval shc_status=case(health_score=2, \"GREEN\", health_score=1, \"YELLOW\", 1=1, \"RED\")\n| eval status_detail=avg_cpu.\"% CPU across \".hosts.\" host(s)\"\n| appendpipe [\n    stats count\n    | where count=0\n    | eval shc_status=\"N/A\", health_score=1, status_detail=\"No _introspection data\"\n]",
+        "query": "search index=_introspection sourcetype=splunk_resource_usage component=Hostwide\n| eval cpu_pct=coalesce('data.cpu_system_pct', 0)+coalesce('data.cpu_user_pct', 0)\n| stats avg(cpu_pct) as avg_cpu, dc(host) as hosts\n| where hosts>0\n| eval avg_cpu=round(avg_cpu, 1)\n| eval health_score=case(avg_cpu>=90, 0, avg_cpu>=75, 1, 1=1, 2)\n| eval shc_status=case(health_score=2, \"GREEN\", health_score=1, \"YELLOW\", 1=1, \"RED\")\n| eval status_detail=avg_cpu.\"% CPU across \".hosts.\" host(s)\"\n| appendpipe [\n    stats count\n    | where count=0\n    | eval shc_status=\"N/A\", health_score=1, status_detail=\"No _introspection data\"\n]",
         "refresh": "5m",
         "refreshType": "delay",
         "queryParameters": {
@@ -92,7 +92,7 @@
       "type": "ds.search",
       "name": "Silent hosts",
       "options": {
-        "query": "| tstats latest(_time) as last_data where index=`exec_health_idx` by host\n| eval silent=if((now()-last_data)>`exec_health_silence_sec`, 1, 0)\n| stats count as hosts, sum(silent) as silent_hosts\n| appendpipe [ stats count | where count=0 | eval hosts=0, silent_hosts=0 ]\n| eval health_score=case(hosts=0, 0, silent_hosts=0, 2, silent_hosts/hosts>0.2, 0, 1=1, 1)",
+        "query": "| tstats latest(_time) as last_data where index=`exec_health_idx` by host\n| eval silent=if((now()-last_data)>`exec_health_silence_sec`, 1, 0)\n| stats count as hosts, sum(silent) as silent_hosts\n| fillnull value=0 hosts, silent_hosts\n| eval health_score=case(hosts=0, 0, silent_hosts=0, 2, silent_hosts/hosts>0.2, 0, 1=1, 1)",
         "refresh": "5m",
         "refreshType": "delay",
         "queryParameters": {
@@ -127,7 +127,7 @@
       "type": "ds.search",
       "name": "Hostwide introspection",
       "options": {
-        "query": "search index=_introspection sourcetype=splunk_resource_usage component=Hostwide\n| eval cpu_pct=coalesce(cpu_system_pct, 0)+coalesce(cpu_user_pct, 0)\n| eval mem_used_gb=round(coalesce(mem_used, 0)/1024/1024/1024, 2)\n| stats avg(cpu_pct) as avg_cpu_pct, max(cpu_pct) as max_cpu_pct, latest(mem_used_gb) as mem_used_gb by host\n| eval avg_cpu_pct=round(avg_cpu_pct, 1), max_cpu_pct=round(max_cpu_pct, 1)\n| eval _color_rank=case(max_cpu_pct>=90, 1, max_cpu_pct>=75, 2, 1=1, 3)\n| sort 0 -max_cpu_pct",
+        "query": "search index=_introspection sourcetype=splunk_resource_usage component=Hostwide\n| eval cpu_pct=coalesce('data.cpu_system_pct', 0)+coalesce('data.cpu_user_pct', 0)\n| eval mem_used_gb=round(coalesce('data.mem_used', 0)/1024, 2)\n| stats avg(cpu_pct) as avg_cpu_pct, max(cpu_pct) as max_cpu_pct, latest(mem_used_gb) as mem_used_gb by host\n| eval avg_cpu_pct=round(avg_cpu_pct, 1), max_cpu_pct=round(max_cpu_pct, 1)\n| eval _color_rank=case(max_cpu_pct>=90, 1, max_cpu_pct>=75, 2, 1=1, 3)\n| sort 0 -max_cpu_pct",
         "refresh": "5m",
         "refreshType": "delay"
       }
@@ -136,12 +136,12 @@
       "type": "ds.search",
       "name": "Host 2-sigma alerts",
       "options": {
-        "query": "| tstats count as events where index=`exec_health_idx` earliest=-24h latest=now by host _time span=15m\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol by host\n| eval sigma=`exec_health_sigma`, lower_bound=round(mean_vol-(sigma*stdev_vol), 1)\n| eval baseline_state=case(isnull(mean_vol), \"WARMUP\", isnotnull(stdev_vol) AND events < lower_bound AND mean_vol>10, \"ALERT\", 1=1, \"OK\")\n| sort 0 -_time\n| dedup host\n| where baseline_state=\"ALERT\"\n| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)\n| eval _color_rank=1\n| table host, events, mean_vol, stdev_vol, lower_bound, z_score, baseline_state, _color_rank\n| sort host",
+        "query": "| tstats count as events where index=`exec_health_idx` earliest=-25h@m latest=@m by _time span=15m host\n| timechart span=15m limit=0 useother=f sum(events) as events by host\n| fillnull value=0\n| untable _time host events\n| where _time+900+300 <= now()\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples by host\n| eventstats max(_time) as scored_bucket\n| where _time=scored_bucket\n| eval sigma=`exec_health_sigma`, mean_vol=round(mean_vol, 1), stdev_vol=round(stdev_vol, 1), lower_bound=round(mean_vol-(sigma*stdev_vol), 1)\n| eval baseline_state=case(samples<8, \"WARMUP\", stdev_vol>0 AND events < lower_bound AND mean_vol>10, \"ALERT\", 1=1, \"OK\")\n| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)\n| where baseline_state=\"ALERT\"\n| eval _color_rank=1\n| table host, events, mean_vol, stdev_vol, lower_bound, z_score, baseline_state, _color_rank\n| sort host",
         "refresh": "5m",
         "refreshType": "delay",
         "queryParameters": {
-          "earliest": "-24h",
-          "latest": "now"
+          "earliest": "-25h@m",
+          "latest": "@m"
         }
       }
     },
@@ -159,7 +159,7 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Splunk Health Derek+\nTraffic lights combine instance HealthReporter, live ingestion, 7-day volume baseline, and silent hosts. GREEN = within baseline \u00b7 YELLOW = watch \u00b7 RED = action required.",
+        "markdown": "# Splunk Health Derek+\nTraffic lights combine the splunkd health report, live ingestion, 7-day volume baseline, and silent hosts. GREEN = within baseline \u00b7 YELLOW = watch \u00b7 RED = action required.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -355,8 +355,8 @@
       "showLastUpdated": true,
       "showProgressBar": true,
       "options": {
-        "majorValue": "> primary | seriesByName(\"silent_hosts\")",
-        "majorColor": "> primary | seriesByName(\"health_score\") | rangeValue(healthColors)",
+        "majorValue": "> primary | seriesByName(\"silent_hosts\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"health_score\") | lastPoint() | rangeValue(healthColors)",
         "sparklineDisplay": "off",
         "trendDisplay": "off",
         "majorFontSize": 32
@@ -476,7 +476,7 @@
         {
           "type": "drilldown.linkToSearch",
           "options": {
-            "type": "global",
+            "type": "auto",
             "newTab": true
           }
         }
@@ -521,7 +521,7 @@
         {
           "type": "drilldown.linkToSearch",
           "options": {
-            "type": "global",
+            "type": "auto",
             "newTab": true
           }
         }
@@ -529,7 +529,7 @@
     },
     "viz_host_alerts": {
       "type": "splunk.table",
-      "title": "Hosts below 2\u03c3 24-hour baseline (latest 15m)",
+      "title": "Hosts below 2\u03c3 24-hour baseline (latest complete 15m)",
       "dataSources": {
         "primary": "ds_host_alerts"
       },
@@ -566,7 +566,7 @@
         {
           "type": "drilldown.linkToSearch",
           "options": {
-            "type": "global",
+            "type": "auto",
             "newTab": true
           }
         }
@@ -611,7 +611,7 @@
         {
           "type": "drilldown.linkToSearch",
           "options": {
-            "type": "global",
+            "type": "auto",
             "newTab": true
           }
         }
@@ -620,7 +620,7 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Baselines use **streamstats** (host volume) and **predict**/moving average (daily GB), not static thresholds. Instance health is **HealthReporter** in `_internal`; search-head load is `_introspection` (no cluster-manager REST \u2014 Splunk Cloud compatible). Tune `exec_health_*` macros in Settings > Advanced search > Search macros. Saved alerts ship **disabled** \u2014 enable them after configuring email in Splunk (do not put webhook URLs or passwords in this app).",
+        "markdown": "Baselines use **streamstats** (host volume) and **predict**/moving average (daily GB), not static thresholds. Instance health is the splunkd health report (`health.log`, PeriodicHealthReporter); search-head load is `_introspection` (no cluster-manager REST \u2014 Splunk Cloud compatible). Tune `exec_health_*` macros in Settings > Advanced search > Search macros. Saved alerts ship **disabled** \u2014 enable them after configuring email in Splunk (do not put webhook URLs or passwords in this app).",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }

@@ -28,7 +28,7 @@
     "viz_identity": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## App identity\n- **Display name:** Splunk Health Derek+\n- **App id:** `splunk_exec_health`\n- **Version:** 1.2.4\n- **Author:** SplunkHealth\n- **License:** Apache License 2.0 (`LICENSE` in the app package)\n- **UI:** Dashboard Studio (dark theme)\n- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\nThe folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`.",
+        "markdown": "## App identity\n- **Display name:** Splunk Health Derek+\n- **App id:** `splunk_exec_health`\n- **Version:** 1.2.5\n- **Author:** SplunkHealth\n- **License:** Apache License 2.0 (`LICENSE` in the app package)\n- **UI:** Dashboard Studio (dark theme)\n- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\nThe folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -36,7 +36,7 @@
     "viz_cloud": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## Splunk Cloud compatibility\n- Search-head app only (`targetWorkloads: _search_heads` in `app.manifest`)\n- No cluster-manager or search-head-cluster REST (those endpoints 403 on Cloud)\n- Instance health from `_internal` HealthReporter; search-head load from `_introspection`\n- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n\nSelf-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** (`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via **Apps \u2192 Manage apps \u2192 Install app from file**.",
+        "markdown": "## Splunk Cloud compatibility\n- Search-head app only (`targetWorkloads: _search_heads` in `app.manifest`)\n- No cluster-manager or search-head-cluster REST (those endpoints 403 on Cloud)\n- Instance health from the `_internal` health report (PeriodicHealthReporter); search-head load from `_introspection`\n- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n\nSelf-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** (`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via **Apps \u2192 Manage apps \u2192 Install app from file**.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }

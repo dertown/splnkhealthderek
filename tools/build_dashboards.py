@@ -167,7 +167,7 @@ def table(title: str, ds_id: str, rank_field: str = "_color_rank", count: int = 
             {
                 "type": "drilldown.linkToSearch",
                 "options": {
-                    "type": "global",
+                    "type": "auto",
                     "newTab": True,
                 },
             }
@@ -262,7 +262,9 @@ def sankey(title: str, ds_id: str) -> dict:
         "showLastUpdated": True,
         "showProgressBar": True,
         "options": {
-            "linkColorMode": "source",
+            "colorMode": "categorical",
+            "linkOpacity": 0.6,
+            "seriesColors": ACCENT,
         },
     }
 
@@ -279,11 +281,19 @@ def grid(structure: list, extra_inputs: list | None = None, include_time: bool =
 # Executive Overview
 # ---------------------------------------------------------------------------
 
-Q_HEALTH_COMPONENTS = r"""
-search index=_internal sourcetype=splunkd component=HealthReporter
-| eval health_val=lower(coalesce(health, color, "unknown"))
-| stats latest(health_val) as health_val by feature
-| eval component="instance:"+feature, score=case(health_val="green", 2, health_val="yellow", 1, health_val="red", 0, 1=1, 1)
+# Worst current color per health-report feature across every instance.
+Q_HEALTH_BY_FEATURE = r"""
+search `exec_health_health_report`
+| eval health_val=lower(coalesce(color, "unknown"))
+| stats latest(health_val) as health_val by host, feature
+| eval score=case(health_val="green", 2, health_val="yellow", 1, health_val="red", 0, 1=1, 1)
+| stats min(score) as score, count(eval(score<2)) as unhealthy_hosts by feature
+""".strip()
+
+Q_HEALTH_COMPONENTS = (
+    Q_HEALTH_BY_FEATURE
+    + "\n"
+    + r"""| eval component="instance:".feature
 | table component, score
 | append [
     | tstats count as events where index=`exec_health_idx` earliest=-15m latest=now
@@ -312,12 +322,15 @@ search index=_internal sourcetype=splunkd component=HealthReporter
 ]
 | eval _color_rank=case(score<=0, 1, score<2, 2, 1=1, 3)
 """.strip()
+)
 
+# Complete days only (the data source ends at @d): a partial "today" would always
+# look like a large drop against the 7-day average.
 Q_LICENSE_DAILY = r"""
 search `exec_health_license_usage`
-| eval daily_GB=round(b/1024/1024/1024, 4)
 | bin _time span=1d
-| stats sum(daily_GB) as daily_GB by _time
+| stats sum(b) as bytes by _time
+| eval daily_GB=bytes/1024/1024/1024
 | streamstats window=7 current=f avg(daily_GB) as ma_7d
 | eval ma_7d=round(ma_7d, 3), daily_GB=round(daily_GB, 3)
 | eval variance_pct=if(ma_7d>0, round(((daily_GB-ma_7d)/ma_7d)*100, 1), 0)
@@ -326,25 +339,27 @@ search `exec_health_license_usage`
 | sort _time
 """.strip()
 
-Q_INDEXER_CLUSTER = r"""
-search index=_internal sourcetype=splunkd component=HealthReporter
-| eval health_val=lower(coalesce(health, color, "unknown"))
-| stats latest(health_val) as health_val by feature
-| eval score=case(health_val="green", 2, health_val="yellow", 1, health_val="red", 0, 1=1, 1)
-| stats min(score) as health_score, count as features, count(eval(score<2)) as unhealthy
+Q_INDEXER_CLUSTER = (
+    Q_HEALTH_BY_FEATURE
+    + "\n"
+    + r"""| stats min(score) as health_score, count as features, count(eval(score<2)) as unhealthy
+| where features>0
 | eval clustering_status=case(health_score>=2, "GREEN", health_score>=1, "YELLOW", 1=1, "RED")
 | eval status_detail=unhealthy." / ".features." features not green"
 | appendpipe [
     stats count
     | where count=0
-    | eval clustering_status="N/A", health_score=1, status_detail="No HealthReporter events"
+    | eval clustering_status="N/A", health_score=1, status_detail="No health.log events"
 ]
 """.strip()
+)
 
+# Hostwide fields are nested JSON (data.cpu_user_pct, data.mem_used in MB).
 Q_SHC = r"""
 search index=_introspection sourcetype=splunk_resource_usage component=Hostwide
-| eval cpu_pct=coalesce(cpu_system_pct, 0)+coalesce(cpu_user_pct, 0)
+| eval cpu_pct=coalesce('data.cpu_system_pct', 0)+coalesce('data.cpu_user_pct', 0)
 | stats avg(cpu_pct) as avg_cpu, dc(host) as hosts
+| where hosts>0
 | eval avg_cpu=round(avg_cpu, 1)
 | eval health_score=case(avg_cpu>=90, 0, avg_cpu>=75, 1, 1=1, 2)
 | eval shc_status=case(health_score=2, "GREEN", health_score=1, "YELLOW", 1=1, "RED")
@@ -360,7 +375,7 @@ Q_SILENT = r"""
 | tstats latest(_time) as last_data where index=`exec_health_idx` by host
 | eval silent=if((now()-last_data)>`exec_health_silence_sec`, 1, 0)
 | stats count as hosts, sum(silent) as silent_hosts
-| appendpipe [ stats count | where count=0 | eval hosts=0, silent_hosts=0 ]
+| fillnull value=0 hosts, silent_hosts
 | eval health_score=case(hosts=0, 0, silent_hosts=0, 2, silent_hosts/hosts>0.2, 0, 1=1, 1)
 """.strip()
 
@@ -382,27 +397,45 @@ search `exec_health_license_usage`
 
 Q_INTROSPECTION = r"""
 search index=_introspection sourcetype=splunk_resource_usage component=Hostwide
-| eval cpu_pct=coalesce(cpu_system_pct, 0)+coalesce(cpu_user_pct, 0)
-| eval mem_used_gb=round(coalesce(mem_used, 0)/1024/1024/1024, 2)
+| eval cpu_pct=coalesce('data.cpu_system_pct', 0)+coalesce('data.cpu_user_pct', 0)
+| eval mem_used_gb=round(coalesce('data.mem_used', 0)/1024, 2)
 | stats avg(cpu_pct) as avg_cpu_pct, max(cpu_pct) as max_cpu_pct, latest(mem_used_gb) as mem_used_gb by host
 | eval avg_cpu_pct=round(avg_cpu_pct, 1), max_cpu_pct=round(max_cpu_pct, 1)
 | eval _color_rank=case(max_cpu_pct>=90, 1, max_cpu_pct>=75, 2, 1=1, 3)
 | sort 0 -max_cpu_pct
 """.strip()
 
-Q_HOST_ALERTS = r"""
-| tstats count as events where index=`exec_health_idx` earliest=-24h latest=now by host _time span=15m
-| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol by host
-| eval sigma=`exec_health_sigma`, lower_bound=round(mean_vol-(sigma*stdev_vol), 1)
-| eval baseline_state=case(isnull(mean_vol), "WARMUP", isnotnull(stdev_vol) AND events < lower_bound AND mean_vol>10, "ALERT", 1=1, "OK")
-| sort 0 -_time
-| dedup host
+def host_baseline_core(host_clause: str = "") -> str:
+    """Per-host 15m volume vs the prior 24h (96 buckets) of the same host.
+
+    - timechart + fillnull + untable zero-fills buckets, so a host that drops to 0
+      events still produces a row (tstats alone emits nothing for an empty bucket).
+    - Only the newest bucket that closed at least 5 minutes ago is scored, so a
+      still-filling bucket or normal indexing lag is never read as a drop.
+    Shared by the dashboards and savedsearches.conf so the logic cannot drift.
+    """
+    where_host = f" {host_clause}" if host_clause else ""
+    return (
+        f"| tstats count as events where index=`exec_health_idx`{where_host} earliest=-25h@m latest=@m by _time span=15m host\n"
+        "| timechart span=15m limit=0 useother=f sum(events) as events by host\n"
+        "| fillnull value=0\n"
+        "| untable _time host events\n"
+        "| where _time+900+300 <= now()\n"
+        "| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples by host\n"
+        "| eventstats max(_time) as scored_bucket\n"
+        "| where _time=scored_bucket\n"
+        "| eval sigma=`exec_health_sigma`, mean_vol=round(mean_vol, 1), stdev_vol=round(stdev_vol, 1), lower_bound=round(mean_vol-(sigma*stdev_vol), 1)\n"
+        '| eval baseline_state=case(samples<8, "WARMUP", stdev_vol>0 AND events < lower_bound AND mean_vol>10, "ALERT", 1=1, "OK")\n'
+        "| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)"
+    )
+
+
+Q_HOST_ALERTS = host_baseline_core() + r"""
 | where baseline_state="ALERT"
-| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)
 | eval _color_rank=1
 | table host, events, mean_vol, stdev_vol, lower_bound, z_score, baseline_state, _color_rank
 | sort host
-""".strip()
+"""
 
 Q_TOPO_ENRICH = r"""
 | rex field=source "(?i)(?:^|[^A-Za-z])(?<net_proto>tcp|udp)[:/](?<net_port>\d+)"
@@ -480,7 +513,7 @@ Q_TOPO_OVERVIEW = (
 Q_TCPIN_PATHS = r"""
 search index=_internal source=*metrics.log group=tcpin_connections
 | eval data_source=coalesce(sourceHost, hostname)
-| eval receiver=coalesce(destHost, splunk_server)
+| eval receiver=host
 | eval fwd=lower(trim(coalesce(fwdType, "")))
 | eval connection=case(
     match(fwd, "^(uf|lwf)$"), "UF",
@@ -498,11 +531,11 @@ search index=_internal source=*metrics.log group=tcpin_connections
 
 Q_HEC_PATHS = r"""
 search `exec_health_hec_metrics`
-| eval token=coalesce(series, name, token)
-| lookup hec_token_map token OUTPUT token_name, owner
+| `exec_health_hec_normalize`
+| lookup hec_token_map token OUTPUT token_name
 | eval data_source=coalesce(token_name, token)
-| stats sum(ev) as events, sum(kb) as kb by data_source
-| eval ingest_path="HEC", splunk_index="HTTP Event Collector", _color_rank=3
+| stats sum(hec_events) as events, sum(hec_bytes) as bytes by data_source
+| eval kb=round(bytes/1024, 1), ingest_path="HEC", splunk_index="HTTP Event Collector", _color_rank=3
 | sort 0 -events
 | head 40
 | table data_source, ingest_path, splunk_index, events, kb, _color_rank
@@ -527,20 +560,20 @@ def executive_overview() -> dict:
 | appendpipe [ stats count | where count=0 | eval overall_score=1, overall_status="YELLOW" ]
 """.strip(),
             ),
-            "ds_license_daily": ds("License GB/day vs 7d MA", Q_LICENSE_DAILY, "-8d@d", "now", refresh="15m"),
+            "ds_license_daily": ds("License GB/day vs 7d MA", Q_LICENSE_DAILY, "-15d@d", "@d", refresh="15m"),
             "ds_indexer_cluster": ds("Indexer cluster peers", Q_INDEXER_CLUSTER, "-15m", "now"),
             "ds_shc": ds("Search head cluster", Q_SHC, "-15m", "now"),
             "ds_silent": ds("Silent hosts", Q_SILENT, "-24h", "now"),
             "ds_live": ds("Live indexed events 15m", Q_LIVE, "-15m", "now"),
             "ds_top_indexes": ds("Top indexes by GB", Q_TOP_INDEXES),
             "ds_introspection": ds("Hostwide introspection", Q_INTROSPECTION),
-            "ds_host_alerts": ds("Host 2-sigma alerts", Q_HOST_ALERTS, "-24h", "now"),
+            "ds_host_alerts": ds("Host 2-sigma alerts", Q_HOST_ALERTS, "-25h@m", "@m"),
             "ds_topo_overview": ds("Data topology preview", Q_TOPO_OVERVIEW),
         },
         "visualizations": {
             "viz_header": md(
                 "# Splunk Health Derek+\n"
-                "Traffic lights combine instance HealthReporter, live ingestion, 7-day volume baseline, and silent hosts. "
+                "Traffic lights combine the splunkd health report, live ingestion, 7-day volume baseline, and silent hosts. "
                 "GREEN = within baseline · YELLOW = watch · RED = action required."
             ),
             "viz_overall": single_status("Overall health", "ds_overall_health", "overall_status", "overall_score"),
@@ -573,8 +606,8 @@ def executive_overview() -> dict:
                 "showLastUpdated": True,
                 "showProgressBar": True,
                 "options": {
-                    "majorValue": "> primary | seriesByName(\"silent_hosts\")",
-                    "majorColor": "> primary | seriesByName(\"health_score\") | rangeValue(healthColors)",
+                    "majorValue": "> primary | seriesByName(\"silent_hosts\") | lastPoint()",
+                    "majorColor": "> primary | seriesByName(\"health_score\") | lastPoint() | rangeValue(healthColors)",
                     "sparklineDisplay": "off",
                     "trendDisplay": "off",
                     "majorFontSize": 32,
@@ -601,11 +634,11 @@ def executive_overview() -> dict:
             },
             "viz_top_indexes": table("Top indexes by license usage (GB)", "ds_top_indexes", count=15),
             "viz_intro": table("Indexer/SH resource usage (_introspection)", "ds_introspection", count=15),
-            "viz_host_alerts": table("Hosts below 2σ 24-hour baseline (latest 15m)", "ds_host_alerts", count=25),
+            "viz_host_alerts": table("Hosts below 2σ 24-hour baseline (latest complete 15m)", "ds_host_alerts", count=25),
             "viz_components": table("Health component scores", "ds_health_components", count=20),
             "viz_footer": md(
                 "Baselines use **streamstats** (host volume) and **predict**/moving average (daily GB), not static thresholds. "
-                "Instance health is **HealthReporter** in `_internal`; search-head load is `_introspection` (no cluster-manager REST — Splunk Cloud compatible). "
+                "Instance health is the splunkd health report (`health.log`, PeriodicHealthReporter); search-head load is `_introspection` (no cluster-manager REST — Splunk Cloud compatible). "
                 "Tune `exec_health_*` macros in Settings > Advanced search > Search macros. "
                 "Saved alerts ship **disabled** — enable them after configuring email in Splunk (do not put webhook URLs or passwords in this app)."
             ),
@@ -637,11 +670,9 @@ def executive_overview() -> dict:
 # ---------------------------------------------------------------------------
 
 Q_PHONE_HOME = r"""
-| tstats latest(_time) as last_data where index=`exec_health_idx` host=$host_filter$ by host
-| append [
-    | tstats latest(_time) as last_heartbeat where index=_internal host=$host_filter$ by host
-]
-| stats max(last_data) as last_data, max(last_heartbeat) as last_heartbeat by host
+| tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) host=$host_filter$ by index host
+| eval kind=if(index="_internal", "heartbeat", "data")
+| stats max(eval(if(kind="data", last_seen, null()))) as last_data, max(eval(if(kind="heartbeat", last_seen, null()))) as last_heartbeat by host
 | eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat
 | eval last_data_received=strftime(last_data, "%Y-%m-%d %H:%M:%S")
 | eval last_internal_heartbeat=strftime(last_heartbeat, "%Y-%m-%d %H:%M:%S")
@@ -658,11 +689,9 @@ Q_PHONE_HOME = r"""
 """.strip()
 
 Q_STATE_COUNTS = r"""
-| tstats latest(_time) as last_data where index=`exec_health_idx` host=$host_filter$ by host
-| append [
-    | tstats latest(_time) as last_heartbeat where index=_internal host=$host_filter$ by host
-]
-| stats max(last_data) as last_data, max(last_heartbeat) as last_heartbeat by host
+| tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) host=$host_filter$ by index host
+| eval kind=if(index="_internal", "heartbeat", "data")
+| stats max(eval(if(kind="data", last_seen, null()))) as last_data, max(eval(if(kind="heartbeat", last_seen, null()))) as last_heartbeat by host
 | eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat
 | eval state=case(
     isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "HEARTBEAT ONLY",
@@ -673,19 +702,12 @@ Q_STATE_COUNTS = r"""
 | stats count as hosts by state
 """.strip()
 
-Q_BASELINE_ALL = r"""
-| tstats count as events where index=`exec_health_idx` host=$host_filter$ earliest=-24h latest=now by host _time span=15m
-| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol by host
-| eval sigma=`exec_health_sigma`, lower_bound=round(mean_vol-(sigma*stdev_vol), 1)
-| eval baseline_state=case(isnull(mean_vol), "WARMUP", isnotnull(stdev_vol) AND events < lower_bound AND mean_vol>10, "ALERT", 1=1, "OK")
-| sort 0 -_time
-| dedup host
+Q_BASELINE_ALL = host_baseline_core("host=$host_filter$") + r"""
 | eval current_eps=round(events/900, 2), baseline_eps=round(mean_vol/900, 2)
-| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)
 | eval _color_rank=case(baseline_state="ALERT", 1, baseline_state="WARMUP", 2, 1=1, 3)
 | table host, events, mean_vol, stdev_vol, lower_bound, current_eps, baseline_eps, z_score, baseline_state, _color_rank
 | sort _color_rank, host
-""".strip()
+"""
 
 Q_HOST_VOLUME = r"""
 | tstats count as events where index=`exec_health_idx` host=$host_filter$ by _time span=15m host
@@ -752,7 +774,7 @@ def host_heartbeat() -> dict:
                 "ds_state_counts",
                 '| append [| makeresults | eval state="HOST DOWN", hosts=0] | where state="HOST DOWN" | stats max(hosts) as hosts',
             ),
-            "ds_baseline": ds("24h streamstats baseline", Q_BASELINE_ALL, "-24h", "now"),
+            "ds_baseline": ds("24h streamstats baseline", Q_BASELINE_ALL, "-25h@m", "@m"),
             "ds_host_volume": ds("Host volume over time", Q_HOST_VOLUME),
             "ds_metadata": ds("metadata type=hosts", Q_METADATA),
         },
@@ -798,55 +820,75 @@ def host_heartbeat() -> dict:
 # HEC
 # ---------------------------------------------------------------------------
 
-Q_HEC_TIMECHART = r"""
-search `exec_health_hec_metrics`
-| eval token=coalesce(series, name, token)
+def hec_state_core() -> str:
+    """Per-token baseline vs recent window, zero-filled.
+
+    Token metrics are written once per metrics_report_interval (60s) and only while
+    a token is active, so a silent token has no rows at all: timechart + fillnull
+    turns that absence into zeros. The window ends one minute back to absorb
+    indexing lag. "recent" is the last N complete minutes; "baseline" is the
+    60 minutes before that, reported as events per second.
+    Shared by the dashboard and savedsearches.conf.
+    """
+    return r"""
+search `exec_health_hec_metrics` earliest=-2h@m latest=-1m@m
+| `exec_health_hec_normalize`
+| timechart span=1m limit=0 useother=f sum(hec_events) as events by token
+| fillnull value=0
+| untable _time token events
+| eval minutes_ago=round((relative_time(now(), "-1m@m")-_time)/60, 0)
+| eval window=case(minutes_ago>=1 AND minutes_ago<=`exec_health_hec_silence_min`, "recent", minutes_ago>`exec_health_hec_silence_min` AND minutes_ago<=`exec_health_hec_silence_min`+60, "baseline")
+| stats sum(eval(if(window="recent", events, 0))) as recent_events, sum(eval(if(window="baseline", events, 0))) as baseline_events, count(eval(window="recent" AND events=0)) as silent_minutes by token
+| eval baseline_eps=round(baseline_events/3600, 2), recent_eps=round(recent_events/(60*`exec_health_hec_silence_min`), 2)
 | lookup hec_token_map token OUTPUT token_name, owner
-| eval token_label=coalesce(token_name, token)
-| timechart span=5m sum(ev) as events by token_label
+| eval token_label=coalesce(token_name, token), owner=coalesce(owner, "unmapped")
+| eval hec_state=case(
+    baseline_eps >= `exec_health_hec_baseline_eps` AND recent_events=0, "ALERT",
+    baseline_eps >= 10 AND recent_events=0, "YELLOW",
+    1=1, "OK")
 """.strip()
 
-Q_HEC_STATE = r"""
+
+Q_HEC_TIMECHART = r"""
 search `exec_health_hec_metrics`
-| eval token=coalesce(series, name, token)
-| lookup hec_token_map token OUTPUT token_name, owner
+| `exec_health_hec_normalize`
+| lookup hec_token_map token OUTPUT token_name
 | eval token_label=coalesce(token_name, token)
-| bin _time span=1m
-| stats sum(ev) as events, sum(kb) as kb by _time, token, token_label, owner
-| streamstats window=60 avg(events) as avg_1h by token
-| eval is_silent=if(events=0, 1, 0)
-| streamstats window=`exec_health_hec_silence_min` sum(is_silent) as silent_minutes by token
-| sort 0 -_time
-| dedup token
-| eval avg_1h_eps=round(avg_1h, 2), kb=round(kb, 1)
-| eval hec_state=case(
-    avg_1h_eps >= `exec_health_hec_baseline_eps` AND silent_minutes >= `exec_health_hec_silence_min`, "ALERT",
-    avg_1h_eps >= 10 AND silent_minutes >= `exec_health_hec_silence_min`, "YELLOW",
-    1=1, "OK")
-| eval _color_rank=case(hec_state="ALERT", 1, hec_state="YELLOW", 2, 1=1, 3)
-| table token, token_label, owner, events, avg_1h_eps, silent_minutes, kb, hec_state, _color_rank
-| sort _color_rank, token_label
+| timechart span=5m sum(hec_events) as events by token_label
 """.strip()
+
+Q_HEC_STATE = hec_state_core() + r"""
+| eval _color_rank=case(hec_state="ALERT", 1, hec_state="YELLOW", 2, 1=1, 3)
+| table token, token_label, owner, recent_events, recent_eps, baseline_eps, silent_minutes, hec_state, _color_rank
+| sort _color_rank, token_label
+"""
 
 Q_HEC_TOTALS = r"""
 search `exec_health_hec_metrics`
-| stats sum(ev) as events, dc(series) as tokens, sum(kb) as kb
-| appendpipe [ stats count | where count=0 | eval events=0, tokens=0, kb=0 ]
+| `exec_health_hec_normalize`
+| stats sum(hec_events) as events, dc(token) as tokens, sum(hec_bytes) as bytes
+| fillnull value=0 events, tokens, bytes
 | eval events_per_sec=round(events/3600, 1)
-| eval gb=round(kb/1024/1024, 3)
+| eval gb=round(bytes/1024/1024/1024, 3)
 """.strip()
 
+# Failed requests log "token name=<input name>, channel=..., reply=<code>".
 Q_HEC_HANDLER = r"""
 search `exec_health_hec_handler`
-| eval token=coalesce(token, token_name, series)
-| eval is_error=if(match(coalesce(log_level, ""), "(?i)error|warn") OR match(_raw, "(?i)error|fail|reject"), 1, 0)
-| stats count as events, sum(is_error) as errors by token
+| rex "token name=(?<token>[^,]+)"
+| rex "reply=(?<reply>\d+)"
+| eval token=coalesce(token, "n/a")
+| eval is_error=if(log_level="ERROR" OR log_level="WARN", 1, 0)
+| stats count as events, sum(is_error) as errors, values(reply) as reply_codes by token
+| lookup hec_token_map token OUTPUT token_name, owner
+| eval token_label=coalesce(token_name, token)
 | eval _color_rank=if(errors>0, 1, 3)
+| table token, token_label, owner, events, errors, reply_codes, _color_rank
 | sort 0 -errors, -events
 """.strip()
 
 Q_HEC_ERRORS = r"""
-search `exec_health_hec_handler` (log_level=ERROR OR log_level=WARN OR error OR fail OR reject)
+search `exec_health_hec_handler` (log_level=ERROR OR log_level=WARN)
 | timechart span=5m count as handler_issues
 """.strip()
 
@@ -859,33 +901,33 @@ def hec_performance() -> dict:
         "inputs": {"input_global_trp": timerange("-4h@h,now")},
         "dataSources": {
             "ds_hec_time": ds("HEC events by token", Q_HEC_TIMECHART),
-            "ds_hec_state": ds("HEC token state", Q_HEC_STATE, "-2h", "now"),
+            "ds_hec_state": ds("HEC token state", Q_HEC_STATE, "-2h@m", "-1m@m"),
             "ds_hec_totals": ds("HEC totals", Q_HEC_TOTALS, "-1h", "now"),
             "ds_hec_handler": ds("HttpInputDataHandler by token", Q_HEC_HANDLER),
             "ds_hec_errors": ds("HttpInputDataHandler issues", Q_HEC_ERRORS),
             "ds_hec_alert_count": chain(
                 "HEC alert count",
                 "ds_hec_state",
-                '| where hec_state="ALERT" | stats count as alerts | appendpipe [ stats count | where count=0 | eval alerts=0 ]',
+                '| where hec_state="ALERT" | stats count as alerts',
             ),
         },
         "visualizations": {
             "viz_header": md(
                 "# HEC token performance\n"
-                "Throughput comes from `metrics.log` `group=http` (series = token). "
-                "A token that usually sends **100+ events/sec** (macro `exec_health_hec_baseline_eps`) and stays at **0 for 5 minutes** is **ALERT**. "
-                "Map token GUIDs to names in `lookups/hec_token_map.csv` — do not put HEC secrets in that file, only display names."
+                "Throughput comes from the per-token HEC metrics in `_introspection` (`http_event_collector_metrics`, field `data.token_name`). "
+                "A token whose previous hour averaged **100+ events/sec** (macro `exec_health_hec_baseline_eps`) and has sent **nothing for the last 5 complete minutes** is **ALERT**. "
+                "Map token input names to friendly names in `lookups/hec_token_map.csv` — never put HEC token secrets in that file."
             ),
             "viz_tokens": single_number("Active tokens (1h)", "ds_hec_totals", "tokens", "", None, 0),
             "viz_eps": single_number("HEC events / sec (1h)", "ds_hec_totals", "events_per_sec", "", None, 1),
             "viz_gb": single_number("HEC volume (1h)", "ds_hec_totals", "gb", " GB", None, 3),
             "viz_alerts": single_number("Tokens in ALERT", "ds_hec_alert_count", "alerts", "", None, 0),
             "viz_time": area("HEC events by token", "ds_hec_time", "events / 5m"),
-            "viz_state": table("Token vs 1-hour rolling window", "ds_hec_state", count=25),
+            "viz_state": table("Token: last 5 minutes vs previous hour", "ds_hec_state", count=25),
             "viz_errors": line("HttpInputDataHandler errors / warnings", "ds_hec_errors", "issues"),
-            "viz_handler": table("HttpInputDataHandler activity by token", "ds_hec_handler", count=20),
+            "viz_handler": table("Failed HEC requests by token (HttpInputDataHandler)", "ds_hec_handler", count=20),
             "viz_footer": md(
-                "Populate `hec_token_map.csv` with `token,token_name,owner`. Never store the HEC token **value** (the secret) in the lookup — only the token name or UUID that already appears in `_internal` metrics."
+                "Populate `hec_token_map.csv` with `token,token_name,owner`, where `token` is the HEC input name exactly as it appears in `data.token_name`. Never store the HEC token **value** (the secret) in the lookup."
             ),
         },
         "layout": grid(
@@ -922,19 +964,19 @@ Q_SC4S_HOSTS = r"""
 """.strip()
 
 Q_SC4S_ERRORS = r"""
-search index=`exec_health_sc4s_idx` `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR "connection refused" OR hang OR dropped)
+search index=`exec_health_sc4s_idx` `exec_health_sc4s` (error OR warn OR fail OR "connection refused" OR hang OR dropped)
 | stats count as issues by host, sourcetype
 | eval _color_rank=if(issues>0, 1, 3)
 | sort 0 -issues
 """.strip()
 
 Q_SC4S_ERR_TIME = r"""
-search index=`exec_health_sc4s_idx` `exec_health_sc4s` (ERROR OR error OR WARN OR fail OR "connection refused")
+search index=`exec_health_sc4s_idx` `exec_health_sc4s` (error OR warn OR fail OR "connection refused")
 | timechart span=5m count as sc4s_issues
 """.strip()
 
 Q_EDGE_THROUGHPUT = r"""
-| mstats rate(processor_events_in_total) as events_in_eps, rate(processor_events_out_total) as events_out_eps, rate(processor_bytes_in_total) as bytes_in_eps, rate(processor_bytes_out_total) as bytes_out_eps where `exec_health_edge_mstats` by host span=5m
+| mstats rate_sum(processor_events_in_total) as events_in_eps, rate_sum(processor_events_out_total) as events_out_eps, rate_sum(processor_bytes_in_total) as bytes_in_eps, rate_sum(processor_bytes_out_total) as bytes_out_eps where `exec_health_edge_mstats` by host span=5m
 | eval filter_efficiency_pct=if(events_in_eps>0, round(((events_in_eps-events_out_eps)/events_in_eps)*100, 2), 0)
 | eval dropped_or_filtered_eps=round(events_in_eps-events_out_eps, 2)
 | eval events_in_eps=round(events_in_eps, 2), events_out_eps=round(events_out_eps, 2)
@@ -942,21 +984,25 @@ Q_EDGE_THROUGHPUT = r"""
 """.strip()
 
 Q_EDGE_SUMMARY = r"""
-| mstats rate(processor_events_in_total) as events_in_eps, rate(processor_events_out_total) as events_out_eps, rate(processor_bytes_in_total) as bytes_in_eps, rate(processor_bytes_out_total) as bytes_out_eps where `exec_health_edge_mstats`
+| mstats rate_sum(processor_events_in_total) as events_in_eps, rate_sum(processor_events_out_total) as events_out_eps, rate_sum(processor_bytes_in_total) as bytes_in_eps, rate_sum(processor_bytes_out_total) as bytes_out_eps where `exec_health_edge_mstats`
 | appendpipe [ stats count | where count=0 | eval events_in_eps=0, events_out_eps=0, bytes_in_eps=0, bytes_out_eps=0 ]
+| fillnull value=0 events_in_eps, events_out_eps, bytes_in_eps, bytes_out_eps
 | eval filter_efficiency_pct=if(events_in_eps>0, round(((events_in_eps-events_out_eps)/events_in_eps)*100, 2), 0)
 | eval events_in_eps=round(events_in_eps, 2), events_out_eps=round(events_out_eps, 2)
 | eval bytes_in_mbps=round(bytes_in_eps/1024/1024, 3)
 """.strip()
 
 Q_EDGE_QUEUE = r"""
-| mstats latest(queue_size_bytes) as queue_size_bytes, latest(exporter_queue_size) as exporter_queue_size, sum(export_destination_errors_total) as export_errors where index=_metrics sourcetype=edge-metrics by host
+| mstats max(queue_size_bytes) as queue_size_bytes, max(queue_max_bytes) as queue_max_bytes, rate_sum(export_destination_errors_total) as export_errors_per_sec where `exec_health_edge_mstats` by host
 | eval queue_mb=round(queue_size_bytes/1024/1024, 2)
-| eval _color_rank=if(export_errors>0, 1, 3)
+| eval queue_fill_pct=if(queue_max_bytes>0, round(queue_size_bytes/queue_max_bytes*100, 1), null())
+| eval export_errors_per_sec=round(coalesce(export_errors_per_sec, 0), 3)
+| eval _color_rank=case(export_errors_per_sec>0 OR queue_fill_pct>=80, 1, queue_fill_pct>=50, 2, 1=1, 3)
+| table host, queue_mb, queue_fill_pct, export_errors_per_sec, _color_rank
 """.strip()
 
 Q_EDGE_LOGS = r"""
-search index=_internal (source="*edge.log" OR sourcetype=edge OR sourcetype=splunkd_ui_res OR sourcetype=*edge*processor* OR component=IngestActions OR component=IngestProcessor)
+search index=_internal (source="*edge.log" OR sourcetype=edge OR sourcetype=*edge*processor* OR component=IngestActions OR component=IngestProcessor)
 | eval is_drop=if(match(_raw, "(?i)drop|filter|sending_queue is full"), 1, 0)
 | stats count as events, sum(is_drop) as drop_mentions by sourcetype, host
 | eval _color_rank=if(drop_mentions>0, 1, 3)
@@ -969,9 +1015,8 @@ Q_INDEXED_COMPARE = r"""
 """.strip()
 
 Q_INGEST_ACTIONS = r"""
-search index=_internal ((sourcetype=splunkd (component=IngestActions OR component=IngestProcessor)) OR (source=*metrics.log group=pipeline))
-| eval dropped=coalesce(dropped_events, dropped, blocked, 0)
-| timechart span=5m sum(dropped) as dropped_events, count as pipeline_events
+search index=_internal source=*metrics.log group=queue blocked=true
+| timechart span=5m limit=10 count as blocked_reports by name
 """.strip()
 
 
@@ -991,13 +1036,13 @@ def sc4s_edge() -> dict:
             "ds_edge_queue": ds("Edge queues and export errors", Q_EDGE_QUEUE),
             "ds_edge_logs": ds("Edge / ingest processor logs", Q_EDGE_LOGS),
             "ds_indexed": ds("Indexed events reaching indexers", Q_INDEXED_COMPARE),
-            "ds_ingest_actions": ds("Ingest Actions / pipeline drops", Q_INGEST_ACTIONS),
+            "ds_ingest_actions": ds("Blocked ingestion queues", Q_INGEST_ACTIONS),
         },
         "visualizations": {
             "viz_header": md(
                 "# SC4S and Edge / Ingest Processors\n"
                 "Left side watches **syslog/SC4S** volume per source host (load-balancer hang = flatline). "
-                "Right side compares **Edge Processor in vs out** (`mstats` on `sourcetype=edge-metrics`) with **events reaching indexers**."
+                "Right side compares **Edge Processor in vs out** (`mstats rate_sum` on `_metrics`) with **events reaching indexers**."
             ),
             "viz_ep_in": single_number("Edge events in / sec", "ds_edge_summary", "events_in_eps", "", None, 2),
             "viz_ep_out": single_number("Edge events out / sec", "ds_edge_summary", "events_out_eps", "", None, 2),
@@ -1009,11 +1054,11 @@ def sc4s_edge() -> dict:
             "viz_sc4s_err_time": line("SC4S error / warn rate", "ds_sc4s_err_time", "issues"),
             "viz_sc4s_errors": table("SC4S container / syslog issues", "ds_sc4s_errors", count=15),
             "viz_edge_tp": table("Edge Processor in vs out (filter efficiency)", "ds_edge_tp", count=15),
-            "viz_edge_queue": table("Edge queues and destination errors", "ds_edge_queue", count=15),
-            "viz_ingest": line("Ingest Actions / pipeline dropped events", "ds_ingest_actions", "dropped"),
+            "viz_edge_queue": table("Edge queue fill and export errors", "ds_edge_queue", count=15),
+            "viz_ingest": line("Blocked ingestion queues (metrics.log blocked=true)", "ds_ingest_actions", "blocked reports / 5m"),
             "viz_edge_logs": table("Edge / Ingest Processor _internal logs", "ds_edge_logs", count=15),
             "viz_footer": md(
-                "Edge metrics require the `_metrics` index and `sourcetype=edge-metrics` (grant the viewing role access to `_metrics` on Splunk Cloud). "
+                "Edge metrics come from the `_metrics` index (`processor_events_in_total` and related counters, macro `exec_health_edge_mstats`); grant the viewing role access to `_metrics` on Splunk Cloud. "
                 "If those panels are empty or error, Edge Processor is not writing metrics to this stack — use `_internal` logs instead. "
                 "**Filter efficiency** = `(events_in - events_out) / events_in`. High values mean pipelines are dropping or routing away from indexers. "
                 "SC4S error scans use macro `exec_health_sc4s_idx` (default `*`). Narrow it on Cloud to avoid expensive `index=*` event searches."
@@ -1156,7 +1201,7 @@ def data_topology() -> dict:
     }
 
 
-APP_VERSION = "1.2.4"
+APP_VERSION = "1.2.5"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -1199,7 +1244,7 @@ def about() -> dict:
                 "## Splunk Cloud compatibility\n"
                 "- Search-head app only (`targetWorkloads: _search_heads` in `app.manifest`)\n"
                 "- No cluster-manager or search-head-cluster REST (those endpoints 403 on Cloud)\n"
-                "- Instance health from `_internal` HealthReporter; search-head load from `_introspection`\n"
+                "- Instance health from the `_internal` health report (PeriodicHealthReporter); search-head load from `_introspection`\n"
                 "- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n"
                 "- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n"
                 "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n\n"
@@ -1261,8 +1306,8 @@ def readme() -> dict:
             "viz_indexes": md(
                 "## Indexes and role access\n"
                 "Grant the viewing role search on:\n\n"
-                "- `_internal` — heartbeats, license usage, HealthReporter, HEC metrics\n"
-                "- `_introspection` — CPU / memory\n"
+                "- `_internal` — heartbeats, license usage, health report, HEC request errors\n"
+                "- `_introspection` — CPU / memory, per-token HEC metrics\n"
                 "- `_metrics` — Edge Processor (optional)\n"
                 "- Customer event indexes used in `exec_health_idx` (default `*`)\n\n"
                 "On Splunk Cloud, `sc_admin` already has the internal indexes. Narrow `exec_health_idx` and "
@@ -1280,7 +1325,9 @@ def readme() -> dict:
                 "- `exec_health_hec_baseline_eps` — `100` — rolling EPS before HEC silence is RED\n"
                 "- `exec_health_hec_silence_min` — `5` — silent minutes to flag a HEC token\n"
                 "- `exec_health_sc4s` — syslog / SC4S sourcetype filter\n"
-                "- `exec_health_edge_mstats` — `index=_metrics sourcetype=edge-metrics`"
+                "- `exec_health_health_report` — splunkd health report (`health.log`, PeriodicHealthReporter)\n"
+                "- `exec_health_hec_metrics` / `exec_health_hec_normalize` — per-token HEC metrics in `_introspection`\n"
+                "- `exec_health_edge_mstats` — `index=_metrics`"
             ),
             "viz_alerts": md(
                 "## Alerts\n"
@@ -1289,7 +1336,7 @@ def readme() -> dict:
                 "2. **Settings → Searches, reports, and alerts** (this app) → enable\n"
                 "3. Attach email or Slack **in Splunk Web** — do not put webhook URLs or passwords in this app\n\n"
                 "Searches:\n"
-                "- Ingestion below `predict()` 95% lower bound (every 15 minutes)\n"
+                "- Ingestion below `predict()` 95% lower bound (hourly, last complete hour)\n"
                 "- Host volume 2σ drop\n"
                 "- HEC token silence\n"
                 "- Host data silent with heartbeat"
@@ -1315,8 +1362,143 @@ def readme() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Saved searches (alerts) — rendered from the same search cores as the dashboards
+# ---------------------------------------------------------------------------
+
+SAVEDSEARCHES = ROOT / "default" / "savedsearches.conf"
+
+SS_HEADER = """# GENERATED by tools/build_dashboards.py — edit the generator, not this file.
+# Scheduled alerts are disabled on install so this app cannot email or page
+# until an admin enables them and configures notification settings in Splunk Web.
+# Do not store SMTP passwords, API tokens, or Slack webhook URLs in this file.
+"""
+
+SS_INGESTION = r"""
+| tstats count as count where index=`exec_health_idx` earliest=-7d@h latest=@h by _time span=1h
+| timechart span=1h sum(count) as count
+| fillnull value=0 count
+| predict count as prediction future_timespan=0 holdback=0 upper95=upper lower95=lower algorithm=LLP5
+| tail 1
+| eval deviation_pct=if(prediction>0, round(((count-prediction)/prediction)*100, 1), 0)
+| where isnotnull(lower) AND count < lower
+""".strip()
+
+SS_HOST_DROP = host_baseline_core() + r"""
+| where baseline_state="ALERT"
+| table _time, host, events, mean_vol, stdev_vol, lower_bound, z_score, baseline_state
+"""
+
+SS_HEC_SILENCE = hec_state_core() + r"""
+| where hec_state="ALERT"
+| table token, token_label, owner, baseline_eps, recent_events, silent_minutes
+"""
+
+SS_DATA_SILENT = r"""
+| tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) earliest=-24h latest=now by index host
+| eval kind=if(index="_internal", "heartbeat", "data")
+| stats max(eval(if(kind="data", last_seen, null()))) as last_data, max(eval(if(kind="heartbeat", last_seen, null()))) as last_heartbeat by host
+| eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat
+| eval state=case(isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "HEARTBEAT ONLY", data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "DATA SILENT", 1=1, "OK")
+| where state="DATA SILENT" OR state="HEARTBEAT ONLY"
+| eval last_data_received=strftime(last_data, "%Y-%m-%d %H:%M:%S"), last_internal_heartbeat=strftime(last_heartbeat, "%Y-%m-%d %H:%M:%S")
+| table host, last_data_received, last_internal_heartbeat, data_age_sec, heartbeat_age_sec, state
+""".strip()
+
+# Shared alert settings. Per-entity alerts use digest_mode=0 because Splunk only
+# applies alert.suppress.fields to per-result alerting.
+SS_COMMON = [
+    ("enableSched", "0"),
+    ("realtime_schedule", "1"),
+    ("schedule_window", "auto"),
+    ("action.email", "0"),
+    ("alert.expires", "24h"),
+    ("alert.suppress", "1"),
+    ("alert.track", "1"),
+    ("alert_type", "number of events"),
+    ("alert_comparator", "greater than"),
+    ("alert_threshold", "0"),
+    ("request.ui_dispatch_view", "search"),
+    ("display.general.type", "statistics"),
+    ("display.page.search.tab", "statistics"),
+]
+
+SAVED_SEARCHES = [
+    (
+        "Exec Health - Ingestion below predicted lower bound",
+        SS_INGESTION,
+        "Fires when the last complete hour of indexed volume falls below the predict() 95% lower bound over the previous 7 days. Runs hourly (each run scores the hour that just closed), so weekend/after-hours seasonality is expected rather than flagged.",
+        [
+            ("cron_schedule", "7 * * * *"),
+            ("dispatch.earliest_time", "-7d@h"),
+            ("dispatch.latest_time", "@h"),
+            ("alert.digest_mode", "1"),
+            ("alert.severity", "4"),
+            ("alert.suppress.period", "1h"),
+        ],
+    ),
+    (
+        "Exec Health - Host volume 2-sigma drop",
+        SS_HOST_DROP,
+        "Per-host volume in the latest complete 15-minute bucket vs that host's prior 24 hours (zero-filled, so a host that drops to 0 events is caught). Alerts when volume is more than exec_health_sigma standard deviations below the host mean.",
+        [
+            ("cron_schedule", "*/15 * * * *"),
+            ("dispatch.earliest_time", "-25h@m"),
+            ("dispatch.latest_time", "@m"),
+            ("alert.digest_mode", "0"),
+            ("alert.severity", "4"),
+            ("alert.suppress.fields", "host"),
+            ("alert.suppress.period", "1h"),
+        ],
+    ),
+    (
+        "Exec Health - HEC token silence",
+        SS_HEC_SILENCE,
+        "Flags HEC tokens whose previous hour averaged at least exec_health_hec_baseline_eps events/sec and that sent nothing in the last exec_health_hec_silence_min complete minutes.",
+        [
+            ("cron_schedule", "*/5 * * * *"),
+            ("dispatch.earliest_time", "-2h@m"),
+            ("dispatch.latest_time", "-1m@m"),
+            ("alert.digest_mode", "0"),
+            ("alert.severity", "5"),
+            ("alert.suppress.fields", "token"),
+            ("alert.suppress.period", "30m"),
+        ],
+    ),
+    (
+        "Exec Health - Host data silent with heartbeat",
+        SS_DATA_SILENT,
+        "Distinguishes a host that is still phoning home in _internal from a host that has stopped sending indexed data.",
+        [
+            ("cron_schedule", "*/15 * * * *"),
+            ("dispatch.earliest_time", "-24h"),
+            ("dispatch.latest_time", "now"),
+            ("alert.digest_mode", "0"),
+            ("alert.severity", "4"),
+            ("alert.suppress.fields", "host"),
+            ("alert.suppress.period", "1h"),
+        ],
+    ),
+]
+
+
+def render_savedsearches() -> str:
+    out = [SS_HEADER.rstrip("\n")]
+    for name, search, description, specific in SAVED_SEARCHES:
+        lines = [ln.rstrip() for ln in search.strip().splitlines() if ln.strip()]
+        body = " \\\n".join(lines)
+        out.append(f"\n[{name}]")
+        out.append(f"search = {body}")
+        out.append(f"description = {description}")
+        for key, value in sorted(specific + SS_COMMON):
+            out.append(f"{key} = {value}")
+    return "\n".join(out) + "\n"
+
+
 def main() -> None:
     VIEWS.mkdir(parents=True, exist_ok=True)
+    SAVEDSEARCHES.write_text(render_savedsearches(), encoding="utf-8")
+    print(f"wrote {SAVEDSEARCHES.relative_to(ROOT)}")
     dashboards = {
         "executive_overview.xml": (
             "Splunk Health Derek+",

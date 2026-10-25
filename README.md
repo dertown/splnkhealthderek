@@ -12,7 +12,7 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 
 | View | Purpose |
 | --- | --- |
-| **Splunk Health Derek+** | GREEN / YELLOW / RED rollup, GB/day vs 7-day MA, instance HealthReporter, search-head load, silent hosts, `_introspection` CPU/memory |
+| **Splunk Health Derek+** | GREEN / YELLOW / RED rollup, GB/day vs 7-day MA, splunkd health report, search-head load, silent hosts, `_introspection` CPU/memory |
 | **Host Heartbeat & Ingestion Latency** | Last indexed data vs last `_internal` heartbeat, `metadata type=hosts` inventory, 24-hour 2σ baseline table |
 | **HEC Token Performance** | Events per HEC token, 1-hour rolling window, flag if a ~100 eps token sits at 0 for 5+ minutes |
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
@@ -20,10 +20,10 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 
 Saved searches (all **disabled** on install):
 
-- Ingestion below `predict()` 95% lower bound (every 15 minutes)
-- Host volume 2σ drop
-- HEC token silence
-- Host still heartbeating but not sending data
+- Ingestion below `predict()` 95% lower bound (hourly, scores the hour that just closed)
+- Host volume 2σ drop (every 15 minutes, latest complete 15-minute bucket, zero-filled)
+- HEC token silence (every 5 minutes)
+- Host still heartbeating but not sending data (every 15 minutes)
 
 The app does not use cluster-manager REST, SHC captain REST, custom Python, modular inputs, `indexes.conf`, or MLTK. `app.manifest` targets search heads only. That keeps Splunk Cloud AppInspect self-service install viable (0 failures, 0 errors, 0 manual checks on `private_app` / `private_victoria` / `private_classic`).
 
@@ -34,13 +34,14 @@ The app does not use cluster-manager REST, SHC captain REST, custom Python, modu
 | Event volume, last data per host | event indexes (`index=*` via macro `exec_health_idx`) | `tstats` |
 | Internal heartbeat | `_internal` | `tstats latest(_time)` |
 | GB/day | `_internal` `license_usage.log` `type=Usage` | event search (already aggregated) |
-| Instance feature health | `_internal` `component=HealthReporter` | event search |
+| Instance feature health | `_internal` `health.log` `component=PeriodicHealthReporter` (`feature`, `color`) | event search |
 | Search head load | `_introspection` `sourcetype=splunk_resource_usage` | event search |
-| HEC throughput | `_internal` `metrics.log` `group=http` plus `component=HttpInputDataHandler` | event search |
-| Edge Processor | `_metrics` `sourcetype=edge-metrics` | `mstats` |
+| HEC throughput | `_introspection` `sourcetype=http_event_collector_metrics` `data.series=http_event_collector_token` | event search |
+| HEC request failures | `_internal` `component=HttpInputDataHandler` (`token name=`) | event search |
+| Edge Processor | `_metrics` (`processor_events_in_total` and related counters) | `mstats rate_sum` |
 | SC4S / syslog | macros `exec_health_idx` / `exec_health_sc4s_idx` | `tstats` + optional event search |
 
-The viewing role needs search access to `_internal` and `_introspection`. Add `_metrics` if you use Edge Processor. On Splunk Cloud, `sc_admin` has this by default; grant those indexes to other roles that should open the app.
+The viewing role needs search access to `_internal` and `_introspection` (HEC per-token metrics live in `_introspection`). Add `_metrics` if you use Edge Processor. On Splunk Cloud, `sc_admin` has this by default; grant those indexes to other roles that should open the app.
 
 ## Install
 
@@ -50,7 +51,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/` Python, no `
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.2.4.spl`.
+3. Upload `dist/splunk_exec_health-1.2.5.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -92,12 +93,15 @@ Override these macros in **Settings > Advanced search > Search macros** (or `loc
 | `exec_health_heartbeat_sec` | `600` | Seconds without `_internal` → missing heartbeat |
 | `exec_health_drop_red_pct` | `50` | % below 7-day MA → RED |
 | `exec_health_drop_yellow_pct` | `20` | % below 7-day MA → YELLOW |
-| `exec_health_hec_baseline_eps` | `100` | Rolling EPS before silence is RED |
+| `exec_health_hec_baseline_eps` | `100` | Previous-hour events/sec before silence is RED |
 | `exec_health_hec_silence_min` | `5` | Silent minutes to flag a HEC token |
 | `exec_health_sc4s` | `sourcetype=sc4s* OR ...` | Syslog / SC4S filter |
-| `exec_health_edge_mstats` | `index=_metrics sourcetype=edge-metrics` | Edge Processor metrics |
+| `exec_health_health_report` | `index=_internal source=*health.log component=PeriodicHealthReporter` | splunkd health report |
+| `exec_health_hec_metrics` | `index=_introspection sourcetype=http_event_collector_metrics data.series=http_event_collector_token` | Per-token HEC metrics |
+| `exec_health_hec_normalize` | `eval token='data.token_name', ...` | Maps HEC metric fields |
+| `exec_health_edge_mstats` | `index=_metrics` | Edge Processor metrics |
 
-Map HEC token IDs to display names in `lookups/hec_token_map.csv`. Columns are `token,token_name,owner`. Store only the identifier that already appears in `_internal` metrics — never the HEC token secret.
+Map HEC token input names to display names in `lookups/hec_token_map.csv`. Columns are `token,token_name,owner`, where `token` is the HEC input name exactly as it appears in `data.token_name` — never the HEC token secret.
 
 ## Heartbeat vs data
 
@@ -113,7 +117,7 @@ DATA SILENT is the failure mode this app is built to catch: the UF/HF is up, the
 
 ## Edge Processor empty panels
 
-Edge tiles use `mstats` against `_metrics` / `sourcetype=edge-metrics`. If those panels are empty, Edge Processor is not emitting metrics to this search head; `_internal` edge / Ingest Actions logs still populate the lower tables.
+Edge tiles use `mstats rate_sum` against the Edge Processor counters in `_metrics`. If those panels are empty, Edge Processor is not emitting metrics to this search head; `_internal` edge / Ingest Actions logs still populate the lower tables.
 
 **Filter efficiency** is `(events_in - events_out) / events_in`. Treat a high percentage as “pipelines are dropping or routing away from indexers,” not as a hardware fault by itself.
 
@@ -121,22 +125,23 @@ Edge tiles use `mstats` against `_metrics` / `sourcetype=edge-metrics`. If those
 
 - Prefer `tstats` / `mstats` over raw event scans.
 - License GB/day reads `license_usage.log`, which is already summarized.
-- Default auto-refresh is 5 minutes (15 minutes for the 8-day license series).
+- Default auto-refresh is 5 minutes (15 minutes for the 15-day license series, which covers complete days only).
 - Narrow `exec_health_idx` if `index=*` is too wide (recommended on Splunk Cloud).
 
 This app is an executive overlay. It does not replace the Cloud Monitoring Console.
 
 ## Rebuild dashboards / package
 
-Dashboard Studio XML is generated from `tools/build_dashboards.py` (development only — not shipped in the Cloud `.spl`):
+Dashboard Studio XML **and `default/savedsearches.conf`** are generated from `tools/build_dashboards.py` (development only — not shipped in the Cloud `.spl`). Edit the generator, not the generated files. `tools/validate_keys.py` checks every conf key, Dashboard Studio option, macro, lookup and cross-reference; `package.sh` runs it and refuses to package on errors.
 
 ```bash
 python3 tools/build_dashboards.py
+python3 tools/validate_keys.py
 bash tools/package.sh
 ```
 
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, no Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.2.4.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.2.5.spl --included-tags private_app
 ```

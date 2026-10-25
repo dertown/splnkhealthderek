@@ -20,6 +20,8 @@ if [[ -z "$VERSION" ]]; then
   exit 1
 fi
 
+python3 "$ROOT/tools/validate_keys.py"
+
 python3 - <<PY
 import json
 from pathlib import Path
