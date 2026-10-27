@@ -4,6 +4,7 @@
   <view name="hec_performance" />
   <view name="sc4s_edge" />
   <view name="data_topology" />
+  <view name="data_quality_agent" />
   <collection label="Help">
     <view name="readme" />
     <view name="about" />

@@ -542,6 +542,152 @@ search `exec_health_hec_metrics`
 """.strip()
 
 
+def dq_agent_findings_core() -> str:
+    """Diagnose Splunk Health traffic lights vs learned baselines.
+
+    Emits one row per issue with a suggested fix. Covers ingestion, hosts, HEC,
+    instance health, search CPU, SC4S, and Edge. The agent never writes Splunk
+    configuration; humans review the row and must type APPLY plus Run in Search
+    before a decision is recorded in dq_agent_approvals.
+    """
+    host_findings = host_baseline_core() + r"""
+| where baseline_state="ALERT"
+| eval issue="Host volume below learned 2-sigma bound", severity="RED", entity=host, evidence="events="+tostring(events)+", mean="+tostring(mean_vol)+", lower="+tostring(lower_bound)+", z="+tostring(z_score), suggested_fix="Compare this host's sourcetypes to the prior 24 hours. Repair the stopped monitor, UF outputs.conf, or an index-time filter. Do not suppress the host without change control.", fix_type="runbook_input", proposed_config="none — human repairs the forwarder or input", action="Review"
+| head 25
+| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+"""
+    hec_findings = hec_state_core() + r"""
+| where hec_state="ALERT"
+| eval issue="HEC token silent vs learned baseline", severity="RED", entity=token_label, evidence="baseline_eps="+tostring(baseline_eps)+", recent_events="+tostring(recent_events)+", silent_min="+tostring(silent_minutes), suggested_fix="In Splunk Web open Settings > Data inputs > HTTP Event Collector and confirm this input is enabled. Then check the sender, network path, and index routing. Never paste the HEC token secret into this app.", fix_type="runbook_hec", proposed_config="none — human checks the HEC input and sender", action="Review"
+| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+"""
+    return (
+        r"""
+| makeresults
+| eval _seed=1
+| append [
+    | tstats count as count where index=`exec_health_idx` earliest=-7d@h latest=@h by _time span=1h
+    | timechart span=1h sum(count) as count
+    | fillnull value=0 count
+    | predict count as prediction future_timespan=0 holdback=0 upper95=upper lower95=lower algorithm=LLP5
+    | tail 1
+    | where isnotnull(lower) AND count < lower
+    | eval issue="Ingestion below learned predict() bound", severity="RED", entity="environment", evidence="hour_count="+tostring(count)+", predict="+tostring(round(prediction,0))+", lower="+tostring(round(lower,0)), suggested_fix="Identify which index dropped vs the 7-day seasonal baseline. Check UF/HF phone-home, HEC tokens, and syslog listeners. Do not raise the learned bound to hide a real drop.", fix_type="investigate", proposed_config="none — human investigates the dropped source", action="Review"
+    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+]
+| append [
+    | tstats count as events where index=`exec_health_idx` earliest=-8d@h latest=@h by _time span=1h index
+    | streamstats window=168 current=f avg(events) as ma_7d by index
+    | where _time >= relative_time(now(), "-1h@h") AND _time < relative_time(now(), "@h")
+    | eval drop_pct=if(ma_7d>0, round(((ma_7d-events)/ma_7d)*100, 1), 0)
+    | where drop_pct >= `exec_health_drop_red_pct` AND ma_7d>10
+    | eval issue="Index volume below 7-day moving average", severity="RED", entity=index, evidence="last_hour="+tostring(events)+", ma_7d="+tostring(round(ma_7d,0))+", drop_pct="+tostring(drop_pct)+"%", suggested_fix="Confirm whether this index was expected to be quiet (maintenance, source retirement). If not, check the last forwarder or HEC route that writes here. Macro exec_health_idx can be narrowed after review.", fix_type="runbook_index", proposed_config="optional: Settings > Search macros > exec_health_idx", action="Review"
+    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+]
+| append [
+"""
+        + host_findings
+        + "]\n| append [\n"
+        + hec_findings
+        + r"""
+]
+| append [
+    | tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) earliest=-24h latest=now by index host
+    | eval kind=if(index="_internal", "heartbeat", "data")
+    | stats max(eval(if(kind="data", last_seen, null()))) as last_data, max(eval(if(kind="heartbeat", last_seen, null()))) as last_heartbeat by host
+    | eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat
+    | eval state=case(isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "HEARTBEAT ONLY", data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "DATA SILENT", (isnull(last_data) OR data_age_sec > `exec_health_silence_sec`) AND (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_heartbeat_sec`), "HOST DOWN", 1=1, "OK")
+    | where state="DATA SILENT" OR state="HEARTBEAT ONLY" OR state="HOST DOWN"
+    | eval issue=case(state="HOST DOWN", "Host down — no heartbeat and no indexed data", 1=1, "Host data silent while heartbeat is fresh")
+    | eval severity="RED", entity=host, evidence="state="+state+", data_age_sec="+tostring(data_age_sec)+", heartbeat_age_sec="+tostring(heartbeat_age_sec)
+    | eval suggested_fix=case(state="HOST DOWN", "The host is not phoning home and not sending data. Check power, network, and splunkd. Do not remove the host from this app.", 1=1, "The UF is up but indexed data stopped. Check outputs.conf, blocked queues, sourcetype transforms, and the destination index. Restart the forwarder only after change control.")
+    | eval fix_type=if(state="HOST DOWN", "runbook_host_down", "runbook_uf")
+    | eval proposed_config=if(state="HOST DOWN", "none — human restores the endpoint", "none — human repairs the UF pipeline"), action="Review"
+    | head 40
+    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+]
+| append [
+    search `exec_health_health_report` earliest=-15m
+    | eval health_val=lower(coalesce(color, "unknown"))
+    | stats latest(health_val) as health_val by host, feature
+    | eval score=case(health_val="green", 2, health_val="yellow", 1, health_val="red", 0, 1=1, 1)
+    | where score<2
+    | eval issue="Instance health feature not GREEN", severity=if(score=0, "RED", "YELLOW"), entity=host." / ".feature, evidence="host="+host+", feature="+feature+", color="+health_val, suggested_fix="On that instance inspect the red or yellow feature (disk, buckets, splunkd). Do not clear or suppress the health report from this dashboard.", fix_type="runbook_instance", proposed_config="none — human inspects the instance feature", action="Review"
+    | sort score, host, feature
+    | head 25
+    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+]
+| append [
+    | tstats count as events where index=`exec_health_idx` earliest=-15m latest=now
+    | appendpipe [ stats count | where count=0 | eval events=0 ]
+    | where events=0
+    | eval issue="No live indexed events in the last 15 minutes", severity="RED", entity="environment", evidence="events_15m=0", suggested_fix="Check UF/HF phone-home, HEC tokens, syslog listeners, and whether macro exec_health_idx excludes the indexes that should be live.", fix_type="runbook_ingest_live", proposed_config="optional: Settings > Search macros > exec_health_idx", action="Review"
+    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+]
+| append [
+    search `exec_health_license_usage` earliest=-8d@d latest=@d
+    | bin _time span=1d
+    | stats sum(b) as bytes by _time
+    | eval daily_GB=bytes/1024/1024/1024
+    | streamstats window=7 current=f avg(daily_GB) as ma_7d
+    | sort 0 -_time
+    | head 1
+    | eval drop_pct=if(ma_7d>0, round(((ma_7d-daily_GB)/ma_7d)*100, 1), 0)
+    | eval health_score=case(isnull(ma_7d), 2, drop_pct>=`exec_health_drop_red_pct`, 0, drop_pct>=`exec_health_drop_yellow_pct`, 1, 1=1, 2)
+    | where health_score<2
+    | eval issue="Daily ingestion below 7-day moving average", severity=if(health_score=0, "RED", "YELLOW"), entity="environment", evidence="daily_GB="+tostring(round(daily_GB,2))+", ma_7d="+tostring(round(ma_7d,2))+", drop_pct="+tostring(drop_pct)+"%", suggested_fix="Compare indexes and sourcetypes for yesterday vs the prior week. Confirm maintenance or a retired source before treating this as an outage.", fix_type="runbook_license_ma", proposed_config="none — human reviews license usage", action="Review"
+    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+]
+| append [
+    search index=_introspection sourcetype=splunk_resource_usage component=Hostwide earliest=-15m
+    | eval cpu_pct=coalesce('data.cpu_system_pct', 0)+coalesce('data.cpu_user_pct', 0)
+    | stats avg(cpu_pct) as avg_cpu, max(cpu_pct) as max_cpu by host
+    | eval avg_cpu=round(avg_cpu, 1), max_cpu=round(max_cpu, 1)
+    | where max_cpu>=75
+    | eval issue="Instance CPU above health bound", severity=if(max_cpu>=90, "RED", "YELLOW"), entity=host, evidence="avg_cpu="+tostring(avg_cpu)+"%, max_cpu="+tostring(max_cpu)+"%", suggested_fix="List expensive searches on this host and pause non-essential scheduled searches after change control. Do not kill user searches from this dashboard.", fix_type="runbook_sh", proposed_config="none — human manages search load", action="Review"
+    | head 15
+    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+]
+| append [
+    search index=`exec_health_sc4s_idx` `exec_health_sc4s` (error OR warn OR fail OR "connection refused" OR hang OR dropped) earliest=-15m
+    | stats count as sc4s_issues, dc(sourcetype) as sourcetypes by host
+    | where sc4s_issues>0
+    | eval issue="SC4S / syslog errors in the last 15 minutes", severity="RED", entity=host, evidence="issues="+tostring(sc4s_issues)+", sourcetypes="+tostring(sourcetypes), suggested_fix="Check the collector process, destination port, TLS, and that the destination index exists. Use this app's SC4S view for the time series.", fix_type="runbook_sc4s", proposed_config="none — human repairs the syslog collector", action="Review"
+    | sort 0 -sc4s_issues
+    | head 15
+    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+]
+| append [
+    | mstats max(queue_size_bytes) as queue_size_bytes, max(queue_max_bytes) as queue_max_bytes, rate_sum(export_destination_errors_total) as export_errors_per_sec, rate_sum(processor_events_in_total) as events_in_eps, rate_sum(processor_events_out_total) as events_out_eps where `exec_health_edge_mstats` earliest=-15m latest=now by host
+    | eval queue_fill_pct=if(queue_max_bytes>0, round(queue_size_bytes/queue_max_bytes*100, 1), null())
+    | eval export_errors_per_sec=round(coalesce(export_errors_per_sec, 0), 3)
+    | eval events_in_eps=round(coalesce(events_in_eps, 0), 2), events_out_eps=round(coalesce(events_out_eps, 0), 2)
+    | where export_errors_per_sec>0 OR queue_fill_pct>=80 OR (events_in_eps>0 AND events_out_eps=0)
+    | eval issue="Edge / Ingest Processor queue or export unhealthy", severity="RED", entity=host, evidence="queue_fill_pct="+tostring(queue_fill_pct)+", export_errors_per_sec="+tostring(export_errors_per_sec)+", in_eps="+tostring(events_in_eps)+", out_eps="+tostring(events_out_eps), suggested_fix="Inspect Edge pipelines for a blocked destination or a filter that drops everything. Do not clear the queue from this dashboard.", fix_type="runbook_edge", proposed_config="none — human repairs the processor pipeline", action="Review"
+    | head 15
+    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+]
+| where isnull(_seed)
+| append [
+    search index=_internal source=*metrics.log group=tcpin_connections earliest=-2h
+    | eval entity=coalesce(sourceHost, hostname)
+    | eval tool_fwdType=lower(trim(coalesce(fwdType, "")))
+    | eval tool_conn=lower(trim(coalesce(connectionType, "")))
+    | where isnotnull(entity)
+    | stats latest(tool_fwdType) as tool_fwdType, latest(tool_conn) as tool_conn by entity
+]
+| append [
+    search index=_internal sourcetype=splunkd (log_level=ERROR OR log_level=WARN) earliest=-2h
+    | eval entity=host
+    | where isnotnull(entity)
+    | stats count as tool_err_count, latest(component) as tool_err_component by entity
+]
+| eventstats latest(tool_fwdType) as tool_fwdType, latest(tool_conn) as tool_conn, latest(tool_err_component) as tool_err_component, max(tool_err_count) as tool_err_count by entity
+| where isnotnull(issue)
+""".strip()
+    )
+
+
 def executive_overview() -> dict:
     return {
         "title": "Splunk Health Derek+",
@@ -569,6 +715,7 @@ def executive_overview() -> dict:
             "ds_introspection": ds("Hostwide introspection", Q_INTROSPECTION),
             "ds_host_alerts": ds("Host 2-sigma alerts", Q_HOST_ALERTS, "-25h@m", "@m"),
             "ds_topo_overview": ds("Data topology preview", Q_TOPO_OVERVIEW),
+            "ds_dq_preview": ds("Data quality agent preview", Q_DQ_AGENT_PREVIEW, "-24h", "now"),
         },
         "visualizations": {
             "viz_header": md(
@@ -636,6 +783,23 @@ def executive_overview() -> dict:
             "viz_intro": table("Indexer/SH resource usage (_introspection)", "ds_introspection", count=15),
             "viz_host_alerts": table("Hosts below 2σ 24-hour baseline (latest complete 15m)", "ds_host_alerts", count=25),
             "viz_components": table("Health component scores", "ds_health_components", count=20),
+            "viz_dq_preview": {
+                **table(
+                    "Derek+ Data Quality Agent — open findings (click through; the agent never applies a fix unattended)",
+                    "ds_dq_preview",
+                    count=8,
+                ),
+                "eventHandlers": [
+                    {
+                        "type": "drilldown.linkToDashboard",
+                        "options": {
+                            "app": "splunk_exec_health",
+                            "dashboard": "data_quality_agent",
+                            "newTab": False,
+                        },
+                    }
+                ],
+            },
             "viz_footer": md(
                 "Baselines use **streamstats** (host volume) and **predict**/moving average (daily GB), not static thresholds. "
                 "Instance health is the splunkd health report (`health.log`, PeriodicHealthReporter); search-head load is `_introspection` (no cluster-manager REST — Splunk Cloud compatible). "
@@ -659,7 +823,8 @@ def executive_overview() -> dict:
                 block("viz_intro", 600, 1070, 600, 300),
                 block("viz_host_alerts", 0, 1370, 700, 320),
                 block("viz_components", 700, 1370, 500, 320),
-                block("viz_footer", 0, 1690, 1200, 110),
+                block("viz_dq_preview", 0, 1690, 1200, 300),
+                block("viz_footer", 0, 1990, 1200, 110),
             ]
         ),
     }
@@ -861,6 +1026,25 @@ Q_HEC_STATE = hec_state_core() + r"""
 | eval _color_rank=case(hec_state="ALERT", 1, hec_state="YELLOW", 2, 1=1, 3)
 | table token, token_label, owner, recent_events, recent_eps, baseline_eps, silent_minutes, hec_state, _color_rank
 | sort _color_rank, token_label
+"""
+
+Q_DQ_AGENT_FINDINGS = dq_agent_findings_core() + r"""
+| eval finding_id=sha256(issue."|".entity)
+| lookup dq_agent_playbooks fix_type OUTPUT playbook_name, likely_cause, confidence, tool_plan, splunk_web_path
+| lookup dq_agent_approvals finding_id OUTPUT decision, decided_at, actor
+| eval status=case(decision="approve", "approved", decision="dismiss", "dismissed", 1=1, "open")
+| eval action=if(status="open", "Review", "Resolved")
+| eval agent_thought="OBSERVE: "+issue+" on "+entity+". INVESTIGATE: "+coalesce(tool_plan, "learned baselines")+". TOOLS: fwdType="+coalesce(tool_fwdType, "n/a")+" conn="+coalesce(tool_conn, "n/a")+" err_component="+coalesce(tool_err_component, "none")+" err_count="+coalesce(tostring(tool_err_count), "0")+". HYPOTHESIZE: "+coalesce(likely_cause, "needs human review")+" (confidence "+coalesce(confidence, "n/a")+"). PROPOSE: "+suggested_fix+". ACT: wait for human APPLY — never change Splunk unattended."
+| eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Reply with root cause, confidence, and step-by-step admin actions. Do not request secrets or HEC token values."
+| eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
+| table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank
+| sort _color_rank, issue, entity
+"""
+
+Q_DQ_AGENT_PREVIEW = Q_DQ_AGENT_FINDINGS + r"""
+| where status="open"
+| head 8
+| table severity, issue, entity, likely_cause, confidence, suggested_fix, action, _color_rank
 """
 
 Q_HEC_TOTALS = r"""
@@ -1201,7 +1385,218 @@ def data_topology() -> dict:
     }
 
 
-APP_VERSION = "1.2.5"
+Q_DQ_AGENT_STATUS = r"""
+| where status="open"
+| stats count as issues
+| eval agent_status=if(issues>0, "RED", "GREEN")
+| appendpipe [ stats count | where count=0 | eval issues=0, agent_status="GREEN" ]
+"""
+
+Q_DQ_IMPLEMENT_READY = r"""
+| makeresults
+| eval finding_id="$tok_finding_id$", decision="$tok_decision$", confirm="$tok_confirm$"
+| eval ready=if(confirm="APPLY" AND finding_id!="none" AND finding_id!="" AND (decision="approve" OR decision="dismiss"), 1, 0)
+| eval button_label=if(ready=1, "CLICK TO IMPLEMENT", "TYPE APPLY AFTER A DECISION")
+| eval button_color=if(ready=1, "YELLOW", "N/A")
+| table button_label, button_color, ready
+"""
+
+Q_DQ_AGENT_ASK = r"""
+| eval q=lower("$tok_ask$")
+| eval q=replace(q, "[^a-z0-9 ]", "")
+| where q="all" OR q="" OR like(lower(issue." ".entity." ".coalesce(likely_cause, "")." ".suggested_fix." ".coalesce(fix_type, "")), "%".q."%")
+"""
+
+
+def data_quality_agent() -> dict:
+    findings_table = table(
+        "Agent work queue — click a row (Review). The agent never applies a fix unattended.",
+        "ds_dq_asked",
+        count=25,
+    )
+    findings_table["eventHandlers"] = [
+        {
+            "type": "drilldown.setToken",
+            "options": {
+                "tokens": [
+                    {"token": "tok_finding_id", "key": "row.finding_id.value"},
+                    {"token": "tok_entity", "key": "row.entity.value"},
+                ]
+            },
+        }
+    ]
+    findings_table["options"]["columnFormat"] = {
+        "action": {"align": "center"},
+        "severity": {"align": "center"},
+        "status": {"align": "center"},
+        "confidence": {"align": "center"},
+    }
+    return {
+        "title": "Derek+ Data Quality Agent",
+        "description": "Agentic health loop: instance, ingest, hosts, HEC, SC4S, Edge — human Act required.",
+        "defaults": defaults(),
+        "inputs": {
+            "input_global_trp": timerange("-24h@h,now"),
+            "input_ask": {
+                "type": "input.text",
+                "title": "Ask the agent (all = every finding)",
+                "options": {"token": "tok_ask", "defaultValue": "all"},
+            },
+            "input_finding": {
+                "type": "input.text",
+                "title": "Selected finding",
+                "options": {"token": "tok_finding_id", "defaultValue": "none"},
+            },
+            "input_entity": {
+                "type": "input.text",
+                "title": "Entity",
+                "options": {"token": "tok_entity", "defaultValue": "none"},
+            },
+            "input_decision": {
+                "type": "input.dropdown",
+                "title": "Human decision",
+                "options": {
+                    "token": "tok_decision",
+                    "defaultValue": "review",
+                    "items": [
+                        {"label": "Review only (no change)", "value": "review"},
+                        {"label": "Dismiss this finding", "value": "dismiss"},
+                        {"label": "Approve suggested fix", "value": "approve"},
+                    ],
+                },
+            },
+            "input_confirm": {
+                "type": "input.text",
+                "title": "Type APPLY to implement (required)",
+                "options": {"token": "tok_confirm", "defaultValue": "NO"},
+            },
+        },
+        "dataSources": {
+            "ds_dq_findings": ds("Agent cycle findings", Q_DQ_AGENT_FINDINGS, "-24h", "now"),
+            "ds_dq_asked": chain("Asked findings", "ds_dq_findings", Q_DQ_AGENT_ASK),
+            "ds_dq_status": chain("Agent status", "ds_dq_findings", Q_DQ_AGENT_STATUS),
+            "ds_dq_selected": chain(
+                "Selected finding",
+                "ds_dq_findings",
+                """
+| where finding_id="$tok_finding_id$"
+| table finding_id, severity, issue, entity, evidence, likely_cause, confidence, suggested_fix, splunk_web_path, proposed_config, status, action
+""".strip(),
+            ),
+            "ds_dq_thought": chain(
+                "Agent thought",
+                "ds_dq_findings",
+                """
+| where finding_id="$tok_finding_id$"
+| table agent_thought, tool_plan, tool_fwdType, tool_conn, tool_err_component, tool_err_count, playbook_name
+""".strip(),
+            ),
+            "ds_dq_brief": chain(
+                "AI briefing",
+                "ds_dq_findings",
+                """
+| where finding_id="$tok_finding_id$"
+| table ai_brief
+""".strip(),
+            ),
+            "ds_dq_ready": ds("Implement control", Q_DQ_IMPLEMENT_READY, "0", "now", refresh="30s"),
+        },
+        "visualizations": {
+            "viz_header": md(
+                "# Derek+ Data Quality Agent\n"
+                "**Goal:** keep Splunk Health GREEN — instance features, live ingest, silent hosts, search CPU, HEC, SC4S, and Edge. "
+                "**Loop:** Observe → Investigate (tools) → Hypothesize (playbooks) → Propose → **Human Act**. "
+                "The agent **cannot** restart forwarders, edit `inputs.conf`, or change HEC tokens. You must type **APPLY** and press **Run**."
+            ),
+            "viz_status": single_status("Agent status", "ds_dq_status", "agent_status", "issues"),
+            "viz_count": single_number("Open findings", "ds_dq_status", "issues", "", spark=None, precision=0),
+            "viz_policy": md(
+                "## Tools the agent uses\n"
+                "- Learned baselines: `predict()`, host 2-sigma, HEC silence, heartbeat vs data, license 7-day MA\n"
+                "- `health.log` features · `_introspection` CPU · SC4S errors · Edge `mstats` queues\n"
+                "- `tcpin_connections` forwarder type · `_internal` ERROR/WARN component\n"
+                "- Playbooks in `dq_agent_playbooks.csv` (no secrets) · memory: `dq_agent_approvals.csv`"
+            ),
+            "viz_cycle": md(
+                "## How to work a finding\n"
+                "1. **Ask** the agent (or leave `all`). 2. Click **Review** on a row. "
+                "3. Read **thought** (what it observed/investigated) and the **AI briefing** (paste into Splunk AI Assistant or your LLM if you want a second opinion). "
+                "4. Choose Dismiss or Approve, type **APPLY**, click implement, press **Run** in Search."
+            ),
+            "viz_findings": findings_table,
+            "viz_thought": table("Agent thought (this cycle)", "ds_dq_thought", count=3),
+            "viz_brief": table("AI briefing — copy to your LLM; the app never sends this off-box", "ds_dq_brief", count=1),
+            "viz_selected": table("Proposed fix for the selected finding", "ds_dq_selected", count=5),
+            "viz_implement": {
+                "type": "splunk.singlevalue",
+                "title": "Act — implement (opens Search; you must press Run)",
+                "dataSources": {"primary": "ds_dq_ready"},
+                "showLastUpdated": True,
+                "showProgressBar": False,
+                "options": {
+                    "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
+                    "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+                    "backgroundColor": "transparent",
+                    "majorFontSize": 22,
+                },
+                "context": {"statusColors": STATUS_COLORS},
+                "eventHandlers": [
+                    {
+                        "type": "drilldown.linkToSearch",
+                        "options": {
+                            "type": "custom",
+                            "newTab": True,
+                            "query": (
+                                "| inputlookup dq_agent_approvals "
+                                "| append [ "
+                                "| makeresults "
+                                "| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\", "
+                                "confirm=\"$tok_confirm$\", entity=\"$tok_entity$\", "
+                                "actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), "
+                                "note=\"human_in_the_loop\" "
+                                "| where confirm=\"APPLY\" AND finding_id!=\"none\" AND finding_id!=\"\" "
+                                "AND (decision=\"approve\" OR decision=\"dismiss\") "
+                                "| table finding_id, decision, actor, decided_at, note, entity "
+                                "] "
+                                "| outputlookup dq_agent_approvals"
+                            ),
+                        },
+                    }
+                ],
+            },
+            "viz_footer": md(
+                "This agent does **not** call an external LLM from Splunk (no API keys in the app). "
+                "The AI briefing is local context you can paste into Splunk AI Assistant or an approved model. "
+                "Enable **Exec Health - Data quality agent report** to email open findings. "
+                "Never put passwords, HEC secrets, or webhook URLs in the lookups."
+            ),
+        },
+        "layout": grid(
+            [
+                block("viz_header", 0, 0, 1200, 130),
+                block("viz_status", 0, 130, 300, 160),
+                block("viz_count", 300, 130, 300, 160),
+                block("viz_policy", 600, 130, 600, 160),
+                block("viz_cycle", 0, 290, 1200, 110),
+                block("viz_findings", 0, 400, 1200, 340),
+                block("viz_thought", 0, 740, 1200, 200),
+                block("viz_brief", 0, 940, 1200, 180),
+                block("viz_selected", 0, 1120, 800, 240),
+                block("viz_implement", 800, 1120, 400, 240),
+                block("viz_footer", 0, 1360, 1200, 110),
+            ],
+            extra_inputs=[
+                "input_ask",
+                "input_finding",
+                "input_entity",
+                "input_decision",
+                "input_confirm",
+            ],
+        ),
+    }
+
+
+APP_VERSION = "1.5.0"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -1226,7 +1621,8 @@ def about() -> dict:
                 "- **Heartbeat vs data** — `_internal` phone-home versus last indexed event (`tstats`)\n"
                 "- **HEC tokens** — rolling 1-hour throughput and silence detection\n"
                 "- **SC4S / syslog** — events per source so a hung collector is visible\n"
-                "- **Edge / Ingest Processors** — in vs out, filter efficiency, dropped or queued data\n\n"
+                "- **Edge / Ingest Processors** — in vs out, filter efficiency, dropped or queued data\n"
+                "- **Derek+ Data Quality Agent** — Observe health tiles and learned ingest bounds, Investigate (tools), Hypothesize (playbooks), Propose, then **Human Act**\n\n"
                 "It is an executive overlay. It does **not** replace the Cloud Monitoring Console or Monitoring Console."
             ),
             "viz_identity": md(
@@ -1247,15 +1643,17 @@ def about() -> dict:
                 "- Instance health from the `_internal` health report (PeriodicHealthReporter); search-head load from `_introspection`\n"
                 "- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n"
                 "- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n"
-                "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n\n"
+                "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n"
+                "- The Data Quality Agent records a decision only after a human types APPLY and presses Run in Search (no Python LLM client, no API keys)\n\n"
                 "Self-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** "
                 "(`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via "
                 "**Apps → Manage apps → Install app from file**."
             ),
             "viz_security": md(
                 "## Security\n"
-                "This app does **not** store SMTP passwords, Slack webhooks, API tokens, HEC token secrets, "
+                "This app does **not** store SMTP passwords, Slack webhooks, API tokens, LLM keys, HEC token secrets, "
                 "certificates, or other credentials. Map HEC token **names** only in `lookups/hec_token_map.csv`. "
+                "Playbooks (`dq_agent_playbooks.csv`) and approvals (`dq_agent_approvals.csv`) hold runbook text only. "
                 "Configure email or Slack on the saved search in Splunk Web after you enable it."
             ),
         },
@@ -1291,7 +1689,8 @@ def readme() -> dict:
                 "- **Host Heartbeat & Ingestion Latency** — last indexed data vs last `_internal` heartbeat; 24-hour 2σ volume baseline\n"
                 "- **HEC Token Performance** — events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n"
                 "- **SC4S Syslog & Edge/Ingest Processors** — syslog sources, Edge in vs out, filter efficiency\n"
-                "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index, and forwarder → indexer\n\n"
+                "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index, and forwarder → indexer\n"
+                "- **Derek+ Data Quality Agent** — agentic loop over health tiles and learned ingest bounds; a human must APPLY\n\n"
                 "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
             ),
             "viz_heartbeat": md(
@@ -1339,7 +1738,8 @@ def readme() -> dict:
                 "- Ingestion below `predict()` 95% lower bound (hourly, last complete hour)\n"
                 "- Host volume 2σ drop\n"
                 "- HEC token silence\n"
-                "- Host data silent with heartbeat"
+                "- Host data silent with heartbeat\n"
+                "- Data quality agent report (open findings + proposed fixes; enable email yourself — the agent never auto-fixes)"
             ),
             "viz_hec": md(
                 "## HEC token names\n"
@@ -1479,6 +1879,19 @@ SAVED_SEARCHES = [
             ("alert.suppress.period", "1h"),
         ],
     ),
+    (
+        "Exec Health - Data quality agent report",
+        Q_DQ_AGENT_FINDINGS + "\n| where status=\"open\"",
+        "Agent cycle report: when Splunk Health tiles or learned ingestion bounds are not GREEN, investigates with tools, attaches a playbook hypothesis, and lists a proposed fix. Enable this search and add an email action in Splunk Web. The search never changes Splunk configuration.",
+        [
+            ("cron_schedule", "12 * * * *"),
+            ("dispatch.earliest_time", "-24h"),
+            ("dispatch.latest_time", "now"),
+            ("alert.digest_mode", "1"),
+            ("alert.severity", "4"),
+            ("alert.suppress.period", "1h"),
+        ],
+    ),
 ]
 
 
@@ -1524,6 +1937,11 @@ def main() -> None:
             "Data Topology",
             "Network topology of data sources, ingest paths, and Splunk receivers.",
             data_topology(),
+        ),
+        "data_quality_agent.xml": (
+            "Derek+ Data Quality Agent",
+            "Agentic health loop: instance, ingest, hosts, HEC, SC4S, Edge — human Act required.",
+            data_quality_agent(),
         ),
         "readme.xml": (
             "README",

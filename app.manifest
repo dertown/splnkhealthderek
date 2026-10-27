@@ -5,7 +5,7 @@
     "id": {
       "group": null,
       "name": "splunk_exec_health",
-      "version": "1.2.5"
+      "version": "1.5.0"
     },
     "author": [
       {
@@ -14,8 +14,8 @@
         "company": null
       }
     ],
-    "releaseDate": "2026-10-25",
-    "description": "Executive-level Splunk infrastructure health: ingestion vs 7-day moving average, host heartbeat vs data, HEC token anomalies, SC4S syslog, and Edge/Ingest Processor throughput.",
+    "releaseDate": "2026-10-27",
+    "description": "Executive-level Splunk infrastructure health plus the Derek+ Data Quality Agent: learned thresholds, tool-based investigation, playbook hypotheses, and human-approved fixes.",
     "classification": {
       "intendedAudience": "IT",
       "categories": ["IT Operations", "Utility"],

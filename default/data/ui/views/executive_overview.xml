@@ -153,6 +153,19 @@
         "refresh": "5m",
         "refreshType": "delay"
       }
+    },
+    "ds_dq_preview": {
+      "type": "ds.search",
+      "name": "Data quality agent preview",
+      "options": {
+        "query": "| makeresults\n| eval _seed=1\n| append [\n    | tstats count as count where index=`exec_health_idx` earliest=-7d@h latest=@h by _time span=1h\n    | timechart span=1h sum(count) as count\n    | fillnull value=0 count\n    | predict count as prediction future_timespan=0 holdback=0 upper95=upper lower95=lower algorithm=LLP5\n    | tail 1\n    | where isnotnull(lower) AND count < lower\n    | eval issue=\"Ingestion below learned predict() bound\", severity=\"RED\", entity=\"environment\", evidence=\"hour_count=\"+tostring(count)+\", predict=\"+tostring(round(prediction,0))+\", lower=\"+tostring(round(lower,0)), suggested_fix=\"Identify which index dropped vs the 7-day seasonal baseline. Check UF/HF phone-home, HEC tokens, and syslog listeners. Do not raise the learned bound to hide a real drop.\", fix_type=\"investigate\", proposed_config=\"none \u2014 human investigates the dropped source\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-8d@h latest=@h by _time span=1h index\n    | streamstats window=168 current=f avg(events) as ma_7d by index\n    | where _time >= relative_time(now(), \"-1h@h\") AND _time < relative_time(now(), \"@h\")\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-events)/ma_7d)*100, 1), 0)\n    | where drop_pct >= `exec_health_drop_red_pct` AND ma_7d>10\n    | eval issue=\"Index volume below 7-day moving average\", severity=\"RED\", entity=index, evidence=\"last_hour=\"+tostring(events)+\", ma_7d=\"+tostring(round(ma_7d,0))+\", drop_pct=\"+tostring(drop_pct)+\"%\", suggested_fix=\"Confirm whether this index was expected to be quiet (maintenance, source retirement). If not, check the last forwarder or HEC route that writes here. Macro exec_health_idx can be narrowed after review.\", fix_type=\"runbook_index\", proposed_config=\"optional: Settings > Search macros > exec_health_idx\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n| tstats count as events where index=`exec_health_idx` earliest=-25h@m latest=@m by _time span=15m host\n| timechart span=15m limit=0 useother=f sum(events) as events by host\n| fillnull value=0\n| untable _time host events\n| where _time+900+300 <= now()\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples by host\n| eventstats max(_time) as scored_bucket\n| where _time=scored_bucket\n| eval sigma=`exec_health_sigma`, mean_vol=round(mean_vol, 1), stdev_vol=round(stdev_vol, 1), lower_bound=round(mean_vol-(sigma*stdev_vol), 1)\n| eval baseline_state=case(samples<8, \"WARMUP\", stdev_vol>0 AND events < lower_bound AND mean_vol>10, \"ALERT\", 1=1, \"OK\")\n| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)\n| where baseline_state=\"ALERT\"\n| eval issue=\"Host volume below learned 2-sigma bound\", severity=\"RED\", entity=host, evidence=\"events=\"+tostring(events)+\", mean=\"+tostring(mean_vol)+\", lower=\"+tostring(lower_bound)+\", z=\"+tostring(z_score), suggested_fix=\"Compare this host's sourcetypes to the prior 24 hours. Repair the stopped monitor, UF outputs.conf, or an index-time filter. Do not suppress the host without change control.\", fix_type=\"runbook_input\", proposed_config=\"none \u2014 human repairs the forwarder or input\", action=\"Review\"\n| head 25\n| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\nsearch `exec_health_hec_metrics` earliest=-2h@m latest=-1m@m\n| `exec_health_hec_normalize`\n| timechart span=1m limit=0 useother=f sum(hec_events) as events by token\n| fillnull value=0\n| untable _time token events\n| eval minutes_ago=round((relative_time(now(), \"-1m@m\")-_time)/60, 0)\n| eval window=case(minutes_ago>=1 AND minutes_ago<=`exec_health_hec_silence_min`, \"recent\", minutes_ago>`exec_health_hec_silence_min` AND minutes_ago<=`exec_health_hec_silence_min`+60, \"baseline\")\n| stats sum(eval(if(window=\"recent\", events, 0))) as recent_events, sum(eval(if(window=\"baseline\", events, 0))) as baseline_events, count(eval(window=\"recent\" AND events=0)) as silent_minutes by token\n| eval baseline_eps=round(baseline_events/3600, 2), recent_eps=round(recent_events/(60*`exec_health_hec_silence_min`), 2)\n| lookup hec_token_map token OUTPUT token_name, owner\n| eval token_label=coalesce(token_name, token), owner=coalesce(owner, \"unmapped\")\n| eval hec_state=case(\n    baseline_eps >= `exec_health_hec_baseline_eps` AND recent_events=0, \"ALERT\",\n    baseline_eps >= 10 AND recent_events=0, \"YELLOW\",\n    1=1, \"OK\")\n| where hec_state=\"ALERT\"\n| eval issue=\"HEC token silent vs learned baseline\", severity=\"RED\", entity=token_label, evidence=\"baseline_eps=\"+tostring(baseline_eps)+\", recent_events=\"+tostring(recent_events)+\", silent_min=\"+tostring(silent_minutes), suggested_fix=\"In Splunk Web open Settings > Data inputs > HTTP Event Collector and confirm this input is enabled. Then check the sender, network path, and index routing. Never paste the HEC token secret into this app.\", fix_type=\"runbook_hec\", proposed_config=\"none \u2014 human checks the HEC input and sender\", action=\"Review\"\n| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) earliest=-24h latest=now by index host\n    | eval kind=if(index=\"_internal\", \"heartbeat\", \"data\")\n    | stats max(eval(if(kind=\"data\", last_seen, null()))) as last_data, max(eval(if(kind=\"heartbeat\", last_seen, null()))) as last_heartbeat by host\n    | eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat\n    | eval state=case(isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"HEARTBEAT ONLY\", data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"DATA SILENT\", (isnull(last_data) OR data_age_sec > `exec_health_silence_sec`) AND (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_heartbeat_sec`), \"HOST DOWN\", 1=1, \"OK\")\n    | where state=\"DATA SILENT\" OR state=\"HEARTBEAT ONLY\" OR state=\"HOST DOWN\"\n    | eval issue=case(state=\"HOST DOWN\", \"Host down \u2014 no heartbeat and no indexed data\", 1=1, \"Host data silent while heartbeat is fresh\")\n    | eval severity=\"RED\", entity=host, evidence=\"state=\"+state+\", data_age_sec=\"+tostring(data_age_sec)+\", heartbeat_age_sec=\"+tostring(heartbeat_age_sec)\n    | eval suggested_fix=case(state=\"HOST DOWN\", \"The host is not phoning home and not sending data. Check power, network, and splunkd. Do not remove the host from this app.\", 1=1, \"The UF is up but indexed data stopped. Check outputs.conf, blocked queues, sourcetype transforms, and the destination index. Restart the forwarder only after change control.\")\n    | eval fix_type=if(state=\"HOST DOWN\", \"runbook_host_down\", \"runbook_uf\")\n    | eval proposed_config=if(state=\"HOST DOWN\", \"none \u2014 human restores the endpoint\", \"none \u2014 human repairs the UF pipeline\"), action=\"Review\"\n    | head 40\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search `exec_health_health_report` earliest=-15m\n    | eval health_val=lower(coalesce(color, \"unknown\"))\n    | stats latest(health_val) as health_val by host, feature\n    | eval score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n    | where score<2\n    | eval issue=\"Instance health feature not GREEN\", severity=if(score=0, \"RED\", \"YELLOW\"), entity=host.\" / \".feature, evidence=\"host=\"+host+\", feature=\"+feature+\", color=\"+health_val, suggested_fix=\"On that instance inspect the red or yellow feature (disk, buckets, splunkd). Do not clear or suppress the health report from this dashboard.\", fix_type=\"runbook_instance\", proposed_config=\"none \u2014 human inspects the instance feature\", action=\"Review\"\n    | sort score, host, feature\n    | head 25\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-15m latest=now\n    | appendpipe [ stats count | where count=0 | eval events=0 ]\n    | where events=0\n    | eval issue=\"No live indexed events in the last 15 minutes\", severity=\"RED\", entity=\"environment\", evidence=\"events_15m=0\", suggested_fix=\"Check UF/HF phone-home, HEC tokens, syslog listeners, and whether macro exec_health_idx excludes the indexes that should be live.\", fix_type=\"runbook_ingest_live\", proposed_config=\"optional: Settings > Search macros > exec_health_idx\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search `exec_health_license_usage` earliest=-8d@d latest=@d\n    | bin _time span=1d\n    | stats sum(b) as bytes by _time\n    | eval daily_GB=bytes/1024/1024/1024\n    | streamstats window=7 current=f avg(daily_GB) as ma_7d\n    | sort 0 -_time\n    | head 1\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-daily_GB)/ma_7d)*100, 1), 0)\n    | eval health_score=case(isnull(ma_7d), 2, drop_pct>=`exec_health_drop_red_pct`, 0, drop_pct>=`exec_health_drop_yellow_pct`, 1, 1=1, 2)\n    | where health_score<2\n    | eval issue=\"Daily ingestion below 7-day moving average\", severity=if(health_score=0, \"RED\", \"YELLOW\"), entity=\"environment\", evidence=\"daily_GB=\"+tostring(round(daily_GB,2))+\", ma_7d=\"+tostring(round(ma_7d,2))+\", drop_pct=\"+tostring(drop_pct)+\"%\", suggested_fix=\"Compare indexes and sourcetypes for yesterday vs the prior week. Confirm maintenance or a retired source before treating this as an outage.\", fix_type=\"runbook_license_ma\", proposed_config=\"none \u2014 human reviews license usage\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search index=_introspection sourcetype=splunk_resource_usage component=Hostwide earliest=-15m\n    | eval cpu_pct=coalesce('data.cpu_system_pct', 0)+coalesce('data.cpu_user_pct', 0)\n    | stats avg(cpu_pct) as avg_cpu, max(cpu_pct) as max_cpu by host\n    | eval avg_cpu=round(avg_cpu, 1), max_cpu=round(max_cpu, 1)\n    | where max_cpu>=75\n    | eval issue=\"Instance CPU above health bound\", severity=if(max_cpu>=90, \"RED\", \"YELLOW\"), entity=host, evidence=\"avg_cpu=\"+tostring(avg_cpu)+\"%, max_cpu=\"+tostring(max_cpu)+\"%\", suggested_fix=\"List expensive searches on this host and pause non-essential scheduled searches after change control. Do not kill user searches from this dashboard.\", fix_type=\"runbook_sh\", proposed_config=\"none \u2014 human manages search load\", action=\"Review\"\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search index=`exec_health_sc4s_idx` `exec_health_sc4s` (error OR warn OR fail OR \"connection refused\" OR hang OR dropped) earliest=-15m\n    | stats count as sc4s_issues, dc(sourcetype) as sourcetypes by host\n    | where sc4s_issues>0\n    | eval issue=\"SC4S / syslog errors in the last 15 minutes\", severity=\"RED\", entity=host, evidence=\"issues=\"+tostring(sc4s_issues)+\", sourcetypes=\"+tostring(sourcetypes), suggested_fix=\"Check the collector process, destination port, TLS, and that the destination index exists. Use this app's SC4S view for the time series.\", fix_type=\"runbook_sc4s\", proposed_config=\"none \u2014 human repairs the syslog collector\", action=\"Review\"\n    | sort 0 -sc4s_issues\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | mstats max(queue_size_bytes) as queue_size_bytes, max(queue_max_bytes) as queue_max_bytes, rate_sum(export_destination_errors_total) as export_errors_per_sec, rate_sum(processor_events_in_total) as events_in_eps, rate_sum(processor_events_out_total) as events_out_eps where `exec_health_edge_mstats` earliest=-15m latest=now by host\n    | eval queue_fill_pct=if(queue_max_bytes>0, round(queue_size_bytes/queue_max_bytes*100, 1), null())\n    | eval export_errors_per_sec=round(coalesce(export_errors_per_sec, 0), 3)\n    | eval events_in_eps=round(coalesce(events_in_eps, 0), 2), events_out_eps=round(coalesce(events_out_eps, 0), 2)\n    | where export_errors_per_sec>0 OR queue_fill_pct>=80 OR (events_in_eps>0 AND events_out_eps=0)\n    | eval issue=\"Edge / Ingest Processor queue or export unhealthy\", severity=\"RED\", entity=host, evidence=\"queue_fill_pct=\"+tostring(queue_fill_pct)+\", export_errors_per_sec=\"+tostring(export_errors_per_sec)+\", in_eps=\"+tostring(events_in_eps)+\", out_eps=\"+tostring(events_out_eps), suggested_fix=\"Inspect Edge pipelines for a blocked destination or a filter that drops everything. Do not clear the queue from this dashboard.\", fix_type=\"runbook_edge\", proposed_config=\"none \u2014 human repairs the processor pipeline\", action=\"Review\"\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| where isnull(_seed)\n| append [\n    search index=_internal source=*metrics.log group=tcpin_connections earliest=-2h\n    | eval entity=coalesce(sourceHost, hostname)\n    | eval tool_fwdType=lower(trim(coalesce(fwdType, \"\")))\n    | eval tool_conn=lower(trim(coalesce(connectionType, \"\")))\n    | where isnotnull(entity)\n    | stats latest(tool_fwdType) as tool_fwdType, latest(tool_conn) as tool_conn by entity\n]\n| append [\n    search index=_internal sourcetype=splunkd (log_level=ERROR OR log_level=WARN) earliest=-2h\n    | eval entity=host\n    | where isnotnull(entity)\n    | stats count as tool_err_count, latest(component) as tool_err_component by entity\n]\n| eventstats latest(tool_fwdType) as tool_fwdType, latest(tool_conn) as tool_conn, latest(tool_err_component) as tool_err_component, max(tool_err_count) as tool_err_count by entity\n| where isnotnull(issue)\n| eval finding_id=sha256(issue.\"|\".entity)\n| lookup dq_agent_playbooks fix_type OUTPUT playbook_name, likely_cause, confidence, tool_plan, splunk_web_path\n| lookup dq_agent_approvals finding_id OUTPUT decision, decided_at, actor\n| eval status=case(decision=\"approve\", \"approved\", decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval action=if(status=\"open\", \"Review\", \"Resolved\")\n| eval agent_thought=\"OBSERVE: \"+issue+\" on \"+entity+\". INVESTIGATE: \"+coalesce(tool_plan, \"learned baselines\")+\". TOOLS: fwdType=\"+coalesce(tool_fwdType, \"n/a\")+\" conn=\"+coalesce(tool_conn, \"n/a\")+\" err_component=\"+coalesce(tool_err_component, \"none\")+\" err_count=\"+coalesce(tostring(tool_err_count), \"0\")+\". HYPOTHESIZE: \"+coalesce(likely_cause, \"needs human review\")+\" (confidence \"+coalesce(confidence, \"n/a\")+\"). PROPOSE: \"+suggested_fix+\". ACT: wait for human APPLY \u2014 never change Splunk unattended.\"\n| eval ai_brief=\"Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: \"+issue+\". Entity: \"+entity+\". Evidence: \"+evidence+\". Forwarder type: \"+coalesce(tool_fwdType, \"unknown\")+\". Connection: \"+coalesce(tool_conn, \"unknown\")+\". Recent _internal errors: \"+coalesce(tostring(tool_err_count), \"0\")+\" (\"+coalesce(tool_err_component, \"none\")+\"). Playbook: \"+coalesce(playbook_name, \"none\")+\". Likely cause: \"+coalesce(likely_cause, \"unknown\")+\". Suggested fix: \"+suggested_fix+\". Splunk Web: \"+coalesce(splunk_web_path, \"n/a\")+\". Reply with root cause, confidence, and step-by-step admin actions. Do not request secrets or HEC token values.\"\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank\n| sort _color_rank, issue, entity\n\n| where status=\"open\"\n| head 8\n| table severity, issue, entity, likely_cause, confidence, suggested_fix, action, _color_rank",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-24h",
+          "latest": "now"
+        }
+      }
     }
   },
   "visualizations": {
@@ -617,6 +630,52 @@
         }
       ]
     },
+    "viz_dq_preview": {
+      "type": "splunk.table",
+      "title": "Derek+ Data Quality Agent \u2014 open findings (click through; the agent never applies a fix unattended)",
+      "dataSources": {
+        "primary": "ds_dq_preview"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 8,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToDashboard",
+          "options": {
+            "app": "splunk_exec_health",
+            "dashboard": "data_quality_agent",
+            "newTab": false
+          }
+        }
+      ]
+    },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
@@ -770,11 +829,21 @@
         }
       },
       {
-        "item": "viz_footer",
+        "item": "viz_dq_preview",
         "type": "block",
         "position": {
           "x": 0,
           "y": 1690,
+          "w": 1200,
+          "h": 300
+        }
+      },
+      {
+        "item": "viz_footer",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1990,
           "w": 1200,
           "h": 110
         }
