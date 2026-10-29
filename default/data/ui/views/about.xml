@@ -20,7 +20,7 @@
     "viz_what": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## What this app does\n**Splunk Health Derek+** watches whether data is still arriving, not only whether servers ping.\n\n- **Ingestion vs baseline** \u2014 daily GB compared to a 7-day moving average, not a static GB cap\n- **Heartbeat vs data** \u2014 `_internal` phone-home versus last indexed event (`tstats`)\n- **HEC tokens** \u2014 rolling 1-hour throughput and silence detection\n- **SC4S / syslog** \u2014 events per source so a hung collector is visible\n- **Edge / Ingest Processors** \u2014 in vs out, filter efficiency, dropped or queued data\n\nIt is an executive overlay. It does **not** replace the Cloud Monitoring Console or Monitoring Console.",
+        "markdown": "## What this app does\n**Splunk Health Derek+** watches whether data is still arriving, not only whether servers ping.\n\n- **Ingestion vs baseline** \u2014 daily GB compared to a 7-day moving average, not a static GB cap\n- **Heartbeat vs data** \u2014 `_internal` phone-home versus last indexed event (`tstats`)\n- **HEC tokens** \u2014 rolling 1-hour throughput and silence detection\n- **SC4S / syslog** \u2014 events per source so a hung collector is visible\n- **Edge / Ingest Processors** \u2014 in vs out, filter efficiency, dropped or queued data\n- **Derek+ Data Quality Agent** \u2014 Observe health tiles and learned ingest bounds, Investigate (tools), Hypothesize (playbooks), Propose, then **Human Act**\n\nIt is an executive overlay. It does **not** replace the Cloud Monitoring Console or Monitoring Console.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -28,7 +28,7 @@
     "viz_identity": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## App identity\n- **Display name:** Splunk Health Derek+\n- **App id:** `splunk_exec_health`\n- **Version:** 1.2.5\n- **Author:** SplunkHealth\n- **License:** Apache License 2.0 (`LICENSE` in the app package)\n- **UI:** Dashboard Studio (dark theme)\n- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\nThe folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`.",
+        "markdown": "## App identity\n- **Display name:** Splunk Health Derek+\n- **App id:** `splunk_exec_health`\n- **Version:** 1.7.0\n- **Author:** SplunkHealth\n- **License:** Apache License 2.0 (`LICENSE` in the app package)\n- **UI:** Dashboard Studio (dark theme)\n- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\nThe folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -36,7 +36,7 @@
     "viz_cloud": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## Splunk Cloud compatibility\n- Search-head app only (`targetWorkloads: _search_heads` in `app.manifest`)\n- No cluster-manager or search-head-cluster REST (those endpoints 403 on Cloud)\n- Instance health from the `_internal` health report (PeriodicHealthReporter); search-head load from `_introspection`\n- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n\nSelf-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** (`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via **Apps \u2192 Manage apps \u2192 Install app from file**.",
+        "markdown": "## Splunk Cloud compatibility\n- Search-head app only (`targetWorkloads: _search_heads` in `app.manifest`)\n- No cluster-manager or search-head-cluster REST (those endpoints 403 on Cloud)\n- Instance health from the `_internal` health report (PeriodicHealthReporter); search-head load from `_introspection`\n- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n- The Data Quality Agent records a decision only after a human types APPLY and presses Run in Search (no Python LLM client, no API keys)\n\nSelf-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** (`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via **Apps \u2192 Manage apps \u2192 Install app from file**.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -44,7 +44,7 @@
     "viz_security": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## Security\nThis app does **not** store SMTP passwords, Slack webhooks, API tokens, HEC token secrets, certificates, or other credentials. Map HEC token **names** only in `lookups/hec_token_map.csv`. Configure email or Slack on the saved search in Splunk Web after you enable it.",
+        "markdown": "## Security\nThis app does **not** store SMTP passwords, Slack webhooks, API tokens, LLM keys, HEC token secrets, certificates, or other credentials. Map HEC token **names** only in `lookups/hec_token_map.csv`. Playbooks, approvals, and AI request lookups hold runbook text only. Optional AI providers are configured on **Configure \u2192 AI provider**. Keys and webhook URLs belong in Splunk Web or your gateway, never in this app.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
