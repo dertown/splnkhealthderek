@@ -54,7 +54,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/` Python, no `
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.0.spl`.
+3. Upload `dist/splunk_exec_health-1.7.1.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -95,12 +95,12 @@ The agent is a **search-head loop**. It ships with **LOCAL** AI mode (no outboun
 
 The agent **cannot** restart forwarders, edit `inputs.conf`, rotate HEC tokens, or change indexes. UF / HEC / index repairs stay runbooks.
 
-To work a finding:
+To work a suggestion:
 
-1. Ask the agent (or leave `all`) and click a row (**Review**).
-2. Read **Agent thought** and the **AI briefing**.
-3. Choose **Dismiss** or **Approve suggested fix**.
-4. Type `APPLY`, click the implement control, press **Run**.
+1. Filter if you want (or leave `all`) and click a row in the work queue.
+2. Read **This suggestion** — likely cause, suggested fix, and where to act.
+3. Choose **Approve this suggestion** or **Dismiss**, type `APPLY`, click save, press **Run**.
+4. Optional: type `ASK` to send the briefing to a configured AI provider.
 
 Enable **Exec Health - Data quality agent report** if you want open findings emailed. Never put passwords, HEC secrets, webhook URLs, or LLM keys in the lookups.
 
@@ -186,5 +186,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, no Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.0.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.1.spl --included-tags private_app
 ```

@@ -1,10 +1,10 @@
 <dashboard version="2" theme="dark">
   <label>Derek+ Data Quality Agent</label>
-  <description>Agentic health loop: instance, ingest, hosts, HEC, SC4S, Edge — human Act required.</description>
+  <description>Pick a suggestion, review the fix, approve or dismiss. Nothing changes until you press Run.</description>
   <definition><![CDATA[
 {
   "title": "Derek+ Data Quality Agent",
-  "description": "Agentic health loop: instance, ingest, hosts, HEC, SC4S, Edge \u2014 human Act required.",
+  "description": "Pick a suggestion, review the fix, then approve or dismiss. Nothing changes until you press Run.",
   "defaults": {
     "dataSources": {
       "ds.search": {
@@ -28,45 +28,46 @@
     },
     "input_ask": {
       "type": "input.text",
-      "title": "Ask the agent (all = every finding)",
+      "title": "Filter (try hec, cpu, silent, or all)",
       "options": {
         "token": "tok_ask",
         "defaultValue": "all"
       }
     },
     "input_finding": {
-      "type": "input.text",
-      "title": "Selected finding",
+      "type": "input.dropdown",
+      "title": "Selected suggestion",
+      "dataSources": {
+        "primary": "ds_dq_picker"
+      },
       "options": {
         "token": "tok_finding_id",
-        "defaultValue": "none"
-      }
-    },
-    "input_entity": {
-      "type": "input.text",
-      "title": "Entity",
-      "options": {
-        "token": "tok_entity",
-        "defaultValue": "none"
+        "defaultValue": "none",
+        "items": [
+          {
+            "label": "Click a row in the work queue",
+            "value": "none"
+          }
+        ]
       }
     },
     "input_decision": {
       "type": "input.dropdown",
-      "title": "Human decision",
+      "title": "Your decision",
       "options": {
         "token": "tok_decision",
         "defaultValue": "review",
         "items": [
           {
-            "label": "Review only (no change)",
+            "label": "Still reviewing",
             "value": "review"
           },
           {
-            "label": "Dismiss this finding",
+            "label": "Dismiss \u2014 not a real issue",
             "value": "dismiss"
           },
           {
-            "label": "Approve suggested fix",
+            "label": "Approve this suggestion",
             "value": "approve"
           }
         ]
@@ -74,31 +75,15 @@
     },
     "input_confirm": {
       "type": "input.text",
-      "title": "Type APPLY to implement (required)",
+      "title": "Type APPLY to record the decision",
       "options": {
         "token": "tok_confirm",
         "defaultValue": "NO"
       }
     },
-    "input_issue": {
-      "type": "input.text",
-      "title": "Selected issue",
-      "options": {
-        "token": "tok_issue",
-        "defaultValue": "none"
-      }
-    },
-    "input_ai_brief": {
-      "type": "input.text",
-      "title": "Selected AI briefing",
-      "options": {
-        "token": "tok_ai_brief",
-        "defaultValue": "none"
-      }
-    },
     "input_ai_confirm": {
       "type": "input.text",
-      "title": "Type ASK to send to the configured AI provider",
+      "title": "Optional: type ASK for a second opinion",
       "options": {
         "token": "tok_ai_confirm",
         "defaultValue": "NO"
@@ -127,6 +112,22 @@
         "query": "| eval q=lower(\"$tok_ask$\")\n| eval q=replace(q, \"[^a-z0-9 ]\", \"\")\n| where q=\"all\" OR q=\"\" OR like(lower(issue.\" \".entity.\" \".coalesce(likely_cause, \"\").\" \".suggested_fix.\" \".coalesce(fix_type, \"\")), \"%\".q.\"%\")"
       }
     },
+    "ds_dq_queue": {
+      "type": "ds.chain",
+      "name": "Work queue",
+      "options": {
+        "extend": "ds_dq_asked",
+        "query": "| table severity, issue, entity, suggested_fix, confidence, action, finding_id, ai_brief, _color_rank"
+      }
+    },
+    "ds_dq_picker": {
+      "type": "ds.chain",
+      "name": "Suggestion picker",
+      "options": {
+        "extend": "ds_dq_asked",
+        "query": "| eval label=severity.\" \u00b7 \".issue.\" \u2014 \".entity\n| eval value=finding_id\n| table label, value"
+      }
+    },
     "ds_dq_status": {
       "type": "ds.chain",
       "name": "Agent status",
@@ -137,33 +138,25 @@
     },
     "ds_dq_selected": {
       "type": "ds.chain",
-      "name": "Selected finding",
+      "name": "Selected suggestion",
       "options": {
-        "extend": "ds_dq_findings",
-        "query": "| where finding_id=\"$tok_finding_id$\"\n| table finding_id, severity, issue, entity, evidence, likely_cause, confidence, suggested_fix, splunk_web_path, proposed_config, status, action"
-      }
-    },
-    "ds_dq_thought": {
-      "type": "ds.chain",
-      "name": "Agent thought",
-      "options": {
-        "extend": "ds_dq_findings",
-        "query": "| where finding_id=\"$tok_finding_id$\"\n| table agent_thought, tool_plan, tool_fwdType, tool_conn, tool_err_component, tool_err_count, playbook_name"
+        "extend": "ds_dq_asked",
+        "query": "| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\" AND finding_id!=\"\"\n| eval where_to_act=coalesce(splunk_web_path, \"Open the matching dashboard in this app\")\n| table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank"
       }
     },
     "ds_dq_brief": {
       "type": "ds.chain",
       "name": "AI briefing",
       "options": {
-        "extend": "ds_dq_findings",
-        "query": "| where finding_id=\"$tok_finding_id$\"\n| table ai_brief"
+        "extend": "ds_dq_asked",
+        "query": "| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\"\n| table ai_brief"
       }
     },
     "ds_dq_ready": {
       "type": "ds.search",
       "name": "Implement control",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\", confirm=\"$tok_confirm$\"\n| eval ready=if(confirm=\"APPLY\" AND finding_id!=\"none\" AND finding_id!=\"\" AND (decision=\"approve\" OR decision=\"dismiss\"), 1, 0)\n| eval button_label=if(ready=1, \"CLICK TO IMPLEMENT\", \"TYPE APPLY AFTER A DECISION\")\n| eval button_color=if(ready=1, \"YELLOW\", \"N/A\")\n| table button_label, button_color, ready",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\", confirm=\"$tok_confirm$\"\n| eval ready=if(confirm=\"APPLY\" AND finding_id!=\"none\" AND finding_id!=\"\" AND (decision=\"approve\" OR decision=\"dismiss\"), 1, 0)\n| eval button_label=if(ready=1, \"SAVE DECISION \u2014 THEN PRESS RUN\", \"PICK A SUGGESTION, CHOOSE APPROVE OR DISMISS, TYPE APPLY\")\n| eval button_color=if(ready=1, \"YELLOW\", \"N/A\")\n| table button_label, button_color, ready",
         "refresh": "30s",
         "refreshType": "delay",
         "queryParameters": {
@@ -198,19 +191,6 @@
         }
       }
     },
-    "ds_dq_ai_queue": {
-      "type": "ds.search",
-      "name": "AI request queue",
-      "options": {
-        "query": "| inputlookup dq_agent_ai_requests\n| where NOT (finding_id=\"placeholder\" AND status=\"none\")\n| eval _color_rank=case(status=\"pending\", 2, 1=1, 3)\n| table requested_at, finding_id, entity, issue, provider, model, status, actor, note, _color_rank\n| sort 0 -requested_at",
-        "refresh": "30s",
-        "refreshType": "delay",
-        "queryParameters": {
-          "earliest": "0",
-          "latest": "now"
-        }
-      }
-    },
     "ds_dq_ai_replies": {
       "type": "ds.search",
       "name": "AI provider replies",
@@ -229,14 +209,14 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Derek+ Data Quality Agent\n**Goal:** keep Splunk Health GREEN \u2014 instance features, live ingest, silent hosts, search CPU, HEC, SC4S, and Edge. **Loop:** Observe \u2192 Investigate (tools) \u2192 Hypothesize (playbooks) \u2192 Propose \u2192 **Human Act**. The agent **cannot** restart forwarders, edit `inputs.conf`, or change HEC tokens. You must type **APPLY** and press **Run**.",
+        "markdown": "# Derek+ Data Quality Agent\n**1. Pick** a suggestion in the queue (or the dropdown). **2. Read** why it fired and the suggested fix. **3. Decide** Approve or Dismiss, type **APPLY**, click save, press **Run**. The agent never changes Splunk by itself.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
     },
     "viz_status": {
       "type": "splunk.singlevalue",
-      "title": "Agent status",
+      "title": "Queue health",
       "dataSources": {
         "primary": "ds_dq_status"
       },
@@ -283,7 +263,7 @@
     },
     "viz_count": {
       "type": "splunk.singlevalue",
-      "title": "Open findings",
+      "title": "Open suggestions",
       "dataSources": {
         "primary": "ds_dq_status"
       },
@@ -299,292 +279,9 @@
         "trendDisplay": "off"
       }
     },
-    "viz_policy": {
-      "type": "splunk.markdown",
-      "options": {
-        "markdown": "## Tools the agent uses\n- Learned baselines: `predict()`, host 2-sigma, HEC silence, heartbeat vs data, license 7-day MA\n- `health.log` features \u00b7 `_introspection` CPU \u00b7 SC4S errors \u00b7 Edge `mstats` queues\n- `tcpin_connections` forwarder type \u00b7 `_internal` ERROR/WARN component\n- Playbooks in `dq_agent_playbooks.csv` (no secrets) \u00b7 memory: `dq_agent_approvals.csv`",
-        "fontSize": "default",
-        "backgroundColor": "transparent"
-      }
-    },
-    "viz_cycle": {
-      "type": "splunk.markdown",
-      "options": {
-        "markdown": "## How to work a finding\n1. **Ask** the agent (or leave `all`). 2. Click **Review** on a row. 3. Read **thought** and the **AI briefing**. 4. Optional: open **Configure \u2192 AI provider**, then type **ASK** to queue the briefing (keys stay in your gateway). 5. Choose Dismiss or Approve, type **APPLY**, click implement, press **Run** in Search.",
-        "fontSize": "default",
-        "backgroundColor": "transparent"
-      }
-    },
-    "viz_findings": {
-      "type": "splunk.table",
-      "title": "Agent work queue \u2014 click a row (Review). The agent never applies a fix unattended.",
-      "dataSources": {
-        "primary": "ds_dq_asked"
-      },
-      "showLastUpdated": true,
-      "showProgressBar": true,
-      "options": {
-        "count": 25,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        },
-        "columnFormat": {
-          "action": {
-            "align": "center"
-          },
-          "severity": {
-            "align": "center"
-          },
-          "status": {
-            "align": "center"
-          },
-          "confidence": {
-            "align": "center"
-          }
-        }
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#5C1A1A"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#5C4A12"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#14301A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.setToken",
-          "options": {
-            "tokens": [
-              {
-                "token": "tok_finding_id",
-                "key": "row.finding_id.value"
-              },
-              {
-                "token": "tok_entity",
-                "key": "row.entity.value"
-              },
-              {
-                "token": "tok_issue",
-                "key": "row.issue.value"
-              },
-              {
-                "token": "tok_ai_brief",
-                "key": "row.ai_brief.value"
-              }
-            ]
-          }
-        }
-      ]
-    },
-    "viz_thought": {
-      "type": "splunk.table",
-      "title": "Agent thought (this cycle)",
-      "dataSources": {
-        "primary": "ds_dq_thought"
-      },
-      "showLastUpdated": true,
-      "showProgressBar": true,
-      "options": {
-        "count": 3,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#5C1A1A"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#5C4A12"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#14301A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_brief": {
-      "type": "splunk.table",
-      "title": "AI briefing \u2014 copy to your LLM; the app never sends this off-box",
-      "dataSources": {
-        "primary": "ds_dq_brief"
-      },
-      "showLastUpdated": true,
-      "showProgressBar": true,
-      "options": {
-        "count": 1,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#5C1A1A"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#5C4A12"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#14301A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_selected": {
-      "type": "splunk.table",
-      "title": "Proposed fix for the selected finding",
-      "dataSources": {
-        "primary": "ds_dq_selected"
-      },
-      "showLastUpdated": true,
-      "showProgressBar": true,
-      "options": {
-        "count": 5,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#5C1A1A"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#5C4A12"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#14301A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_implement": {
-      "type": "splunk.singlevalue",
-      "title": "Act \u2014 implement (opens Search; you must press Run)",
-      "dataSources": {
-        "primary": "ds_dq_ready"
-      },
-      "showLastUpdated": true,
-      "showProgressBar": false,
-      "options": {
-        "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-        "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
-        "backgroundColor": "transparent",
-        "majorFontSize": 22
-      },
-      "context": {
-        "statusColors": [
-          {
-            "match": "GREEN",
-            "value": "#53A051"
-          },
-          {
-            "match": "YELLOW",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "RED",
-            "value": "#DC4E41"
-          },
-          {
-            "match": "N/A",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "LOCAL",
-            "value": "#53A051"
-          },
-          {
-            "match": "PROVIDER",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "MISCONFIG",
-            "value": "#DC4E41"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "custom",
-            "newTab": true,
-            "query": "| inputlookup dq_agent_approvals | append [ | makeresults | eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\", confirm=\"$tok_confirm$\", entity=\"$tok_entity$\", actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\" | where confirm=\"APPLY\" AND finding_id!=\"none\" AND finding_id!=\"\" AND (decision=\"approve\" OR decision=\"dismiss\") | table finding_id, decision, actor, decided_at, note, entity ] | outputlookup dq_agent_approvals"
-          }
-        }
-      ]
-    },
     "viz_ai_status": {
       "type": "splunk.singlevalue",
-      "title": "AI provider (click to configure)",
+      "title": "AI provider (click to set up)",
       "dataSources": {
         "primary": "ds_dq_ai_status"
       },
@@ -639,17 +336,234 @@
         }
       ]
     },
-    "viz_ai_help": {
-      "type": "splunk.markdown",
+    "viz_findings": {
+      "type": "splunk.table",
+      "title": "1. Work queue \u2014 click a suggestion",
+      "dataSources": {
+        "primary": "ds_dq_queue"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
       "options": {
-        "markdown": "## Optional AI provider\nDefault is **LOCAL**. Click the AI provider tile or open **Configure \u2192 AI provider** to choose OpenAI, Cisco AI Defense, Azure OpenAI, Anthropic, or custom. **Do not enter API keys on that page.** Keys and the webhook URL stay in your gateway / Splunk Web. After saving provider mode, type **ASK** here, then enable **Exec Health - AI provider dispatch** with a webhook.",
-        "fontSize": "default",
-        "backgroundColor": "transparent"
-      }
+        "count": 20,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "columnFormat": {
+          "action": {
+            "align": "center"
+          },
+          "severity": {
+            "align": "center"
+          },
+          "confidence": {
+            "align": "center"
+          },
+          "finding_id": {
+            "width": 1
+          },
+          "ai_brief": {
+            "width": 1
+          }
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.setToken",
+          "options": {
+            "tokens": [
+              {
+                "token": "tok_finding_id",
+                "key": "row.finding_id.value"
+              },
+              {
+                "token": "tok_entity",
+                "key": "row.entity.value"
+              },
+              {
+                "token": "tok_issue",
+                "key": "row.issue.value"
+              },
+              {
+                "token": "tok_ai_brief",
+                "key": "row.ai_brief.value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "viz_selected": {
+      "type": "splunk.table",
+      "title": "2. This suggestion \u2014 why it fired and what to do",
+      "dataSources": {
+        "primary": "ds_dq_selected"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 3,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_implement": {
+      "type": "splunk.singlevalue",
+      "title": "3. Save your decision (opens Search; press Run)",
+      "dataSources": {
+        "primary": "ds_dq_ready"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": false,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+        "backgroundColor": "transparent",
+        "majorFontSize": 18
+      },
+      "context": {
+        "statusColors": [
+          {
+            "match": "GREEN",
+            "value": "#53A051"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "RED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "N/A",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#53A051"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#DC4E41"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "custom",
+            "newTab": true,
+            "query": "| inputlookup dq_agent_approvals | append [ | makeresults | eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\", confirm=\"$tok_confirm$\", entity=\"$tok_entity$\", actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\" | where confirm=\"APPLY\" AND finding_id!=\"none\" AND finding_id!=\"\" AND (decision=\"approve\" OR decision=\"dismiss\") | table finding_id, decision, actor, decided_at, note, entity ] | outputlookup dq_agent_approvals"
+          }
+        }
+      ]
+    },
+    "viz_brief": {
+      "type": "splunk.table",
+      "title": "Optional \u2014 briefing to paste into Splunk AI Assistant",
+      "dataSources": {
+        "primary": "ds_dq_brief"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
     },
     "viz_ai_ask": {
       "type": "splunk.singlevalue",
-      "title": "Ask configured AI provider (opens Search; you must press Run)",
+      "title": "Optional \u2014 send briefing to your configured provider",
       "dataSources": {
         "primary": "ds_dq_ai_ready"
       },
@@ -659,7 +573,7 @@
         "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
         "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
         "backgroundColor": "transparent",
-        "majorFontSize": 20
+        "majorFontSize": 16
       },
       "context": {
         "statusColors": [
@@ -706,59 +620,14 @@
     },
     "viz_ai_replies": {
       "type": "splunk.table",
-      "title": "AI replies for the selected finding (from your HEC inbox)",
+      "title": "Provider replies for this suggestion",
       "dataSources": {
         "primary": "ds_dq_ai_replies"
       },
       "showLastUpdated": true,
       "showProgressBar": true,
       "options": {
-        "count": 8,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#5C1A1A"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#5C4A12"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#14301A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_ai_queue": {
-      "type": "splunk.table",
-      "title": "Pending AI requests (no secrets \u2014 briefing text only)",
-      "dataSources": {
-        "primary": "ds_dq_ai_queue"
-      },
-      "showLastUpdated": true,
-      "showProgressBar": true,
-      "options": {
-        "count": 10,
+        "count": 5,
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
@@ -797,7 +666,7 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "LOCAL mode never calls an LLM from Splunk (no API keys in the app). PROVIDER mode still cannot change Splunk config; it only queues a briefing after **ASK** + Run. Enable **Exec Health - Data quality agent report** to email open findings. Never put passwords, HEC secrets, webhook URLs, or LLM keys in the lookups.",
+        "markdown": "Approve/Dismiss only records a decision. UF, HEC, and index repairs stay runbooks. API keys stay on **Configure \u2192 AI provider** / your gateway \u2014 never in this queue.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -813,7 +682,7 @@
           "x": 0,
           "y": 0,
           "w": 1200,
-          "h": 130
+          "h": 100
         }
       },
       {
@@ -821,39 +690,29 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 130,
-          "w": 300,
-          "h": 160
+          "y": 100,
+          "w": 400,
+          "h": 140
         }
       },
       {
         "item": "viz_count",
         "type": "block",
         "position": {
-          "x": 300,
-          "y": 130,
-          "w": 300,
-          "h": 160
+          "x": 400,
+          "y": 100,
+          "w": 400,
+          "h": 140
         }
       },
       {
-        "item": "viz_policy",
+        "item": "viz_ai_status",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 130,
-          "w": 600,
-          "h": 160
-        }
-      },
-      {
-        "item": "viz_cycle",
-        "type": "block",
-        "position": {
-          "x": 0,
-          "y": 290,
-          "w": 1200,
-          "h": 110
+          "x": 800,
+          "y": 100,
+          "w": 400,
+          "h": 140
         }
       },
       {
@@ -861,29 +720,9 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 400,
+          "y": 240,
           "w": 1200,
-          "h": 340
-        }
-      },
-      {
-        "item": "viz_thought",
-        "type": "block",
-        "position": {
-          "x": 0,
-          "y": 740,
-          "w": 1200,
-          "h": 200
-        }
-      },
-      {
-        "item": "viz_brief",
-        "type": "block",
-        "position": {
-          "x": 0,
-          "y": 940,
-          "w": 1200,
-          "h": 180
+          "h": 320
         }
       },
       {
@@ -891,9 +730,9 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1120,
+          "y": 560,
           "w": 800,
-          "h": 240
+          "h": 260
         }
       },
       {
@@ -901,59 +740,39 @@
         "type": "block",
         "position": {
           "x": 800,
-          "y": 1120,
+          "y": 560,
           "w": 400,
-          "h": 240
+          "h": 260
         }
       },
       {
-        "item": "viz_ai_status",
+        "item": "viz_brief",
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1360,
-          "w": 300,
-          "h": 180
-        }
-      },
-      {
-        "item": "viz_ai_help",
-        "type": "block",
-        "position": {
-          "x": 300,
-          "y": 1360,
-          "w": 900,
-          "h": 180
+          "y": 820,
+          "w": 800,
+          "h": 160
         }
       },
       {
         "item": "viz_ai_ask",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1540,
+          "x": 800,
+          "y": 820,
           "w": 400,
-          "h": 200
+          "h": 160
         }
       },
       {
         "item": "viz_ai_replies",
         "type": "block",
         "position": {
-          "x": 400,
-          "y": 1540,
-          "w": 800,
-          "h": 200
-        }
-      },
-      {
-        "item": "viz_ai_queue",
-        "type": "block",
-        "position": {
           "x": 0,
-          "y": 1740,
+          "y": 980,
           "w": 1200,
-          "h": 220
+          "h": 160
         }
       },
       {
@@ -961,9 +780,9 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1960,
+          "y": 1140,
           "w": 1200,
-          "h": 110
+          "h": 80
         }
       }
     ],
@@ -971,9 +790,6 @@
       "input_global_trp",
       "input_ask",
       "input_finding",
-      "input_entity",
-      "input_issue",
-      "input_ai_brief",
       "input_decision",
       "input_confirm",
       "input_ai_confirm"

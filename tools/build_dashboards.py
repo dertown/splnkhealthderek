@@ -1399,7 +1399,7 @@ Q_DQ_IMPLEMENT_READY = r"""
 | makeresults
 | eval finding_id="$tok_finding_id$", decision="$tok_decision$", confirm="$tok_confirm$"
 | eval ready=if(confirm="APPLY" AND finding_id!="none" AND finding_id!="" AND (decision="approve" OR decision="dismiss"), 1, 0)
-| eval button_label=if(ready=1, "CLICK TO IMPLEMENT", "TYPE APPLY AFTER A DECISION")
+| eval button_label=if(ready=1, "SAVE DECISION — THEN PRESS RUN", "PICK A SUGGESTION, CHOOSE APPROVE OR DISMISS, TYPE APPLY")
 | eval button_color=if(ready=1, "YELLOW", "N/A")
 | table button_label, button_color, ready
 """
@@ -1408,6 +1408,22 @@ Q_DQ_AGENT_ASK = r"""
 | eval q=lower("$tok_ask$")
 | eval q=replace(q, "[^a-z0-9 ]", "")
 | where q="all" OR q="" OR like(lower(issue." ".entity." ".coalesce(likely_cause, "")." ".suggested_fix." ".coalesce(fix_type, "")), "%".q."%")
+"""
+
+Q_DQ_QUEUE_VIEW = r"""
+| table severity, issue, entity, suggested_fix, confidence, action, finding_id, ai_brief, _color_rank
+"""
+
+Q_DQ_PICKER = r"""
+| eval label=severity." · ".issue." — ".entity
+| eval value=finding_id
+| table label, value
+"""
+
+Q_DQ_SUGGESTION = r"""
+| where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none" AND finding_id!=""
+| eval where_to_act=coalesce(splunk_web_path, "Open the matching dashboard in this app")
+| table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank
 """
 
 Q_DQ_AI_CFG_ROW = r"""
@@ -1488,9 +1504,9 @@ Q_DQ_AI_DISPATCH = r"""
 
 def data_quality_agent() -> dict:
     findings_table = table(
-        "Agent work queue — click a row (Review). The agent never applies a fix unattended.",
-        "ds_dq_asked",
-        count=25,
+        "1. Work queue — click a suggestion",
+        "ds_dq_queue",
+        count=20,
     )
     findings_table["eventHandlers"] = [
         {
@@ -1508,128 +1524,108 @@ def data_quality_agent() -> dict:
     findings_table["options"]["columnFormat"] = {
         "action": {"align": "center"},
         "severity": {"align": "center"},
-        "status": {"align": "center"},
         "confidence": {"align": "center"},
+        "finding_id": {"width": 1},
+        "ai_brief": {"width": 1},
     }
+    suggestion_table = table(
+        "2. This suggestion — why it fired and what to do",
+        "ds_dq_selected",
+        count=3,
+    )
     return {
         "title": "Derek+ Data Quality Agent",
-        "description": "Agentic health loop: instance, ingest, hosts, HEC, SC4S, Edge — human Act required.",
+        "description": "Pick a suggestion, review the fix, then approve or dismiss. Nothing changes until you press Run.",
         "defaults": defaults(),
         "inputs": {
             "input_global_trp": timerange("-24h@h,now"),
             "input_ask": {
                 "type": "input.text",
-                "title": "Ask the agent (all = every finding)",
+                "title": "Filter (try hec, cpu, silent, or all)",
                 "options": {"token": "tok_ask", "defaultValue": "all"},
             },
             "input_finding": {
-                "type": "input.text",
-                "title": "Selected finding",
-                "options": {"token": "tok_finding_id", "defaultValue": "none"},
-            },
-            "input_entity": {
-                "type": "input.text",
-                "title": "Entity",
-                "options": {"token": "tok_entity", "defaultValue": "none"},
+                "type": "input.dropdown",
+                "title": "Selected suggestion",
+                "dataSources": {"primary": "ds_dq_picker"},
+                "options": {
+                    "token": "tok_finding_id",
+                    "defaultValue": "none",
+                    "items": [{"label": "Click a row in the work queue", "value": "none"}],
+                },
             },
             "input_decision": {
                 "type": "input.dropdown",
-                "title": "Human decision",
+                "title": "Your decision",
                 "options": {
                     "token": "tok_decision",
                     "defaultValue": "review",
                     "items": [
-                        {"label": "Review only (no change)", "value": "review"},
-                        {"label": "Dismiss this finding", "value": "dismiss"},
-                        {"label": "Approve suggested fix", "value": "approve"},
+                        {"label": "Still reviewing", "value": "review"},
+                        {"label": "Dismiss — not a real issue", "value": "dismiss"},
+                        {"label": "Approve this suggestion", "value": "approve"},
                     ],
                 },
             },
             "input_confirm": {
                 "type": "input.text",
-                "title": "Type APPLY to implement (required)",
+                "title": "Type APPLY to record the decision",
                 "options": {"token": "tok_confirm", "defaultValue": "NO"},
-            },
-            "input_issue": {
-                "type": "input.text",
-                "title": "Selected issue",
-                "options": {"token": "tok_issue", "defaultValue": "none"},
-            },
-            "input_ai_brief": {
-                "type": "input.text",
-                "title": "Selected AI briefing",
-                "options": {"token": "tok_ai_brief", "defaultValue": "none"},
             },
             "input_ai_confirm": {
                 "type": "input.text",
-                "title": "Type ASK to send to the configured AI provider",
+                "title": "Optional: type ASK for a second opinion",
                 "options": {"token": "tok_ai_confirm", "defaultValue": "NO"},
             },
         },
         "dataSources": {
             "ds_dq_findings": ds("Agent cycle findings", Q_DQ_AGENT_FINDINGS, "-24h", "now"),
             "ds_dq_asked": chain("Asked findings", "ds_dq_findings", Q_DQ_AGENT_ASK),
+            "ds_dq_queue": chain("Work queue", "ds_dq_asked", Q_DQ_QUEUE_VIEW),
+            "ds_dq_picker": chain("Suggestion picker", "ds_dq_asked", Q_DQ_PICKER),
             "ds_dq_status": chain("Agent status", "ds_dq_findings", Q_DQ_AGENT_STATUS),
-            "ds_dq_selected": chain(
-                "Selected finding",
-                "ds_dq_findings",
-                """
-| where finding_id="$tok_finding_id$"
-| table finding_id, severity, issue, entity, evidence, likely_cause, confidence, suggested_fix, splunk_web_path, proposed_config, status, action
-""".strip(),
-            ),
-            "ds_dq_thought": chain(
-                "Agent thought",
-                "ds_dq_findings",
-                """
-| where finding_id="$tok_finding_id$"
-| table agent_thought, tool_plan, tool_fwdType, tool_conn, tool_err_component, tool_err_count, playbook_name
-""".strip(),
-            ),
+            "ds_dq_selected": chain("Selected suggestion", "ds_dq_asked", Q_DQ_SUGGESTION),
             "ds_dq_brief": chain(
                 "AI briefing",
-                "ds_dq_findings",
+                "ds_dq_asked",
                 """
-| where finding_id="$tok_finding_id$"
+| where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none"
 | table ai_brief
 """.strip(),
             ),
             "ds_dq_ready": ds("Implement control", Q_DQ_IMPLEMENT_READY, "0", "now", refresh="30s"),
             "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_STATUS, "0", "now", refresh="30s"),
             "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_READY, "0", "now", refresh="30s"),
-            "ds_dq_ai_queue": ds("AI request queue", Q_DQ_AI_QUEUE, "0", "now", refresh="30s"),
             "ds_dq_ai_replies": ds("AI provider replies", Q_DQ_AI_REPLIES, "-24h", "now", refresh="30s"),
         },
         "visualizations": {
             "viz_header": md(
                 "# Derek+ Data Quality Agent\n"
-                "**Goal:** keep Splunk Health GREEN — instance features, live ingest, silent hosts, search CPU, HEC, SC4S, and Edge. "
-                "**Loop:** Observe → Investigate (tools) → Hypothesize (playbooks) → Propose → **Human Act**. "
-                "The agent **cannot** restart forwarders, edit `inputs.conf`, or change HEC tokens. You must type **APPLY** and press **Run**."
+                "**1. Pick** a suggestion in the queue (or the dropdown). "
+                "**2. Read** why it fired and the suggested fix. "
+                "**3. Decide** Approve or Dismiss, type **APPLY**, click save, press **Run**. "
+                "The agent never changes Splunk by itself."
             ),
-            "viz_status": single_status("Agent status", "ds_dq_status", "agent_status", "issues"),
-            "viz_count": single_number("Open findings", "ds_dq_status", "issues", "", spark=None, precision=0),
-            "viz_policy": md(
-                "## Tools the agent uses\n"
-                "- Learned baselines: `predict()`, host 2-sigma, HEC silence, heartbeat vs data, license 7-day MA\n"
-                "- `health.log` features · `_introspection` CPU · SC4S errors · Edge `mstats` queues\n"
-                "- `tcpin_connections` forwarder type · `_internal` ERROR/WARN component\n"
-                "- Playbooks in `dq_agent_playbooks.csv` (no secrets) · memory: `dq_agent_approvals.csv`"
-            ),
-            "viz_cycle": md(
-                "## How to work a finding\n"
-                "1. **Ask** the agent (or leave `all`). 2. Click **Review** on a row. "
-                "3. Read **thought** and the **AI briefing**. "
-                "4. Optional: open **Configure → AI provider**, then type **ASK** to queue the briefing (keys stay in your gateway). "
-                "5. Choose Dismiss or Approve, type **APPLY**, click implement, press **Run** in Search."
-            ),
+            "viz_status": single_status("Queue health", "ds_dq_status", "agent_status", "issues"),
+            "viz_count": single_number("Open suggestions", "ds_dq_status", "issues", "", spark=None, precision=0),
+            "viz_ai_status": {
+                **single_status("AI provider (click to set up)", "ds_dq_ai_status", "ai_status", "status_color"),
+                "eventHandlers": [
+                    {
+                        "type": "drilldown.linkToDashboard",
+                        "options": {
+                            "app": "splunk_exec_health",
+                            "dashboard": "ai_provider_setup",
+                            "newTab": False,
+                        },
+                    }
+                ],
+            },
             "viz_findings": findings_table,
-            "viz_thought": table("Agent thought (this cycle)", "ds_dq_thought", count=3),
-            "viz_brief": table("AI briefing — copy to your LLM; the app never sends this off-box", "ds_dq_brief", count=1),
-            "viz_selected": table("Proposed fix for the selected finding", "ds_dq_selected", count=5),
+            "viz_selected": suggestion_table,
             "viz_implement": {
                 "type": "splunk.singlevalue",
-                "title": "Act — implement (opens Search; you must press Run)",
+                "title": "3. Save your decision (opens Search; press Run)",
                 "dataSources": {"primary": "ds_dq_ready"},
                 "showLastUpdated": True,
                 "showProgressBar": False,
@@ -1637,7 +1633,7 @@ def data_quality_agent() -> dict:
                     "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
                     "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
                     "backgroundColor": "transparent",
-                    "majorFontSize": 22,
+                    "majorFontSize": 18,
                 },
                 "context": {"statusColors": STATUS_COLORS},
                 "eventHandlers": [
@@ -1664,28 +1660,10 @@ def data_quality_agent() -> dict:
                     }
                 ],
             },
-            "viz_ai_status": {
-                **single_status("AI provider (click to configure)", "ds_dq_ai_status", "ai_status", "status_color"),
-                "eventHandlers": [
-                    {
-                        "type": "drilldown.linkToDashboard",
-                        "options": {
-                            "app": "splunk_exec_health",
-                            "dashboard": "ai_provider_setup",
-                            "newTab": False,
-                        },
-                    }
-                ],
-            },
-            "viz_ai_help": md(
-                "## Optional AI provider\n"
-                "Default is **LOCAL**. Click the AI provider tile or open **Configure → AI provider** to choose OpenAI, Cisco AI Defense, Azure OpenAI, Anthropic, or custom. "
-                "**Do not enter API keys on that page.** Keys and the webhook URL stay in your gateway / Splunk Web. "
-                "After saving provider mode, type **ASK** here, then enable **Exec Health - AI provider dispatch** with a webhook."
-            ),
+            "viz_brief": table("Optional — briefing to paste into Splunk AI Assistant", "ds_dq_brief", count=1),
             "viz_ai_ask": {
                 "type": "splunk.singlevalue",
-                "title": "Ask configured AI provider (opens Search; you must press Run)",
+                "title": "Optional — send briefing to your configured provider",
                 "dataSources": {"primary": "ds_dq_ai_ready"},
                 "showLastUpdated": True,
                 "showProgressBar": False,
@@ -1693,7 +1671,7 @@ def data_quality_agent() -> dict:
                     "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
                     "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
                     "backgroundColor": "transparent",
-                    "majorFontSize": 20,
+                    "majorFontSize": 16,
                 },
                 "context": {"statusColors": STATUS_COLORS},
                 "eventHandlers": [
@@ -1727,40 +1705,29 @@ def data_quality_agent() -> dict:
                     }
                 ],
             },
-            "viz_ai_replies": table("AI replies for the selected finding (from your HEC inbox)", "ds_dq_ai_replies", count=8),
-            "viz_ai_queue": table("Pending AI requests (no secrets — briefing text only)", "ds_dq_ai_queue", count=10),
+            "viz_ai_replies": table("Provider replies for this suggestion", "ds_dq_ai_replies", count=5),
             "viz_footer": md(
-                "LOCAL mode never calls an LLM from Splunk (no API keys in the app). "
-                "PROVIDER mode still cannot change Splunk config; it only queues a briefing after **ASK** + Run. "
-                "Enable **Exec Health - Data quality agent report** to email open findings. "
-                "Never put passwords, HEC secrets, webhook URLs, or LLM keys in the lookups."
+                "Approve/Dismiss only records a decision. UF, HEC, and index repairs stay runbooks. "
+                "API keys stay on **Configure → AI provider** / your gateway — never in this queue."
             ),
         },
         "layout": grid(
             [
-                block("viz_header", 0, 0, 1200, 130),
-                block("viz_status", 0, 130, 300, 160),
-                block("viz_count", 300, 130, 300, 160),
-                block("viz_policy", 600, 130, 600, 160),
-                block("viz_cycle", 0, 290, 1200, 110),
-                block("viz_findings", 0, 400, 1200, 340),
-                block("viz_thought", 0, 740, 1200, 200),
-                block("viz_brief", 0, 940, 1200, 180),
-                block("viz_selected", 0, 1120, 800, 240),
-                block("viz_implement", 800, 1120, 400, 240),
-                block("viz_ai_status", 0, 1360, 300, 180),
-                block("viz_ai_help", 300, 1360, 900, 180),
-                block("viz_ai_ask", 0, 1540, 400, 200),
-                block("viz_ai_replies", 400, 1540, 800, 200),
-                block("viz_ai_queue", 0, 1740, 1200, 220),
-                block("viz_footer", 0, 1960, 1200, 110),
+                block("viz_header", 0, 0, 1200, 100),
+                block("viz_status", 0, 100, 400, 140),
+                block("viz_count", 400, 100, 400, 140),
+                block("viz_ai_status", 800, 100, 400, 140),
+                block("viz_findings", 0, 240, 1200, 320),
+                block("viz_selected", 0, 560, 800, 260),
+                block("viz_implement", 800, 560, 400, 260),
+                block("viz_brief", 0, 820, 800, 160),
+                block("viz_ai_ask", 800, 820, 400, 160),
+                block("viz_ai_replies", 0, 980, 1200, 160),
+                block("viz_footer", 0, 1140, 1200, 80),
             ],
             extra_inputs=[
                 "input_ask",
                 "input_finding",
-                "input_entity",
-                "input_issue",
-                "input_ai_brief",
                 "input_decision",
                 "input_confirm",
                 "input_ai_confirm",
@@ -1939,7 +1906,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.1"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2298,7 +2265,7 @@ def main() -> None:
         ),
         "data_quality_agent.xml": (
             "Derek+ Data Quality Agent",
-            "Agentic health loop: instance, ingest, hosts, HEC, SC4S, Edge — human Act required.",
+            "Pick a suggestion, review the fix, approve or dismiss. Nothing changes until you press Run.",
             data_quality_agent(),
         ),
         "ai_provider_setup.xml": (
