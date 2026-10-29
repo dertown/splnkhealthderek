@@ -79,6 +79,30 @@
         "token": "tok_confirm",
         "defaultValue": "NO"
       }
+    },
+    "input_issue": {
+      "type": "input.text",
+      "title": "Selected issue",
+      "options": {
+        "token": "tok_issue",
+        "defaultValue": "none"
+      }
+    },
+    "input_ai_brief": {
+      "type": "input.text",
+      "title": "Selected AI briefing",
+      "options": {
+        "token": "tok_ai_brief",
+        "defaultValue": "none"
+      }
+    },
+    "input_ai_confirm": {
+      "type": "input.text",
+      "title": "Type ASK to send to the configured AI provider",
+      "options": {
+        "token": "tok_ai_confirm",
+        "defaultValue": "NO"
+      }
     }
   },
   "dataSources": {
@@ -147,6 +171,58 @@
           "latest": "now"
         }
       }
+    },
+    "ds_dq_ai_status": {
+      "type": "ds.search",
+      "name": "AI provider status",
+      "options": {
+        "query": "| inputlookup dq_agent_ai_config\n| where stanza=\"default\"\n| head 1\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval ai_status=case(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\", \"PROVIDER\", mode=\"provider\", \"MISCONFIG\", 1=1, \"LOCAL\")\n| eval status_color=case(ai_status=\"PROVIDER\", \"YELLOW\", ai_status=\"MISCONFIG\", \"RED\", 1=1, \"GREEN\")\n| eval _color_rank=case(ai_status=\"MISCONFIG\", 1, ai_status=\"PROVIDER\", 2, 1=1, 3)\n| table ai_status, status_color, mode, provider, provider_label, model, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
+        "refresh": "30s",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "0",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_dq_ai_ready": {
+      "type": "ds.search",
+      "name": "Ask AI control",
+      "options": {
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", confirm=\"$tok_ai_confirm$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, updated_at\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval ready=if(confirm=\"ASK\" AND finding_id!=\"none\" AND finding_id!=\"\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\", 1, 0)\n| eval button_label=case(mode!=\"provider\", \"OPEN AI SETUP FIRST\", ready=1, \"CLICK TO ASK AI\", 1=1, \"TYPE ASK AFTER A REVIEW\")\n| eval button_color=if(ready=1, \"YELLOW\", \"N/A\")\n| table button_label, button_color, ready",
+        "refresh": "30s",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "0",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_dq_ai_queue": {
+      "type": "ds.search",
+      "name": "AI request queue",
+      "options": {
+        "query": "| inputlookup dq_agent_ai_requests\n| where NOT (finding_id=\"placeholder\" AND status=\"none\")\n| eval _color_rank=case(status=\"pending\", 2, 1=1, 3)\n| table requested_at, finding_id, entity, issue, provider, model, status, actor, note, _color_rank\n| sort 0 -requested_at",
+        "refresh": "30s",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "0",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_dq_ai_replies": {
+      "type": "ds.search",
+      "name": "AI provider replies",
+      "options": {
+        "query": "search [| inputlookup dq_agent_ai_config | where stanza=\"default\" | head 1 | eval inbox_index=replace(coalesce(inbox_index, \"_internal\"), \"[^A-Za-z0-9_]\", \"\") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\"), \"[^A-Za-z0-9_]\", \"\") | eval search=\"index=\".inbox_index.\" sourcetype=\".inbox_sourcetype | return $search]\n| eval fid=\"$tok_finding_id$\"\n| where fid!=\"none\" AND fid!=\"\" AND (finding_id=fid OR match(coalesce(_raw, \"\"), fid))\n| eval reply=coalesce(reply, ai_reply, _raw)\n| sort 0 -_time\n| head 10\n| table _time, provider, model, finding_id, reply",
+        "refresh": "30s",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-24h",
+          "latest": "now"
+        }
+      }
     }
   },
   "visualizations": {
@@ -189,6 +265,18 @@
           {
             "match": "N/A",
             "value": "#F8BE34"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#53A051"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#DC4E41"
           }
         ]
       }
@@ -222,7 +310,7 @@
     "viz_cycle": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## How to work a finding\n1. **Ask** the agent (or leave `all`). 2. Click **Review** on a row. 3. Read **thought** (what it observed/investigated) and the **AI briefing** (paste into Splunk AI Assistant or your LLM if you want a second opinion). 4. Choose Dismiss or Approve, type **APPLY**, click implement, press **Run** in Search.",
+        "markdown": "## How to work a finding\n1. **Ask** the agent (or leave `all`). 2. Click **Review** on a row. 3. Read **thought** and the **AI briefing**. 4. Optional: open **Configure \u2192 AI provider**, then type **ASK** to queue the briefing (keys stay in your gateway). 5. Choose Dismiss or Approve, type **APPLY**, click implement, press **Run** in Search.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -288,6 +376,14 @@
               {
                 "token": "tok_entity",
                 "key": "row.entity.value"
+              },
+              {
+                "token": "tok_issue",
+                "key": "row.issue.value"
+              },
+              {
+                "token": "tok_ai_brief",
+                "key": "row.ai_brief.value"
               }
             ]
           }
@@ -460,6 +556,18 @@
           {
             "match": "N/A",
             "value": "#F8BE34"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#53A051"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#DC4E41"
           }
         ]
       },
@@ -474,10 +582,222 @@
         }
       ]
     },
+    "viz_ai_status": {
+      "type": "splunk.singlevalue",
+      "title": "AI provider (click to configure)",
+      "dataSources": {
+        "primary": "ds_dq_ai_status"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"ai_status\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"ai_status\") | lastPoint() | matchValue(statusColors)",
+        "backgroundColor": "transparent",
+        "majorFontSize": 36
+      },
+      "context": {
+        "statusColors": [
+          {
+            "match": "GREEN",
+            "value": "#53A051"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "RED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "N/A",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#53A051"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#DC4E41"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToDashboard",
+          "options": {
+            "app": "splunk_exec_health",
+            "dashboard": "ai_provider_setup",
+            "newTab": false
+          }
+        }
+      ]
+    },
+    "viz_ai_help": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "## Optional AI provider\nDefault is **LOCAL**. Click the AI provider tile or open **Configure \u2192 AI provider** to choose OpenAI, Cisco AI Defense, Azure OpenAI, Anthropic, or custom. **Do not enter API keys on that page.** Keys and the webhook URL stay in your gateway / Splunk Web. After saving provider mode, type **ASK** here, then enable **Exec Health - AI provider dispatch** with a webhook.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_ai_ask": {
+      "type": "splunk.singlevalue",
+      "title": "Ask configured AI provider (opens Search; you must press Run)",
+      "dataSources": {
+        "primary": "ds_dq_ai_ready"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": false,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+        "backgroundColor": "transparent",
+        "majorFontSize": 20
+      },
+      "context": {
+        "statusColors": [
+          {
+            "match": "GREEN",
+            "value": "#53A051"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "RED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "N/A",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#53A051"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#DC4E41"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "custom",
+            "newTab": true,
+            "query": "| inputlookup dq_agent_ai_requests | append [ | makeresults | eval finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", confirm=\"$tok_ai_confirm$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\" | lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, updated_at | eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1) | eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\")) | eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\")) | eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\")) | eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\")) | where confirm=\"ASK\" AND finding_id!=\"none\" AND finding_id!=\"\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" | eval status=\"pending\", actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ask_ai_provider\" | table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief ] | outputlookup dq_agent_ai_requests"
+          }
+        }
+      ]
+    },
+    "viz_ai_replies": {
+      "type": "splunk.table",
+      "title": "AI replies for the selected finding (from your HEC inbox)",
+      "dataSources": {
+        "primary": "ds_dq_ai_replies"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 8,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_ai_queue": {
+      "type": "splunk.table",
+      "title": "Pending AI requests (no secrets \u2014 briefing text only)",
+      "dataSources": {
+        "primary": "ds_dq_ai_queue"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 10,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "This agent does **not** call an external LLM from Splunk (no API keys in the app). The AI briefing is local context you can paste into Splunk AI Assistant or an approved model. Enable **Exec Health - Data quality agent report** to email open findings. Never put passwords, HEC secrets, or webhook URLs in the lookups.",
+        "markdown": "LOCAL mode never calls an LLM from Splunk (no API keys in the app). PROVIDER mode still cannot change Splunk config; it only queues a briefing after **ASK** + Run. Enable **Exec Health - Data quality agent report** to email open findings. Never put passwords, HEC secrets, webhook URLs, or LLM keys in the lookups.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -587,11 +907,61 @@
         }
       },
       {
-        "item": "viz_footer",
+        "item": "viz_ai_status",
         "type": "block",
         "position": {
           "x": 0,
           "y": 1360,
+          "w": 300,
+          "h": 180
+        }
+      },
+      {
+        "item": "viz_ai_help",
+        "type": "block",
+        "position": {
+          "x": 300,
+          "y": 1360,
+          "w": 900,
+          "h": 180
+        }
+      },
+      {
+        "item": "viz_ai_ask",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1540,
+          "w": 400,
+          "h": 200
+        }
+      },
+      {
+        "item": "viz_ai_replies",
+        "type": "block",
+        "position": {
+          "x": 400,
+          "y": 1540,
+          "w": 800,
+          "h": 200
+        }
+      },
+      {
+        "item": "viz_ai_queue",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1740,
+          "w": 1200,
+          "h": 220
+        }
+      },
+      {
+        "item": "viz_footer",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1960,
           "w": 1200,
           "h": 110
         }
@@ -602,8 +972,11 @@
       "input_ask",
       "input_finding",
       "input_entity",
+      "input_issue",
+      "input_ai_brief",
       "input_decision",
-      "input_confirm"
+      "input_confirm",
+      "input_ai_confirm"
     ]
   }
 }

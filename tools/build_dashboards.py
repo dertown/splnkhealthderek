@@ -27,6 +27,9 @@ STATUS_COLORS = [
     {"match": "YELLOW", "value": YELLOW},
     {"match": "RED", "value": RED},
     {"match": "N/A", "value": YELLOW},
+    {"match": "LOCAL", "value": GREEN},
+    {"match": "PROVIDER", "value": YELLOW},
+    {"match": "MISCONFIG", "value": RED},
 ]
 
 # Row colors: 1=red/alert, 2=yellow, 3=green/ok
@@ -1407,6 +1410,81 @@ Q_DQ_AGENT_ASK = r"""
 | where q="all" OR q="" OR like(lower(issue." ".entity." ".coalesce(likely_cause, "")." ".suggested_fix." ".coalesce(fix_type, "")), "%".q."%")
 """
 
+Q_DQ_AI_CFG_ROW = r"""
+| inputlookup dq_agent_ai_config
+| where stanza="default"
+| head 1
+| eval used_ui=if(updated_at="0" OR isnull(updated_at), 0, 1)
+| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
+| eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
+| eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
+| eval endpoint=if(used_ui=0, "`exec_health_ai_endpoint`", coalesce(endpoint, "none"))
+| eval inbox_index=coalesce(inbox_index, "_internal")
+| eval inbox_sourcetype=coalesce(inbox_sourcetype, "derek_health_ai_unconfigured")
+""".strip()
+
+Q_DQ_AI_STATUS = Q_DQ_AI_CFG_ROW + r"""
+| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes
+| eval endpoint=if(endpoint="none" OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
+| eval ai_status=case(mode="provider" AND provider!="none" AND provider!="", "PROVIDER", mode="provider", "MISCONFIG", 1=1, "LOCAL")
+| eval status_color=case(ai_status="PROVIDER", "YELLOW", ai_status="MISCONFIG", "RED", 1=1, "GREEN")
+| eval _color_rank=case(ai_status="MISCONFIG", 1, ai_status="PROVIDER", 2, 1=1, 3)
+| table ai_status, status_color, mode, provider, provider_label, model, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank
+"""
+
+Q_DQ_AI_ASK_READY = r"""
+| makeresults
+| eval finding_id="$tok_finding_id$", confirm="$tok_ai_confirm$", stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT mode, provider, updated_at
+| eval used_ui=if(updated_at="0" OR isnull(updated_at), 0, 1)
+| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
+| eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
+| eval ready=if(confirm="ASK" AND finding_id!="none" AND finding_id!="" AND mode="provider" AND provider!="none" AND provider!="", 1, 0)
+| eval button_label=case(mode!="provider", "OPEN AI SETUP FIRST", ready=1, "CLICK TO ASK AI", 1=1, "TYPE ASK AFTER A REVIEW")
+| eval button_color=if(ready=1, "YELLOW", "N/A")
+| table button_label, button_color, ready
+"""
+
+Q_DQ_AI_SAVE_READY = r"""
+| makeresults
+| eval confirm="$tok_cfg_save$", mode="$tok_cfg_mode$", provider="$tok_cfg_provider$"
+| eval ready=if(confirm="SAVE" AND (mode="off" OR (mode="provider" AND provider!="none" AND provider!="")), 1, 0)
+| eval button_label=if(ready=1, "CLICK TO SAVE CONFIG", "TYPE SAVE TO WRITE SETTINGS")
+| eval button_color=if(ready=1, "YELLOW", "N/A")
+| table button_label, button_color, ready
+"""
+
+Q_DQ_AI_QUEUE = r"""
+| inputlookup dq_agent_ai_requests
+| where NOT (finding_id="placeholder" AND status="none")
+| eval _color_rank=case(status="pending", 2, 1=1, 3)
+| table requested_at, finding_id, entity, issue, provider, model, status, actor, note, _color_rank
+| sort 0 -requested_at
+"""
+
+Q_DQ_AI_REPLIES = r"""
+search [| inputlookup dq_agent_ai_config | where stanza="default" | head 1 | eval inbox_index=replace(coalesce(inbox_index, "_internal"), "[^A-Za-z0-9_]", "") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, "derek_health_ai_unconfigured"), "[^A-Za-z0-9_]", "") | eval search="index=".inbox_index." sourcetype=".inbox_sourcetype | return $search]
+| eval fid="$tok_finding_id$"
+| where fid!="none" AND fid!="" AND (finding_id=fid OR match(coalesce(_raw, ""), fid))
+| eval reply=coalesce(reply, ai_reply, _raw)
+| sort 0 -_time
+| head 10
+| table _time, provider, model, finding_id, reply
+"""
+
+Q_DQ_AI_DISPATCH = r"""
+| inputlookup dq_agent_ai_requests
+| where status="pending" AND provider!="none" AND provider!=""
+| eval stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT mode AS cfg_mode, updated_at AS cfg_updated
+| eval used_ui=if(cfg_updated="0" OR isnull(cfg_updated), 0, 1)
+| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(cfg_mode, "off"))
+| where mode="provider"
+| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint
+| eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
+| table requested_at, finding_id, entity, issue, provider, provider_label, model, endpoint, ai_brief, status, actor, note
+"""
+
 
 def data_quality_agent() -> dict:
     findings_table = table(
@@ -1421,6 +1499,8 @@ def data_quality_agent() -> dict:
                 "tokens": [
                     {"token": "tok_finding_id", "key": "row.finding_id.value"},
                     {"token": "tok_entity", "key": "row.entity.value"},
+                    {"token": "tok_issue", "key": "row.issue.value"},
+                    {"token": "tok_ai_brief", "key": "row.ai_brief.value"},
                 ]
             },
         }
@@ -1470,6 +1550,21 @@ def data_quality_agent() -> dict:
                 "title": "Type APPLY to implement (required)",
                 "options": {"token": "tok_confirm", "defaultValue": "NO"},
             },
+            "input_issue": {
+                "type": "input.text",
+                "title": "Selected issue",
+                "options": {"token": "tok_issue", "defaultValue": "none"},
+            },
+            "input_ai_brief": {
+                "type": "input.text",
+                "title": "Selected AI briefing",
+                "options": {"token": "tok_ai_brief", "defaultValue": "none"},
+            },
+            "input_ai_confirm": {
+                "type": "input.text",
+                "title": "Type ASK to send to the configured AI provider",
+                "options": {"token": "tok_ai_confirm", "defaultValue": "NO"},
+            },
         },
         "dataSources": {
             "ds_dq_findings": ds("Agent cycle findings", Q_DQ_AGENT_FINDINGS, "-24h", "now"),
@@ -1500,6 +1595,10 @@ def data_quality_agent() -> dict:
 """.strip(),
             ),
             "ds_dq_ready": ds("Implement control", Q_DQ_IMPLEMENT_READY, "0", "now", refresh="30s"),
+            "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_STATUS, "0", "now", refresh="30s"),
+            "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_READY, "0", "now", refresh="30s"),
+            "ds_dq_ai_queue": ds("AI request queue", Q_DQ_AI_QUEUE, "0", "now", refresh="30s"),
+            "ds_dq_ai_replies": ds("AI provider replies", Q_DQ_AI_REPLIES, "-24h", "now", refresh="30s"),
         },
         "visualizations": {
             "viz_header": md(
@@ -1520,8 +1619,9 @@ def data_quality_agent() -> dict:
             "viz_cycle": md(
                 "## How to work a finding\n"
                 "1. **Ask** the agent (or leave `all`). 2. Click **Review** on a row. "
-                "3. Read **thought** (what it observed/investigated) and the **AI briefing** (paste into Splunk AI Assistant or your LLM if you want a second opinion). "
-                "4. Choose Dismiss or Approve, type **APPLY**, click implement, press **Run** in Search."
+                "3. Read **thought** and the **AI briefing**. "
+                "4. Optional: open **Configure → AI provider**, then type **ASK** to queue the briefing (keys stay in your gateway). "
+                "5. Choose Dismiss or Approve, type **APPLY**, click implement, press **Run** in Search."
             ),
             "viz_findings": findings_table,
             "viz_thought": table("Agent thought (this cycle)", "ds_dq_thought", count=3),
@@ -1564,11 +1664,76 @@ def data_quality_agent() -> dict:
                     }
                 ],
             },
+            "viz_ai_status": {
+                **single_status("AI provider (click to configure)", "ds_dq_ai_status", "ai_status", "status_color"),
+                "eventHandlers": [
+                    {
+                        "type": "drilldown.linkToDashboard",
+                        "options": {
+                            "app": "splunk_exec_health",
+                            "dashboard": "ai_provider_setup",
+                            "newTab": False,
+                        },
+                    }
+                ],
+            },
+            "viz_ai_help": md(
+                "## Optional AI provider\n"
+                "Default is **LOCAL**. Click the AI provider tile or open **Configure → AI provider** to choose OpenAI, Cisco AI Defense, Azure OpenAI, Anthropic, or custom. "
+                "**Do not enter API keys on that page.** Keys and the webhook URL stay in your gateway / Splunk Web. "
+                "After saving provider mode, type **ASK** here, then enable **Exec Health - AI provider dispatch** with a webhook."
+            ),
+            "viz_ai_ask": {
+                "type": "splunk.singlevalue",
+                "title": "Ask configured AI provider (opens Search; you must press Run)",
+                "dataSources": {"primary": "ds_dq_ai_ready"},
+                "showLastUpdated": True,
+                "showProgressBar": False,
+                "options": {
+                    "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
+                    "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+                    "backgroundColor": "transparent",
+                    "majorFontSize": 20,
+                },
+                "context": {"statusColors": STATUS_COLORS},
+                "eventHandlers": [
+                    {
+                        "type": "drilldown.linkToSearch",
+                        "options": {
+                            "type": "custom",
+                            "newTab": True,
+                            "query": (
+                                "| inputlookup dq_agent_ai_requests "
+                                "| append [ "
+                                "| makeresults "
+                                "| eval finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", "
+                                "issue=\"$tok_issue$\", confirm=\"$tok_ai_confirm$\", "
+                                "ai_brief=\"$tok_ai_brief$\", stanza=\"default\" "
+                                "| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, updated_at "
+                                "| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1) "
+                                "| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\")) "
+                                "| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\")) "
+                                "| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\")) "
+                                "| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\")) "
+                                "| where confirm=\"ASK\" AND finding_id!=\"none\" AND finding_id!=\"\" "
+                                "AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" "
+                                "| eval status=\"pending\", actor=\"human_dashboard\", "
+                                "requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ask_ai_provider\" "
+                                "| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief "
+                                "] "
+                                "| outputlookup dq_agent_ai_requests"
+                            ),
+                        },
+                    }
+                ],
+            },
+            "viz_ai_replies": table("AI replies for the selected finding (from your HEC inbox)", "ds_dq_ai_replies", count=8),
+            "viz_ai_queue": table("Pending AI requests (no secrets — briefing text only)", "ds_dq_ai_queue", count=10),
             "viz_footer": md(
-                "This agent does **not** call an external LLM from Splunk (no API keys in the app). "
-                "The AI briefing is local context you can paste into Splunk AI Assistant or an approved model. "
+                "LOCAL mode never calls an LLM from Splunk (no API keys in the app). "
+                "PROVIDER mode still cannot change Splunk config; it only queues a briefing after **ASK** + Run. "
                 "Enable **Exec Health - Data quality agent report** to email open findings. "
-                "Never put passwords, HEC secrets, or webhook URLs in the lookups."
+                "Never put passwords, HEC secrets, webhook URLs, or LLM keys in the lookups."
             ),
         },
         "layout": grid(
@@ -1583,20 +1748,198 @@ def data_quality_agent() -> dict:
                 block("viz_brief", 0, 940, 1200, 180),
                 block("viz_selected", 0, 1120, 800, 240),
                 block("viz_implement", 800, 1120, 400, 240),
-                block("viz_footer", 0, 1360, 1200, 110),
+                block("viz_ai_status", 0, 1360, 300, 180),
+                block("viz_ai_help", 300, 1360, 900, 180),
+                block("viz_ai_ask", 0, 1540, 400, 200),
+                block("viz_ai_replies", 400, 1540, 800, 200),
+                block("viz_ai_queue", 0, 1740, 1200, 220),
+                block("viz_footer", 0, 1960, 1200, 110),
             ],
             extra_inputs=[
                 "input_ask",
                 "input_finding",
                 "input_entity",
+                "input_issue",
+                "input_ai_brief",
                 "input_decision",
                 "input_confirm",
+                "input_ai_confirm",
             ],
         ),
     }
 
 
-APP_VERSION = "1.5.0"
+def ai_provider_setup() -> dict:
+    return {
+        "title": "AI provider setup",
+        "description": "Configure optional OpenAI, Cisco, Azure, or custom model integration. No API keys on this page.",
+        "defaults": {},
+        "inputs": {
+            "input_cfg_mode": {
+                "type": "input.dropdown",
+                "title": "AI mode",
+                "options": {
+                    "token": "tok_cfg_mode",
+                    "defaultValue": "off",
+                    "items": [
+                        {"label": "Off — local briefing only", "value": "off"},
+                        {"label": "Provider — queue ASK to your gateway", "value": "provider"},
+                    ],
+                },
+            },
+            "input_cfg_provider": {
+                "type": "input.dropdown",
+                "title": "Provider",
+                "options": {
+                    "token": "tok_cfg_provider",
+                    "defaultValue": "none",
+                    "items": [
+                        {"label": "None", "value": "none"},
+                        {"label": "OpenAI", "value": "openai"},
+                        {"label": "Cisco AI Defense", "value": "cisco"},
+                        {"label": "Azure OpenAI", "value": "azure"},
+                        {"label": "Anthropic", "value": "anthropic"},
+                        {"label": "Custom OpenAI-compatible", "value": "custom"},
+                    ],
+                },
+            },
+            "input_cfg_model": {
+                "type": "input.text",
+                "title": "Model id (example gpt-4o-mini)",
+                "options": {"token": "tok_cfg_model", "defaultValue": "none"},
+            },
+            "input_cfg_endpoint": {
+                "type": "input.text",
+                "title": "Chat endpoint URL (none = provider default)",
+                "options": {"token": "tok_cfg_endpoint", "defaultValue": "none"},
+            },
+            "input_cfg_inbox_index": {
+                "type": "input.text",
+                "title": "HEC reply index",
+                "options": {"token": "tok_cfg_inbox_index", "defaultValue": "main"},
+            },
+            "input_cfg_inbox_sourcetype": {
+                "type": "input.text",
+                "title": "HEC reply sourcetype",
+                "options": {"token": "tok_cfg_inbox_sourcetype", "defaultValue": "derek_health_ai"},
+            },
+            "input_cfg_save": {
+                "type": "input.text",
+                "title": "Type SAVE to write these settings",
+                "options": {"token": "tok_cfg_save", "defaultValue": "NO"},
+            },
+        },
+        "dataSources": {
+            "ds_ai_current": ds("Saved AI config", Q_DQ_AI_STATUS, "0", "now", refresh="30s"),
+            "ds_ai_providers": ds(
+                "Provider catalog",
+                "| inputlookup dq_agent_ai_providers | eval _color_rank=3 | table provider, provider_label, default_endpoint, notes, _color_rank",
+                "0",
+                "now",
+                refresh="5m",
+            ),
+            "ds_ai_save": ds("Save control", Q_DQ_AI_SAVE_READY, "0", "now", refresh="30s"),
+        },
+        "visualizations": {
+            "viz_header": md(
+                "# AI provider setup\n"
+                "Choose how Derek+ talks to a model. This page stores **mode, provider, model, endpoint, and HEC inbox** only. "
+                "**Never type API keys, HEC tokens, or webhook URLs here** — they are searchable. "
+                "Put secrets in your gateway environment or Splunk **storage/passwords**."
+            ),
+            "viz_status": single_status("Current mode", "ds_ai_current", "ai_status", "status_color"),
+            "viz_steps": md(
+                "## After you save\n"
+                "1. Enable **Exec Health - AI provider dispatch**.\n"
+                "2. On that search, add a **webhook** in Splunk Web to your gateway (OpenAI, Cisco AI Defense, Azure, or `tools/ai_gateway_example.py`).\n"
+                "3. Point the gateway at this HEC index/sourcetype.\n"
+                "4. Open **Derek+ Data Quality Agent**, review a finding, type **ASK**, press **Run**.\n"
+                "Cisco endpoint looks like `https://gateway.aidefense.security.cisco.com/<tenant>/connections/<conn>/v1/chat/completions`."
+            ),
+            "viz_current": table("Saved integration settings (no secrets)", "ds_ai_current", count=5),
+            "viz_providers": table("Supported providers", "ds_ai_providers", count=10),
+            "viz_save": {
+                "type": "splunk.singlevalue",
+                "title": "Save (opens Search; you must press Run)",
+                "dataSources": {"primary": "ds_ai_save"},
+                "showLastUpdated": True,
+                "showProgressBar": False,
+                "options": {
+                    "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
+                    "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+                    "backgroundColor": "transparent",
+                    "majorFontSize": 22,
+                },
+                "context": {"statusColors": STATUS_COLORS},
+                "eventHandlers": [
+                    {
+                        "type": "drilldown.linkToSearch",
+                        "options": {
+                            "type": "custom",
+                            "newTab": True,
+                            "query": (
+                                "| inputlookup dq_agent_ai_config "
+                                "| eval src=1 "
+                                "| append [ "
+                                "| makeresults "
+                                "| eval confirm=\"$tok_cfg_save$\" "
+                                "| eval mode=lower(\"$tok_cfg_mode$\") "
+                                "| eval mode=if(mode=\"provider\", \"provider\", \"off\") "
+                                "| eval provider=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\") "
+                                "| eval provider=if(provider=\"openai\" OR provider=\"cisco\" OR provider=\"azure\" OR provider=\"anthropic\" OR provider=\"custom\", provider, \"none\") "
+                                "| eval model=replace(lower(\"$tok_cfg_model$\"), \"[^a-z0-9._-]\", \"\") "
+                                "| eval model=if(model=\"\" OR isnull(model), \"none\", model) "
+                                "| eval endpoint=replace(\"$tok_cfg_endpoint$\", \"[^-A-Za-z0-9:/.?&=]\", \"\") "
+                                "| eval endpoint=if(endpoint=\"\" OR isnull(endpoint), \"none\", endpoint) "
+                                "| eval inbox_index=replace(\"$tok_cfg_inbox_index$\", \"[^A-Za-z0-9_]\", \"\") "
+                                "| eval inbox_index=if(inbox_index=\"\" OR isnull(inbox_index), \"_internal\", inbox_index) "
+                                "| eval inbox_sourcetype=replace(\"$tok_cfg_inbox_sourcetype$\", \"[^A-Za-z0-9_]\", \"\") "
+                                "| eval inbox_sourcetype=if(inbox_sourcetype=\"\" OR isnull(inbox_sourcetype), \"derek_health_ai_unconfigured\", inbox_sourcetype) "
+                                "| where confirm=\"SAVE\" AND (mode=\"off\" OR (mode=\"provider\" AND provider!=\"none\")) "
+                                "| eval stanza=\"default\", src=2, updated_by=\"human_dashboard\", "
+                                "updated_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ui_config\" "
+                                "| table stanza, mode, provider, model, endpoint, inbox_index, inbox_sourcetype, updated_by, updated_at, note, src "
+                                "] "
+                                "| sort stanza, -src "
+                                "| dedup stanza "
+                                "| fields - src "
+                                "| outputlookup dq_agent_ai_config"
+                            ),
+                        },
+                    }
+                ],
+            },
+            "viz_footer": md(
+                "Saving writes `lookups/dq_agent_ai_config.csv` on this search head. "
+                "It does not call a model and does not change `inputs.conf`. "
+                "Webhook URLs and API keys never belong in this lookup."
+            ),
+        },
+        "layout": grid(
+            [
+                block("viz_header", 0, 0, 1200, 140),
+                block("viz_status", 0, 140, 300, 180),
+                block("viz_steps", 300, 140, 900, 180),
+                block("viz_current", 0, 320, 1200, 200),
+                block("viz_providers", 0, 520, 1200, 240),
+                block("viz_save", 0, 760, 400, 200),
+                block("viz_footer", 400, 760, 800, 200),
+            ],
+            extra_inputs=[
+                "input_cfg_mode",
+                "input_cfg_provider",
+                "input_cfg_model",
+                "input_cfg_endpoint",
+                "input_cfg_inbox_index",
+                "input_cfg_inbox_sourcetype",
+                "input_cfg_save",
+            ],
+            include_time=False,
+        ),
+    }
+
+
+APP_VERSION = "1.7.0"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -1653,8 +1996,8 @@ def about() -> dict:
                 "## Security\n"
                 "This app does **not** store SMTP passwords, Slack webhooks, API tokens, LLM keys, HEC token secrets, "
                 "certificates, or other credentials. Map HEC token **names** only in `lookups/hec_token_map.csv`. "
-                "Playbooks (`dq_agent_playbooks.csv`) and approvals (`dq_agent_approvals.csv`) hold runbook text only. "
-                "Configure email or Slack on the saved search in Splunk Web after you enable it."
+                "Playbooks, approvals, and AI request lookups hold runbook text only. "
+                "Optional AI providers are configured on **Configure → AI provider**. Keys and webhook URLs belong in Splunk Web or your gateway, never in this app."
             ),
         },
         "layout": grid(
@@ -1690,7 +2033,8 @@ def readme() -> dict:
                 "- **HEC Token Performance** — events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n"
                 "- **SC4S Syslog & Edge/Ingest Processors** — syslog sources, Edge in vs out, filter efficiency\n"
                 "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index, and forwarder → indexer\n"
-                "- **Derek+ Data Quality Agent** — agentic loop over health tiles and learned ingest bounds; a human must APPLY\n\n"
+                "- **Derek+ Data Quality Agent** — agentic loop over health tiles and learned ingest bounds; a human must APPLY\n"
+                "- **AI provider setup** — Configure → AI provider: mode, model, endpoint, HEC inbox (no API keys)\n\n"
                 "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
             ),
             "viz_heartbeat": md(
@@ -1739,7 +2083,8 @@ def readme() -> dict:
                 "- Host volume 2σ drop\n"
                 "- HEC token silence\n"
                 "- Host data silent with heartbeat\n"
-                "- Data quality agent report (open findings + proposed fixes; enable email yourself — the agent never auto-fixes)"
+                "- Data quality agent report (open findings + proposed fixes; enable email yourself — the agent never auto-fixes)\n"
+                "- AI provider dispatch (pending ASK requests; attach a webhook in Splunk Web — never put the URL or API key in this app)"
             ),
             "viz_hec": md(
                 "## HEC token names\n"
@@ -1892,6 +2237,19 @@ SAVED_SEARCHES = [
             ("alert.suppress.period", "1h"),
         ],
     ),
+    (
+        "Exec Health - AI provider dispatch",
+        Q_DQ_AI_DISPATCH,
+        "Lists pending human-approved ASK requests for the configured AI provider. Enable this search only after you set exec_health_ai_mode=provider, then attach a webhook action in Splunk Web to your gateway. Do not put webhook URLs, API keys, or HEC tokens in this app. The search never calls a provider itself and never changes Splunk configuration.",
+        [
+            ("cron_schedule", "*/5 * * * *"),
+            ("dispatch.earliest_time", "-15m"),
+            ("dispatch.latest_time", "now"),
+            ("alert.digest_mode", "1"),
+            ("alert.severity", "3"),
+            ("alert.suppress.period", "5m"),
+        ],
+    ),
 ]
 
 
@@ -1942,6 +2300,11 @@ def main() -> None:
             "Derek+ Data Quality Agent",
             "Agentic health loop: instance, ingest, hosts, HEC, SC4S, Edge — human Act required.",
             data_quality_agent(),
+        ),
+        "ai_provider_setup.xml": (
+            "AI provider setup",
+            "Configure optional OpenAI, Cisco, Azure, or custom model integration. No API keys on this page.",
+            ai_provider_setup(),
         ),
         "readme.xml": (
             "README",

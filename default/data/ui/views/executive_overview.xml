@@ -208,6 +208,18 @@
           {
             "match": "N/A",
             "value": "#F8BE34"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#53A051"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#DC4E41"
           }
         ]
       }
@@ -320,6 +332,18 @@
           {
             "match": "N/A",
             "value": "#F8BE34"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#53A051"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#DC4E41"
           }
         ]
       }
@@ -355,6 +379,18 @@
           {
             "match": "N/A",
             "value": "#F8BE34"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#53A051"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#DC4E41"
           }
         ]
       }

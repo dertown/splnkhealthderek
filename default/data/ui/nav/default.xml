@@ -5,6 +5,9 @@
   <view name="sc4s_edge" />
   <view name="data_topology" />
   <view name="data_quality_agent" />
+  <collection label="Configure">
+    <view name="ai_provider_setup" />
+  </collection>
   <collection label="Help">
     <view name="readme" />
     <view name="about" />

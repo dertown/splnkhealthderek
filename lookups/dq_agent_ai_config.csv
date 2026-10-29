@@ -1,0 +1,2 @@
+stanza,mode,provider,model,endpoint,inbox_index,inbox_sourcetype,updated_by,updated_at,note
+default,off,none,none,none,_internal,derek_health_ai_unconfigured,system,0,seed row — do not delete

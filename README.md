@@ -18,6 +18,7 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
 | **Data Topology** | Link graph and Sankey of data sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port / HEC / SC4S → index, plus forwarder → indexer |
 | **Derek+ Data Quality Agent** | Agentic loop over health tiles and learned ingest bounds (instance features, silent hosts, search CPU, HEC, SC4S, Edge). A human must type APPLY and press Run before anything is recorded. |
+| **AI provider setup** | Configure OpenAI / Cisco / Azure / Anthropic / custom (mode, model, endpoint, HEC inbox). No API keys on this page. |
 
 Saved searches (all **disabled** on install):
 
@@ -53,7 +54,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/` Python, no `
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.5.0.spl`.
+3. Upload `dist/splunk_exec_health-1.7.0.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -84,7 +85,7 @@ Do not put SMTP passwords, Slack webhook URLs, API tokens, or HEC token **secret
 
 ## Derek+ Data Quality Agent
 
-The agent is a **search-head loop**, not a Python process and not an external LLM call (no API keys in the app). Each cycle:
+The agent is a **search-head loop**. It ships with **LOCAL** AI mode (no outbound LLM, no API keys in the app). You can optionally configure a provider (OpenAI, Cisco AI Defense, Azure OpenAI, Anthropic, or a custom OpenAI-compatible proxy). Each cycle:
 
 1. **Observe** — health tiles and learned bounds: `health.log` features, live ingest, license 7-day MA, `predict()`, host 2-sigma, HEC silence, heartbeat vs data / HOST DOWN, search CPU, SC4S errors, Edge queues.
 2. **Investigate** — tools: `tcpin_connections` forwarder type/connection, recent `_internal` ERROR/WARN component counts, `_introspection` CPU, Edge `mstats`.
@@ -102,6 +103,20 @@ To work a finding:
 4. Type `APPLY`, click the implement control, press **Run**.
 
 Enable **Exec Health - Data quality agent report** if you want open findings emailed. Never put passwords, HEC secrets, webhook URLs, or LLM keys in the lookups.
+
+### Optional AI provider
+
+Use **Configure → AI provider** (or click the AI provider tile on the agent dashboard). That page writes `lookups/dq_agent_ai_config.csv`. It has **no API key field**.
+
+1. Set mode to **Provider**, pick OpenAI / Cisco AI Defense / Azure OpenAI / Anthropic / custom, then model, endpoint, and HEC reply index/sourcetype.
+2. Type **SAVE**, click the control, press **Run** in Search.
+3. Store API keys and HEC tokens **outside this app**: gateway environment or Splunk **storage/passwords**. Never in lookups or macros.
+4. Enable **Exec Health - AI provider dispatch** and attach a **webhook** in Splunk Web to your gateway. Do not put that URL in the app package.
+5. On the agent dashboard, review a finding, type **ASK**, press **Run**. The gateway should HEC-write the reply to the index/sourcetype you saved.
+
+Cisco endpoint looks like `https://gateway.aidefense.security.cisco.com/<tenant>/connections/<conn>/v1/chat/completions`. Until you SAVE in the UI, macros `exec_health_ai_*` remain the fallback (default `off`).
+
+`tools/ai_gateway_example.py` is a development example (not in the Cloud `.spl`). It reads `OPENAI_API_KEY` / `CISCO_API_KEY` / `AZURE_OPENAI_API_KEY` / `ANTHROPIC_API_KEY` and `SPLUNK_HEC_URL` / `SPLUNK_HEC_TOKEN` from the environment.
 
 ## Tune thresholds
 
@@ -123,6 +138,11 @@ Override these macros in **Settings > Advanced search > Search macros** (or `loc
 | `exec_health_hec_metrics` | `index=_introspection sourcetype=http_event_collector_metrics data.series=http_event_collector_token` | Per-token HEC metrics |
 | `exec_health_hec_normalize` | `eval token='data.token_name', ...` | Maps HEC metric fields |
 | `exec_health_edge_mstats` | `index=_metrics` | Edge Processor metrics |
+| `exec_health_ai_mode` | `off` | `off` or `provider` |
+| `exec_health_ai_provider` | `none` | `openai` / `cisco` / `azure` / `anthropic` / `custom` |
+| `exec_health_ai_model` | `none` | Model id for the gateway |
+| `exec_health_ai_endpoint` | `none` | Provider URL; Cisco/Azure must be set |
+| `exec_health_ai_inbox` | `_internal` unconfigured sourcetype | Where HEC replies are searched |
 
 Map HEC token input names to display names in `lookups/hec_token_map.csv`. Columns are `token,token_name,owner`, where `token` is the HEC input name exactly as it appears in `data.token_name` — never the HEC token secret.
 
@@ -166,5 +186,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, no Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.5.0.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.0.spl --included-tags private_app
 ```
