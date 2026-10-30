@@ -193,6 +193,10 @@
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
+          },
+          {
+            "match": "WAIT",
+            "value": "#6B6B6B"
           }
         ]
       }
@@ -338,6 +342,10 @@
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
+          },
+          {
+            "match": "WAIT",
+            "value": "#6B6B6B"
           }
         ]
       },
