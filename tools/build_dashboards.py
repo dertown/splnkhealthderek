@@ -2080,12 +2080,12 @@ def data_quality_agent() -> dict:
             "ds_dq_approve": ds("Approve control", Q_DQ_CHOOSE_APPROVE, "0", "now", refresh=None),
             "ds_dq_dismiss": ds("Dismiss control", Q_DQ_CHOOSE_DISMISS, "0", "now", refresh=None),
             "ds_dq_save": ds("Write agent decision", Q_DQ_SAVE_DECISION, "0", "now", refresh=None),
-            "ds_dq_recorded": chain("Recorded decision", "ds_dq_save", "| head 0\n| append [\n" + Q_DQ_RECORDED_READ.strip() + "\n]"),
+            "ds_dq_recorded": chain("Recorded decision", "ds_dq_save", "| where 1=0\n| append [\n" + Q_DQ_RECORDED_READ.strip() + "\n]"),
             "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_CONN_TEST, "0", "now", refresh=None),
             "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_BUTTON, "0", "now", refresh=None),
             "ds_dq_ai_write": ds("Write ASK request", Q_DQ_AI_ASK_WRITE, "0", "now", refresh=None),
-            "ds_dq_ai_ask_status": chain("ASK wait or fail", "ds_dq_ai_write", "| head 0\n| append [\n" + Q_DQ_AI_ASK_STATUS.strip() + "\n]"),
-            "ds_dq_ai_replies": chain("AI suggested fix", "ds_dq_ai_write", "| head 0\n| append [\n" + Q_DQ_AI_REPLIES.strip() + "\n]"),
+            "ds_dq_ai_ask_status": chain("ASK wait or fail", "ds_dq_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_ASK_STATUS.strip() + "\n]"),
+            "ds_dq_ai_replies": chain("AI suggested fix", "ds_dq_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_REPLIES.strip() + "\n]"),
         },
         "visualizations": {
             "viz_header": md(
@@ -2250,7 +2250,7 @@ def ai_provider_setup() -> dict:
             "ds_ai_current": chain(
                 "Saved AI config",
                 "ds_ai_conn_write",
-                "| head 0\n| append [\n" + Q_DQ_AI_CONN_TEST.strip() + '\n| eval _gate="$tok_cfg_save$"\n]',
+                "| where 1=0\n| append [\n" + Q_DQ_AI_CONN_TEST.strip() + '\n| eval _gate="$tok_cfg_save$"\n]',
             ),
             "ds_ai_reason": chain(
                 "Setup reason",
@@ -2277,7 +2277,7 @@ def ai_provider_setup() -> dict:
             "ds_ai_models": ds("Models for selected provider", Q_DQ_AI_MODELS, "0", "now", refresh=None),
             "ds_ai_save": ds("Save control", Q_DQ_AI_SAVE_BUTTON, "0", "now", refresh=None),
             "ds_ai_write": ds("Write AI config", Q_DQ_AI_SAVE_CONFIG, "0", "now", refresh=None),
-            "ds_ai_conn_write": chain("Connection test", "ds_ai_write", "| head 0\n| append [\n" + Q_DQ_AI_CONN_WRITE.strip() + "\n]"),
+            "ds_ai_conn_write": chain("Connection test", "ds_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_CONN_WRITE.strip() + "\n]"),
         },
         "visualizations": {
             "viz_header": md(
@@ -2347,7 +2347,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.25"
+APP_VERSION = "1.7.26"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 

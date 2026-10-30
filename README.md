@@ -54,7 +54,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.25.spl`.
+3. Upload `dist/splunk_exec_health-1.7.26.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -186,5 +186,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.25.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.26.spl --included-tags private_app
 ```
