@@ -730,21 +730,6 @@
         ]
       }
     },
-    "viz_write": {
-      "type": "splunk.singlevalue",
-      "title": "",
-      "dataSources": {
-        "primary": "ds_dq_save"
-      },
-      "hideWhenNoData": true,
-      "showLastUpdated": false,
-      "showProgressBar": false,
-      "options": {
-        "majorValue": "> primary | seriesByName(\"decision\") | lastPoint()",
-        "backgroundColor": "transparent",
-        "majorFontSize": 14
-      }
-    },
     "viz_brief": {
       "type": "splunk.table",
       "title": "Optional \u2014 briefing to paste into Splunk AI Assistant",
@@ -963,21 +948,6 @@
             "value": "#14301A"
           }
         ]
-      }
-    },
-    "viz_ai_write": {
-      "type": "splunk.singlevalue",
-      "title": "",
-      "dataSources": {
-        "primary": "ds_dq_ai_write"
-      },
-      "hideWhenNoData": true,
-      "showLastUpdated": false,
-      "showProgressBar": false,
-      "options": {
-        "majorValue": "> primary | seriesByName(\"status\") | lastPoint()",
-        "backgroundColor": "transparent",
-        "majorFontSize": 14
       }
     },
     "viz_ai_replies": {
@@ -1226,7 +1196,7 @@
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 1562,
+      "height": 1482,
       "display": "auto-scale",
       "backgroundColor": "#0B0F19"
     },
@@ -1609,26 +1579,6 @@
           "y": 1404,
           "w": 1172,
           "h": 54
-        }
-      },
-      {
-        "item": "viz_write",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1476,
-          "w": 1188,
-          "h": 28
-        }
-      },
-      {
-        "item": "viz_ai_write",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1516,
-          "w": 1188,
-          "h": 28
         }
       }
     ],

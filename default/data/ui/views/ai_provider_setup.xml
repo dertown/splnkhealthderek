@@ -648,36 +648,6 @@
         }
       ]
     },
-    "viz_write": {
-      "type": "splunk.singlevalue",
-      "title": "",
-      "dataSources": {
-        "primary": "ds_ai_write"
-      },
-      "hideWhenNoData": true,
-      "showLastUpdated": false,
-      "showProgressBar": false,
-      "options": {
-        "majorValue": "> primary | seriesByName(\"key_state\") | lastPoint()",
-        "backgroundColor": "transparent",
-        "majorFontSize": 14
-      }
-    },
-    "viz_conn_write": {
-      "type": "splunk.singlevalue",
-      "title": "",
-      "dataSources": {
-        "primary": "ds_ai_conn_write"
-      },
-      "hideWhenNoData": true,
-      "showLastUpdated": false,
-      "showProgressBar": false,
-      "options": {
-        "majorValue": "> primary | seriesByName(\"status\") | lastPoint()",
-        "backgroundColor": "transparent",
-        "majorFontSize": 14
-      }
-    },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
@@ -821,7 +791,7 @@
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 1047,
+      "height": 967,
       "display": "auto-scale",
       "backgroundColor": "#0B0F19"
     },
@@ -1114,26 +1084,6 @@
           "y": 889,
           "w": 1172,
           "h": 54
-        }
-      },
-      {
-        "item": "viz_write",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 961,
-          "w": 1188,
-          "h": 28
-        }
-      },
-      {
-        "item": "viz_conn_write",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1001,
-          "w": 1188,
-          "h": 28
         }
       }
     ]

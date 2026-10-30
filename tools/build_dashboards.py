@@ -386,7 +386,7 @@ ACCENT_CHART = "#009CEB"
 ACCENT_GRAPH = "#DD9900"
 GUTTER = 6
 BAR_H = 4
-HIDDEN_PREFIXES = ("viz_write", "viz_ai_write", "viz_conn_write")
+HIDDEN_PREFIXES = ()
 TRANSPARENT_TYPES = (
     "splunk.table", "splunk.line", "splunk.area", "splunk.column", "splunk.linkgraph", "splunk.sankey",
     "splunk.singlevalue", "splunk.markdown",
@@ -2215,36 +2215,10 @@ def data_quality_agent() -> dict:
             "viz_approve": decision_button("", "ds_dq_approve", fill=GREEN),
             "viz_dismiss": decision_button("", "ds_dq_dismiss", fill=RED),
             "viz_recorded": recorded_table,
-            "viz_write": {
-                "type": "splunk.singlevalue",
-                "title": "",
-                "dataSources": {"primary": "ds_dq_save"},
-                "hideWhenNoData": True,
-                "showLastUpdated": False,
-                "showProgressBar": False,
-                "options": {
-                    "majorValue": "> primary | seriesByName(\"decision\") | lastPoint()",
-                    "backgroundColor": "transparent",
-                    "majorFontSize": 14,
-                },
-            },
             "viz_brief": brief_table,
             "viz_ai_ask": decision_button("", "ds_dq_ai_ready", token="tok_ai_ask", fill="#7B56DB"),
             "viz_ai_ask_state": single_status("ASK status", "ds_dq_ai_ask_status", "ask_state", "ask_state"),
             "viz_ai_ask_msg": ask_msg_table,
-            "viz_ai_write": {
-                "type": "splunk.singlevalue",
-                "title": "",
-                "dataSources": {"primary": "ds_dq_ai_write"},
-                "hideWhenNoData": True,
-                "showLastUpdated": False,
-                "showProgressBar": False,
-                "options": {
-                    "majorValue": "> primary | seriesByName(\"status\") | lastPoint()",
-                    "backgroundColor": "transparent",
-                    "majorFontSize": 14,
-                },
-            },
             "viz_ai_replies": replies_table,
             "viz_footer": md(
                 "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. "
@@ -2269,8 +2243,6 @@ def data_quality_agent() -> dict:
                 block("viz_recorded", 0, 1130, 1200, 130),
                 block("viz_brief", 0, 1260, 1200, 130),
                 block("viz_footer", 0, 1390, 1200, 80),
-                block("viz_write", 0, 1470, 1200, 40),
-                block("viz_ai_write", 0, 1510, 1200, 40),
             ],
             extra_inputs=[
                 "input_ask",
@@ -2290,19 +2262,6 @@ def ai_provider_setup() -> dict:
     conn_reason_table["showLastUpdated"] = False
     providers_table = table("Supported providers", "ds_ai_providers", count=10)
     providers_table.pop("eventHandlers", None)
-    write_viz = {
-        "type": "splunk.singlevalue",
-        "title": "",
-        "dataSources": {"primary": "ds_ai_write"},
-        "hideWhenNoData": True,
-        "showLastUpdated": False,
-        "showProgressBar": False,
-        "options": {
-            "majorValue": "> primary | seriesByName(\"key_state\") | lastPoint()",
-            "backgroundColor": "transparent",
-            "majorFontSize": 14,
-        },
-    }
     return {
         "title": "AI provider setup",
         "description": "Set provider, model, and key, then click SAVE. Search does not open.",
@@ -2404,20 +2363,6 @@ def ai_provider_setup() -> dict:
             "viz_current": saved_table,
             "viz_providers": providers_table,
             "viz_save": decision_button("", "ds_ai_save", token="tok_cfg_save", fill=GREEN),
-            "viz_write": write_viz,
-            "viz_conn_write": {
-                "type": "splunk.singlevalue",
-                "title": "",
-                "dataSources": {"primary": "ds_ai_conn_write"},
-                "hideWhenNoData": True,
-                "showLastUpdated": False,
-                "showProgressBar": False,
-                "options": {
-                    "majorValue": "> primary | seriesByName(\"status\") | lastPoint()",
-                    "backgroundColor": "transparent",
-                    "majorFontSize": 14,
-                },
-            },
             "viz_footer": md(
                 "SAVE stores the key in KV Store collection `dq_agent_ai_config` on this search head. "
                 "App updates do not overwrite it. The install package does not ship a live API key. "
@@ -2439,15 +2384,13 @@ def ai_provider_setup() -> dict:
                 block("viz_current", 0, 475, 1200, 180),
                 block("viz_providers", 0, 655, 1200, 220),
                 block("viz_footer", 0, 875, 1200, 80),
-                block("viz_write", 0, 955, 1200, 40),
-                block("viz_conn_write", 0, 995, 1200, 40),
             ],
             include_time=False,
         ),
     }
 
 
-APP_VERSION = "1.7.28"
+APP_VERSION = "1.7.29"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
