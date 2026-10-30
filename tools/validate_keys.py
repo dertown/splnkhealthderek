@@ -133,6 +133,7 @@ SAVEDSEARCH_KEYS = {
     "display.statistics.drilldown", "display.events.type", "display.visualizations.show",
     "display.visualizations.type", "display.visualizations.charting.chart",
     "auto_summarize", "embed.enabled",
+    "check_risky_command",
 }
 
 SAVEDSEARCH_ENUMS = {
@@ -146,6 +147,7 @@ SAVEDSEARCH_ENUMS = {
 SAVEDSEARCH_BOOLS = {
     "enableSched", "realtime_schedule", "alert.digest_mode", "alert.suppress", "alert.track",
     "action.email", "action.email.sendcsv", "disabled", "is_visible", "run_on_startup",
+    "check_risky_command",
 }
 
 META_KEYS = {"access", "export", "owner", "version", "modtime", "import"}
@@ -205,6 +207,29 @@ def check_transforms() -> dict:
         if "filename" in keys and not (ROOT / "lookups" / keys["filename"]).is_file():
             err("transforms.conf", f"[{stanza}] lookups/{keys['filename']} does not exist")
     return conf
+
+
+COMMANDS_CONF_KEYS = {"is_risky"}
+COMMANDS_CONF_STANZAS = {"outputlookup"}
+
+
+def check_commands_conf() -> None:
+    path = DEFAULT / "commands.conf"
+    if not path.is_file():
+        err("commands.conf", "missing; the agent dashboard needs outputlookup is_risky=false")
+        return
+    conf = parse_conf(path)
+    for stanza, keys in conf.items():
+        if stanza not in COMMANDS_CONF_STANZAS:
+            err("commands.conf", f"unknown stanza [{stanza}]")
+            continue
+        check_keys("commands.conf", stanza, keys, COMMANDS_CONF_KEYS)
+        if keys.get("is_risky") not in BOOL:
+            err("commands.conf", f"[{stanza}] is_risky must be boolean")
+    if "outputlookup" not in conf:
+        err("commands.conf", "missing [outputlookup] stanza")
+    elif conf["outputlookup"].get("is_risky") not in ("false", "0", "False"):
+        err("commands.conf", "[outputlookup] is_risky must be false so Cloud dashboards can record APPROVE/DISMISS")
 
 
 def check_savedsearches() -> dict:
@@ -570,6 +595,7 @@ def main() -> int:
     macros = check_macros()
     transforms = check_transforms()
     saved = check_savedsearches()
+    check_commands_conf()
     check_meta()
     check_manifest(app_conf)
     check_nav()
@@ -586,7 +612,7 @@ def main() -> int:
     for e in errors:
         print(f"ERROR {e}")
     print(f"checked app.conf, macros.conf ({len(macros)} macros), transforms.conf, "
-          f"savedsearches.conf ({len(saved)} searches), default.meta, app.manifest, nav, "
+          f"savedsearches.conf ({len(saved)} searches), commands.conf, default.meta, app.manifest, nav, "
           f"{len(views)} dashboards: {len(errors)} error(s), {len(warnings)} warning(s)")
     return 1 if errors else 0
 

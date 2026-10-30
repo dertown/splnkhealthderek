@@ -1,10 +1,10 @@
 <dashboard version="2" theme="dark">
   <label>Data Topology</label>
-  <description>Network topology of data sources, ingest paths, and Splunk receivers.</description>
+  <description>Click a data source for latest event, volume, trend, and drop/burst outliers.</description>
   <definition><![CDATA[
 {
   "title": "Data Topology",
-  "description": "Network topology of data sources, ingest paths, and Splunk receivers.",
+  "description": "Click a data source for latest event, volume, trend, and drop/burst outliers.",
   "defaults": {
     "dataSources": {
       "ds.search": {
@@ -24,6 +24,26 @@
       "options": {
         "token": "global_time",
         "defaultValue": "-4h@h,now"
+      }
+    },
+    "input_source": {
+      "type": "input.dropdown",
+      "title": "Data source",
+      "options": {
+        "token": "tok_data_source",
+        "defaultValue": "none",
+        "items": "> frame(label, value) | prepend(prependItems)"
+      },
+      "dataSources": {
+        "primary": "ds_topo_src_list"
+      },
+      "context": {
+        "prependItems": [
+          {
+            "label": "Click a source or pick one",
+            "value": "none"
+          }
+        ]
       }
     }
   },
@@ -59,6 +79,57 @@
       "options": {
         "extend": "ds_topo_paths",
         "query": "| stats sum(events) as events by ingest_path | sort 0 -events"
+      }
+    },
+    "ds_topo_src_list": {
+      "type": "ds.chain",
+      "name": "Data source picker",
+      "options": {
+        "extend": "ds_topo_paths",
+        "query": "| stats count by data_source | eval label=data_source, value=data_source | table label, value | sort label"
+      }
+    },
+    "ds_topo_src_stats": {
+      "type": "ds.search",
+      "name": "Selected source latest and totals",
+      "options": {
+        "query": "| tstats count as events, latest(_time) as last_event, earliest(_time) as first_event, dc(sourcetype) as sourcetypes, dc(index) as indexes where index=`exec_health_idx` host=\"$tok_data_source$\"\n| eval data_source=replace(\"$tok_data_source$\", \"[^A-Za-z0-9._:-]\", \"\")\n| where data_source!=\"none\" AND data_source!=\"\" AND data_source!=\"*\"\n| eval age_min=round((now()-last_event)/60, 0)\n| eval age=tostring(now()-last_event, \"duration\")\n| eval last_event=strftime(last_event, \"%Y-%m-%d %H:%M:%S\")\n| eval first_event=strftime(first_event, \"%Y-%m-%d %H:%M:%S\")\n| eval _color_rank=if(age_min>(`exec_health_silence_sec`/60), 1, 3)\n| table data_source, last_event, first_event, age, age_min, events, sourcetypes, indexes, _color_rank",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_topo_src_trend": {
+      "type": "ds.search",
+      "name": "Selected source 24h trend",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` host=\"$tok_data_source$\" earliest=-25h@m latest=@m by _time span=15m\n| eval data_source=replace(\"$tok_data_source$\", \"[^A-Za-z0-9._:-]\", \"\")\n| where data_source!=\"none\" AND data_source!=\"\" AND data_source!=\"*\"\n| timechart span=15m sum(events) as events\n| fillnull value=0 events\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples\n| eval sigma=`exec_health_sigma`\n| eval mean=if(samples>=8, round(mean_vol, 1), null())\n| eval drop_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol-(sigma*stdev_vol), 1), null())\n| eval burst_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol+(sigma*stdev_vol), 1), null())\n| eval drop_bound=if(drop_bound<0, 0, drop_bound)\n| table _time, events, mean, drop_bound, burst_bound",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-25h@m",
+          "latest": "@m"
+        }
+      }
+    },
+    "ds_topo_src_outliers": {
+      "type": "ds.search",
+      "name": "Selected source drop/burst outliers",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` host=\"$tok_data_source$\" earliest=-25h@m latest=@m by _time span=15m\n| eval data_source=replace(\"$tok_data_source$\", \"[^A-Za-z0-9._:-]\", \"\")\n| where data_source!=\"none\" AND data_source!=\"\" AND data_source!=\"*\"\n| timechart span=15m sum(events) as events\n| fillnull value=0 events\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples\n| where _time+900+300 <= now()\n| eval sigma=`exec_health_sigma`\n| eval mean_vol=round(mean_vol, 1), stdev_vol=round(stdev_vol, 1)\n| eval drop_bound=round(mean_vol-(sigma*stdev_vol), 1), burst_bound=round(mean_vol+(sigma*stdev_vol), 1)\n| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)\n| eval outlier=case(\n    samples<8, \"WARMUP\",\n    stdev_vol>0 AND events < drop_bound AND mean_vol>10, \"DROP\",\n    stdev_vol>0 AND events > burst_bound AND events>10, \"BURST\",\n    1=1, \"OK\")\n| where outlier=\"DROP\" OR outlier=\"BURST\"\n| eval _color_rank=if(outlier=\"DROP\", 1, 2)\n| eval bucket=strftime(_time, \"%Y-%m-%d %H:%M\")\n| eval data_source=replace(\"$tok_data_source$\", \"[^A-Za-z0-9._:-]\", \"\")\n| sort -_time\n| table bucket, data_source, events, mean_vol, stdev_vol, z_score, outlier, _color_rank",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-25h@m",
+          "latest": "@m"
+        }
+      }
+    },
+    "ds_topo_src_out_n": {
+      "type": "ds.chain",
+      "name": "Selected source outlier count",
+      "options": {
+        "extend": "ds_topo_src_outliers",
+        "query": "| stats count as outliers"
       }
     },
     "ds_tcpin": {
@@ -116,7 +187,7 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Data topology\nHow servers and data sources reach Splunk: **data source \u2192 ingest path \u2192 index**, plus **forwarder \u2192 indexer** from `_internal` `tcpin_connections`. Click a node to highlight its links.",
+        "markdown": "# Data topology\nHow servers and data sources reach Splunk: **data source \u2192 ingest path \u2192 index**, plus **forwarder \u2192 indexer** from `_internal` `tcpin_connections`. **Click a data source** (table row, graph node, or the picker) for latest event, totals, 24-hour trend, and sudden drops or bursts. Search does not open.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -216,7 +287,20 @@
         "resultLimit": 40,
         "showNodeCounts": true,
         "showValueCounts": true
-      }
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.setToken",
+          "options": {
+            "tokens": [
+              {
+                "token": "tok_data_source",
+                "key": "row.data_source.value"
+              }
+            ]
+          }
+        }
+      ]
     },
     "viz_sankey": {
       "type": "splunk.sankey",
@@ -261,9 +345,208 @@
     },
     "viz_table": {
       "type": "splunk.table",
-      "title": "Top source \u2192 path \u2192 index flows",
+      "title": "Top source \u2192 path \u2192 index flows \u2014 click a source",
       "dataSources": {
         "primary": "ds_topo_paths"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 20,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.setToken",
+          "options": {
+            "tokens": [
+              {
+                "token": "tok_data_source",
+                "key": "row.data_source.value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "viz_src_header": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "## Selected data source\nLatest event and totals follow the time picker. Trend and outliers use the last **24 hours** at 15-minute buckets vs that source's `streamstats` mean \u00b1 `exec_health_sigma` (default 2). **DROP** = sudden traffic loss. **BURST** = sudden spike. Empty panels mean nothing is selected, or there is no indexed `host=` match (HEC token names are not hosts).",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_src_total": {
+      "type": "splunk.singlevalue",
+      "title": "Total events",
+      "dataSources": {
+        "primary": "ds_topo_src_stats"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"events\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_src_age": {
+      "type": "splunk.singlevalue",
+      "title": "Minutes since latest event",
+      "dataSources": {
+        "primary": "ds_topo_src_stats"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"age_min\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off",
+        "underLabel": "in selected time range"
+      }
+    },
+    "viz_src_types": {
+      "type": "splunk.singlevalue",
+      "title": "Sourcetypes",
+      "dataSources": {
+        "primary": "ds_topo_src_stats"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"sourcetypes\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_src_out_n": {
+      "type": "splunk.singlevalue",
+      "title": "Drop / burst buckets",
+      "dataSources": {
+        "primary": "ds_topo_src_out_n"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"outliers\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off",
+        "underLabel": "2\u03c3 vs prior 24h"
+      }
+    },
+    "viz_src_stats": {
+      "type": "splunk.table",
+      "title": "Latest event, first event, and totals",
+      "dataSources": {
+        "primary": "ds_topo_src_stats"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_src_trend": {
+      "type": "splunk.line",
+      "title": "Event trend vs 24-hour mean and 2\u03c3 bounds",
+      "dataSources": {
+        "primary": "ds_topo_src_trend"
+      },
+      "showLastUpdated": true,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "events / 15m",
+        "nullValueDisplay": "connect",
+        "lineWidth": 2,
+        "markerDisplay": "off"
+      }
+    },
+    "viz_src_outliers": {
+      "type": "splunk.table",
+      "title": "Sudden drops and traffic bursts (2\u03c3)",
+      "dataSources": {
+        "primary": "ds_topo_src_outliers"
       },
       "showLastUpdated": true,
       "showProgressBar": true,
@@ -327,7 +610,20 @@
         "resultLimit": 40,
         "showNodeCounts": true,
         "showValueCounts": true
-      }
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.setToken",
+          "options": {
+            "tokens": [
+              {
+                "token": "tok_data_source",
+                "key": "row.data_source.value"
+              }
+            ]
+          }
+        }
+      ]
     },
     "viz_tcpin_sankey": {
       "type": "splunk.sankey",
@@ -396,7 +692,7 @@
     },
     "viz_tcpin_table": {
       "type": "splunk.table",
-      "title": "Forwarder connections (metrics.log tcpin)",
+      "title": "Forwarder connections (metrics.log tcpin) \u2014 click a source",
       "dataSources": {
         "primary": "ds_tcpin"
       },
@@ -431,10 +727,14 @@
       },
       "eventHandlers": [
         {
-          "type": "drilldown.linkToSearch",
+          "type": "drilldown.setToken",
           "options": {
-            "type": "auto",
-            "newTab": true
+            "tokens": [
+              {
+                "token": "tok_data_source",
+                "key": "row.data_source.value"
+              }
+            ]
           }
         }
       ]
@@ -442,7 +742,7 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. **Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. HEC, SC4S, and Edge stay as their own paths. Narrow `exec_health_idx` if the source list is too large.",
+        "markdown": "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. **Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. HEC, SC4S, and Edge stay as their own paths. Source drill-down is `tstats` by `host`. Narrow `exec_health_idx` if the source list is too large.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -542,11 +842,91 @@
         }
       },
       {
-        "item": "viz_tcpin_link",
+        "item": "viz_src_header",
         "type": "block",
         "position": {
           "x": 0,
           "y": 1210,
+          "w": 1200,
+          "h": 90
+        }
+      },
+      {
+        "item": "viz_src_total",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1300,
+          "w": 300,
+          "h": 140
+        }
+      },
+      {
+        "item": "viz_src_age",
+        "type": "block",
+        "position": {
+          "x": 300,
+          "y": 1300,
+          "w": 300,
+          "h": 140
+        }
+      },
+      {
+        "item": "viz_src_types",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 1300,
+          "w": 300,
+          "h": 140
+        }
+      },
+      {
+        "item": "viz_src_out_n",
+        "type": "block",
+        "position": {
+          "x": 900,
+          "y": 1300,
+          "w": 300,
+          "h": 140
+        }
+      },
+      {
+        "item": "viz_src_stats",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1440,
+          "w": 1200,
+          "h": 150
+        }
+      },
+      {
+        "item": "viz_src_trend",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1590,
+          "w": 1200,
+          "h": 280
+        }
+      },
+      {
+        "item": "viz_src_outliers",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1870,
+          "w": 1200,
+          "h": 260
+        }
+      },
+      {
+        "item": "viz_tcpin_link",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 2130,
           "w": 1200,
           "h": 360
         }
@@ -556,7 +936,7 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1570,
+          "y": 2490,
           "w": 600,
           "h": 300
         }
@@ -566,7 +946,7 @@
         "type": "block",
         "position": {
           "x": 600,
-          "y": 1570,
+          "y": 2490,
           "w": 600,
           "h": 300
         }
@@ -576,7 +956,7 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1870,
+          "y": 2790,
           "w": 1200,
           "h": 280
         }
@@ -586,14 +966,15 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 2150,
+          "y": 3070,
           "w": 1200,
-          "h": 100
+          "h": 110
         }
       }
     ],
     "globalInputs": [
-      "input_global_trp"
+      "input_global_trp",
+      "input_source"
     ]
   }
 }

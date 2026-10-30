@@ -104,29 +104,25 @@ def md(text: str, font: str = "default") -> dict:
     }
 
 
-def click_tile(title: str, ds_id: str, token: str, font: int = 28) -> dict:
-    return {
-        "type": "splunk.singlevalue",
-        "title": title,
-        "dataSources": {"primary": ds_id},
-        "showLastUpdated": False,
-        "showProgressBar": False,
-        "options": {
-            "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-            "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
-            "backgroundColor": "transparent",
-            "majorFontSize": font,
-        },
-        "context": {"statusColors": STATUS_COLORS},
-        "eventHandlers": [
-            {
-                "type": "drilldown.setToken",
-                "options": {
-                    "tokens": [{"token": token, "key": "row.click_action.value"}],
-                },
-            }
-        ],
+def decision_button(title: str, ds_id: str) -> dict:
+    """One-row table so row.click_action.value is a real table drilldown."""
+    viz = table(title, ds_id, count=1)
+    viz["showLastUpdated"] = False
+    viz["showProgressBar"] = False
+    viz["eventHandlers"] = [
+        {
+            "type": "drilldown.setToken",
+            "options": {
+                "tokens": [{"token": "tok_decision", "key": "row.click_action.value"}],
+            },
+        }
+    ]
+    viz["options"]["headerVisibility"] = "none"
+    viz["options"]["columnFormat"] = {
+        "button_label": {"width": 420, "align": "center"},
+        "click_action": {"width": 1},
     }
+    return viz
 
 
 def single_status(title: str, ds_id: str, value_field: str, score_field: str) -> dict:
@@ -202,6 +198,20 @@ def table(title: str, ds_id: str, rank_field: str = "_color_rank", count: int = 
             }
         ],
     }
+
+
+def drill_source(viz: dict, field: str = "data_source") -> dict:
+    """Click a topology row or node to set tok_data_source (does not open Search)."""
+    viz = dict(viz)
+    viz["eventHandlers"] = [
+        {
+            "type": "drilldown.setToken",
+            "options": {
+                "tokens": [{"token": "tok_data_source", "key": f"row.{field}.value"}],
+            },
+        }
+    ]
+    return viz
 
 
 def line(title: str, ds_id: str, y_title: str) -> dict:
@@ -570,13 +580,68 @@ search `exec_health_hec_metrics`
 | table data_source, ingest_path, splunk_index, events, kb, _color_rank
 """.strip()
 
+# Per-source drill-down. tok_data_source is a host (indexed / tcpin) or HEC token
+# label. Host stats use tstats; the token is sanitized after substitution so a
+# click cannot inject SPL. Main topology searches must not reference this token.
+Q_TOPO_SRC_STATS = r"""
+| tstats count as events, latest(_time) as last_event, earliest(_time) as first_event, dc(sourcetype) as sourcetypes, dc(index) as indexes where index=`exec_health_idx` host="$tok_data_source$"
+| eval data_source=replace("$tok_data_source$", "[^A-Za-z0-9._:-]", "")
+| where data_source!="none" AND data_source!="" AND data_source!="*"
+| eval age_min=round((now()-last_event)/60, 0)
+| eval age=tostring(now()-last_event, "duration")
+| eval last_event=strftime(last_event, "%Y-%m-%d %H:%M:%S")
+| eval first_event=strftime(first_event, "%Y-%m-%d %H:%M:%S")
+| eval _color_rank=if(age_min>(`exec_health_silence_sec`/60), 1, 3)
+| table data_source, last_event, first_event, age, age_min, events, sourcetypes, indexes, _color_rank
+""".strip()
+
+Q_TOPO_SRC_TREND = r"""
+| tstats count as events where index=`exec_health_idx` host="$tok_data_source$" earliest=-25h@m latest=@m by _time span=15m
+| eval data_source=replace("$tok_data_source$", "[^A-Za-z0-9._:-]", "")
+| where data_source!="none" AND data_source!="" AND data_source!="*"
+| timechart span=15m sum(events) as events
+| fillnull value=0 events
+| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples
+| eval sigma=`exec_health_sigma`
+| eval mean=if(samples>=8, round(mean_vol, 1), null())
+| eval drop_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol-(sigma*stdev_vol), 1), null())
+| eval burst_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol+(sigma*stdev_vol), 1), null())
+| eval drop_bound=if(drop_bound<0, 0, drop_bound)
+| table _time, events, mean, drop_bound, burst_bound
+""".strip()
+
+Q_TOPO_SRC_OUTLIERS = r"""
+| tstats count as events where index=`exec_health_idx` host="$tok_data_source$" earliest=-25h@m latest=@m by _time span=15m
+| eval data_source=replace("$tok_data_source$", "[^A-Za-z0-9._:-]", "")
+| where data_source!="none" AND data_source!="" AND data_source!="*"
+| timechart span=15m sum(events) as events
+| fillnull value=0 events
+| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples
+| where _time+900+300 <= now()
+| eval sigma=`exec_health_sigma`
+| eval mean_vol=round(mean_vol, 1), stdev_vol=round(stdev_vol, 1)
+| eval drop_bound=round(mean_vol-(sigma*stdev_vol), 1), burst_bound=round(mean_vol+(sigma*stdev_vol), 1)
+| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)
+| eval outlier=case(
+    samples<8, "WARMUP",
+    stdev_vol>0 AND events < drop_bound AND mean_vol>10, "DROP",
+    stdev_vol>0 AND events > burst_bound AND events>10, "BURST",
+    1=1, "OK")
+| where outlier="DROP" OR outlier="BURST"
+| eval _color_rank=if(outlier="DROP", 1, 2)
+| eval bucket=strftime(_time, "%Y-%m-%d %H:%M")
+| eval data_source=replace("$tok_data_source$", "[^A-Za-z0-9._:-]", "")
+| sort -_time
+| table bucket, data_source, events, mean_vol, stdev_vol, z_score, outlier, _color_rank
+""".strip()
+
 
 def dq_agent_findings_core() -> str:
     """Diagnose Splunk Health traffic lights vs learned baselines.
 
     Emits one row per issue with a suggested fix. Covers ingestion, hosts, HEC,
     instance health, search CPU, SC4S, and Edge. The agent never writes Splunk
-    configuration; humans click APPROVE or DISMISS, then SAVE,
+    configuration; humans click APPROVE or DISMISS
     before a decision is recorded in dq_agent_approvals.
     """
     host_findings = host_baseline_core() + r"""
@@ -1063,7 +1128,7 @@ Q_DQ_AGENT_FINDINGS = dq_agent_findings_core() + r"""
 | lookup dq_agent_approvals finding_id OUTPUT decision, decided_at, actor
 | eval status=case(decision="approve", "approved", decision="dismiss", "dismissed", 1=1, "open")
 | eval action=if(status="open", "Review", "Resolved")
-| eval agent_thought="OBSERVE: "+issue+" on "+entity+". INVESTIGATE: "+coalesce(tool_plan, "learned baselines")+". TOOLS: fwdType="+coalesce(tool_fwdType, "n/a")+" conn="+coalesce(tool_conn, "n/a")+" err_component="+coalesce(tool_err_component, "none")+" err_count="+coalesce(tostring(tool_err_count), "0")+". HYPOTHESIZE: "+coalesce(likely_cause, "needs human review")+" (confidence "+coalesce(confidence, "n/a")+"). PROPOSE: "+suggested_fix+". ACT: wait for human APPROVE or DISMISS then SAVE — never change Splunk unattended."
+| eval agent_thought="OBSERVE: "+issue+" on "+entity+". INVESTIGATE: "+coalesce(tool_plan, "learned baselines")+". TOOLS: fwdType="+coalesce(tool_fwdType, "n/a")+" conn="+coalesce(tool_conn, "n/a")+" err_component="+coalesce(tool_err_component, "none")+" err_count="+coalesce(tostring(tool_err_count), "0")+". HYPOTHESIZE: "+coalesce(likely_cause, "needs human review")+" (confidence "+coalesce(confidence, "n/a")+"). PROPOSE: "+suggested_fix+". ACT: wait for human APPROVE or DISMISS — never change Splunk unattended."
 | eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Reply with root cause, confidence, and step-by-step admin actions. Do not request secrets or HEC token values."
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank
@@ -1300,11 +1365,30 @@ def sc4s_edge() -> dict:
 
 
 def data_topology() -> dict:
+    src_age = single_number("Minutes since latest event", "ds_topo_src_stats", "age_min", "", None, 0)
+    src_age["options"]["underLabel"] = "in selected time range"
+    src_out_n = single_number("Drop / burst buckets", "ds_topo_src_out_n", "outliers", "", None, 0)
+    src_out_n["options"]["underLabel"] = "2σ vs prior 24h"
     return {
         "title": "Data Topology",
-        "description": "Network topology of data sources, ingest paths, and Splunk receivers.",
+        "description": "Click a data source for latest event, volume, trend, and drop/burst outliers.",
         "defaults": defaults(),
-        "inputs": {"input_global_trp": timerange("-4h@h,now")},
+        "inputs": {
+            "input_global_trp": timerange("-4h@h,now"),
+            "input_source": {
+                "type": "input.dropdown",
+                "title": "Data source",
+                "options": {
+                    "token": "tok_data_source",
+                    "defaultValue": "none",
+                    "items": "> frame(label, value) | prepend(prependItems)",
+                },
+                "dataSources": {"primary": "ds_topo_src_list"},
+                "context": {
+                    "prependItems": [{"label": "Click a source or pick one", "value": "none"}]
+                },
+            },
+        },
         "dataSources": {
             "ds_topo_paths": ds("Indexed source → ingest → index", Q_TOPO_PATHS),
             "ds_topo_sankey": chain(
@@ -1331,6 +1415,19 @@ def data_topology() -> dict:
                 "Events by ingest path",
                 "ds_topo_paths",
                 "| stats sum(events) as events by ingest_path | sort 0 -events",
+            ),
+            "ds_topo_src_list": chain(
+                "Data source picker",
+                "ds_topo_paths",
+                "| stats count by data_source | eval label=data_source, value=data_source | table label, value | sort label",
+            ),
+            "ds_topo_src_stats": ds("Selected source latest and totals", Q_TOPO_SRC_STATS),
+            "ds_topo_src_trend": ds("Selected source 24h trend", Q_TOPO_SRC_TREND, "-25h@m", "@m"),
+            "ds_topo_src_outliers": ds("Selected source drop/burst outliers", Q_TOPO_SRC_OUTLIERS, "-25h@m", "@m"),
+            "ds_topo_src_out_n": chain(
+                "Selected source outlier count",
+                "ds_topo_src_outliers",
+                "| stats count as outliers",
             ),
             "ds_tcpin": ds("Forwarder → indexer connections", Q_TCPIN_PATHS),
             "ds_tcpin_sankey": chain(
@@ -1365,32 +1462,52 @@ def data_topology() -> dict:
                 "# Data topology\n"
                 "How servers and data sources reach Splunk: **data source → ingest path → index**, "
                 "plus **forwarder → indexer** from `_internal` `tcpin_connections`. "
-                "Click a node to highlight its links."
+                "**Click a data source** (table row, graph node, or the picker) for latest event, totals, "
+                "24-hour trend, and sudden drops or bursts. Search does not open."
             ),
             "viz_sources": single_number("Data sources", "ds_topo_counts", "sources", "", None, 0),
             "viz_paths": single_number("Ingest paths", "ds_topo_counts", "ingest_paths", "", None, 0),
             "viz_indexes": single_number("Destination indexes", "ds_topo_counts", "indexes", "", None, 0),
             "viz_fwds": single_number("Forwarders (tcpin)", "ds_tcpin_counts", "forwarders", "", None, 0),
-            "viz_link": linkgraph(
-                "Sources → ingest path → Splunk index",
-                "ds_topo_link",
-                ["data_source", "ingest_path", "splunk_index"],
+            "viz_link": drill_source(
+                linkgraph(
+                    "Sources → ingest path → Splunk index",
+                    "ds_topo_link",
+                    ["data_source", "ingest_path", "splunk_index"],
+                )
             ),
             "viz_sankey": sankey("Volume flow (events) through ingest paths", "ds_topo_sankey"),
             "viz_methods": column("Indexed events by ingest path", "ds_topo_methods", "events"),
-            "viz_table": table("Top source → path → index flows", "ds_topo_paths", count=20),
-            "viz_tcpin_link": linkgraph(
-                "Servers: forwarder → connection type → indexer",
-                "ds_tcpin_link",
-                ["data_source", "connection", "receiver"],
+            "viz_table": drill_source(table("Top source → path → index flows — click a source", "ds_topo_paths", count=20)),
+            "viz_src_header": md(
+                "## Selected data source\n"
+                "Latest event and totals follow the time picker. Trend and outliers use the last **24 hours** "
+                "at 15-minute buckets vs that source's `streamstats` mean ± `exec_health_sigma` (default 2). "
+                "**DROP** = sudden traffic loss. **BURST** = sudden spike. Empty panels mean nothing is selected, "
+                "or there is no indexed `host=` match (HEC token names are not hosts)."
+            ),
+            "viz_src_total": single_number("Total events", "ds_topo_src_stats", "events", "", None, 0),
+            "viz_src_age": src_age,
+            "viz_src_types": single_number("Sourcetypes", "ds_topo_src_stats", "sourcetypes", "", None, 0),
+            "viz_src_out_n": src_out_n,
+            "viz_src_stats": table("Latest event, first event, and totals", "ds_topo_src_stats", count=1),
+            "viz_src_trend": line("Event trend vs 24-hour mean and 2σ bounds", "ds_topo_src_trend", "events / 15m"),
+            "viz_src_outliers": table("Sudden drops and traffic bursts (2σ)", "ds_topo_src_outliers", count=20),
+            "viz_tcpin_link": drill_source(
+                linkgraph(
+                    "Servers: forwarder → connection type → indexer",
+                    "ds_tcpin_link",
+                    ["data_source", "connection", "receiver"],
+                )
             ),
             "viz_tcpin_sankey": sankey("Forwarder → indexer volume (KB)", "ds_tcpin_sankey"),
             "viz_hec": table("HEC tokens as data sources", "ds_hec_paths", count=15),
-            "viz_tcpin_table": table("Forwarder connections (metrics.log tcpin)", "ds_tcpin", count=15),
+            "viz_tcpin_table": drill_source(table("Forwarder connections (metrics.log tcpin) — click a source", "ds_tcpin", count=15)),
             "viz_footer": md(
                 "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. "
                 "**Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. "
-                "HEC, SC4S, and Edge stay as their own paths. Narrow `exec_health_idx` if the source list is too large."
+                "HEC, SC4S, and Edge stay as their own paths. Source drill-down is `tstats` by `host`. "
+                "Narrow `exec_health_idx` if the source list is too large."
             ),
         },
         "layout": grid(
@@ -1404,17 +1521,29 @@ def data_topology() -> dict:
                 block("viz_sankey", 0, 610, 700, 320),
                 block("viz_methods", 700, 610, 500, 320),
                 block("viz_table", 0, 930, 1200, 280),
-                block("viz_tcpin_link", 0, 1210, 1200, 360),
-                block("viz_tcpin_sankey", 0, 1570, 600, 300),
-                block("viz_hec", 600, 1570, 600, 300),
-                block("viz_tcpin_table", 0, 1870, 1200, 280),
-                block("viz_footer", 0, 2150, 1200, 100),
-            ]
+                block("viz_src_header", 0, 1210, 1200, 90),
+                block("viz_src_total", 0, 1300, 300, 140),
+                block("viz_src_age", 300, 1300, 300, 140),
+                block("viz_src_types", 600, 1300, 300, 140),
+                block("viz_src_out_n", 900, 1300, 300, 140),
+                block("viz_src_stats", 0, 1440, 1200, 150),
+                block("viz_src_trend", 0, 1590, 1200, 280),
+                block("viz_src_outliers", 0, 1870, 1200, 260),
+                block("viz_tcpin_link", 0, 2130, 1200, 360),
+                block("viz_tcpin_sankey", 0, 2490, 600, 300),
+                block("viz_hec", 600, 2490, 600, 300),
+                block("viz_tcpin_table", 0, 2790, 1200, 280),
+                block("viz_footer", 0, 3070, 1200, 110),
+            ],
+            extra_inputs=["input_source"],
         ),
     }
 
 
 Q_DQ_AGENT_STATUS = r"""
+| eval _gate="$tok_decision$"
+| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
+| eval status=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
 | where status="open"
 | stats count as issues
 | eval agent_status=if(issues>0, "RED", "GREEN")
@@ -1423,46 +1552,46 @@ Q_DQ_AGENT_STATUS = r"""
 
 Q_DQ_CHOOSE_APPROVE = r"""
 | makeresults
-| eval selected="$tok_decision$", finding_id="$tok_finding_id$"
+| eval finding_id="$tok_finding_id$"
 | eval picked=if(finding_id!="none" AND finding_id!="", 1, 0)
-| eval button_label=case(selected="approve", "APPROVED", picked=1, "APPROVE", 1=1, "PICK A ROW")
-| eval button_color=case(selected="approve", "GREEN", picked=1, "YELLOW", 1=1, "WAIT")
-| eval click_action=if(picked=1, "approve", "review")
-| table button_label, button_color, click_action
+| eval button_label=if(picked=1, "APPROVE", "PICK A ROW FIRST")
+| eval click_action="approve"
+| eval _color_rank=if(picked=1, 2, 1)
+| table button_label, click_action, _color_rank
 """
 
 Q_DQ_CHOOSE_DISMISS = r"""
 | makeresults
-| eval selected="$tok_decision$", finding_id="$tok_finding_id$"
+| eval finding_id="$tok_finding_id$"
 | eval picked=if(finding_id!="none" AND finding_id!="", 1, 0)
-| eval button_label=case(selected="dismiss", "DISMISSED", picked=1, "DISMISS", 1=1, "PICK A ROW")
-| eval button_color=case(selected="dismiss", "GREEN", picked=1, "YELLOW", 1=1, "WAIT")
-| eval click_action=if(picked=1, "dismiss", "review")
-| table button_label, button_color, click_action
+| eval button_label=if(picked=1, "DISMISS", "PICK A ROW FIRST")
+| eval click_action="dismiss"
+| eval _color_rank=if(picked=1, 2, 1)
+| table button_label, click_action, _color_rank
 """
 
-Q_DQ_IMPLEMENT_READY = r"""
-| makeresults
-| eval finding_id="$tok_finding_id$", decision="$tok_decision$", commit="$tok_commit$"
-| eval ready=if(finding_id!="none" AND finding_id!="" AND (decision="approve" OR decision="dismiss"), 1, 0)
-| eval button_label=case(commit="SAVE" AND ready=1, "SAVED", ready=1, "SAVE", 1=1, "WAIT")
-| eval button_color=case(commit="SAVE" AND ready=1, "GREEN", ready=1, "YELLOW", 1=1, "WAIT")
-| eval click_action=if(ready=1, "SAVE", "WAIT")
-| table button_label, button_color, ready, click_action
-"""
-
+# Only writes when APPROVE/DISMISS is chosen. Empty results skip appendpipe, so
+# page load does not rewrite the lookup (that long job was getting cancelled).
 Q_DQ_SAVE_DECISION = r"""
-| inputlookup dq_agent_approvals
-| append [
-    | makeresults
-    | eval commit="$tok_commit$", decision="$tok_decision$", finding_id="$tok_finding_id$"
-    | where commit="SAVE" AND finding_id!="none" AND finding_id!="" AND (decision="approve" OR decision="dismiss")
-    | eval actor="human_dashboard", decided_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="human_in_the_loop", entity="none"
-    | table finding_id, decision, actor, decided_at, note, entity
+| makeresults
+| eval finding_id="$tok_finding_id$", decision="$tok_decision$"
+| where (decision="approve" OR decision="dismiss") AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder"
+| eval actor="human_dashboard", decided_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="human_in_the_loop", entity="none"
+| table finding_id, decision, actor, decided_at, note, entity
+| appendpipe [
+    | inputlookup append=true dq_agent_approvals
+    | stats latest(decision) as decision, latest(actor) as actor, latest(decided_at) as decided_at, latest(note) as note, latest(entity) as entity by finding_id
+    | outputlookup dq_agent_approvals
 ]
-| stats latest(decision) as decision, latest(actor) as actor, latest(decided_at) as decided_at, latest(note) as note, latest(entity) as entity by finding_id
-| outputlookup dq_agent_approvals
-| where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none"
+| where finding_id="$tok_finding_id$"
+| eval _color_rank=if(decision="approve" OR decision="dismiss", 3, 2)
+| table decided_at, finding_id, decision, actor, _color_rank
+"""
+
+Q_DQ_RECORDED_READ = r"""
+| inputlookup dq_agent_approvals
+| eval _gate="$tok_decision$"
+| where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none" AND finding_id!="placeholder"
 | eval _color_rank=if(decision="approve" OR decision="dismiss", 3, 2)
 | table decided_at, finding_id, decision, actor, _color_rank
 """
@@ -1474,11 +1603,15 @@ Q_DQ_AGENT_ASK = r"""
 """
 
 Q_DQ_QUEUE_VIEW = r"""
+| eval _gate="$tok_decision$"
+| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
+| eval status=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+| eval action=if(status="open", "Select", "Done")
+| eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval fix=coalesce(suggested_fix, "")
 | eval fix=if(len(fix)>80, substr(fix,1,80)."...", fix)
-| eval action=if(action="Resolved", "Done", "Select")
-| eval _ai_brief=ai_brief, _reset="WAIT", _reset_decision="review"
-| table finding_id, severity, issue, entity, fix, confidence, action, _ai_brief, _reset, _reset_decision, _color_rank
+| eval _ai_brief=ai_brief, _reset_decision="review"
+| table finding_id, severity, issue, entity, fix, confidence, action, status, _ai_brief, _reset_decision, _color_rank
 """
 
 Q_DQ_PICKER = r"""
@@ -1489,6 +1622,10 @@ Q_DQ_PICKER = r"""
 
 Q_DQ_SUGGESTION = r"""
 | where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none" AND finding_id!=""
+| eval _gate="$tok_decision$"
+| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
+| eval status=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+| eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval where_to_act=coalesce(splunk_web_path, "Open the matching dashboard in this app")
 | table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank
 """
@@ -1585,7 +1722,6 @@ def data_quality_agent() -> dict:
                     {"token": "tok_entity", "key": "row.entity.value"},
                     {"token": "tok_issue", "key": "row.issue.value"},
                     {"token": "tok_ai_brief", "key": "row._ai_brief.value"},
-                    {"token": "tok_commit", "key": "row._reset.value"},
                     {"token": "tok_decision", "key": "row._reset_decision.value"},
                 ]
             },
@@ -1594,11 +1730,12 @@ def data_quality_agent() -> dict:
     findings_table["options"]["headerVisibility"] = "fixed"
     findings_table["options"]["columnFormat"] = {
         "severity": {"width": 90, "align": "center"},
-        "issue": {"width": 250},
-        "entity": {"width": 150},
-        "fix": {"width": 380},
-        "confidence": {"width": 90, "align": "center"},
-        "action": {"width": 120, "align": "center"},
+        "issue": {"width": 220},
+        "entity": {"width": 140},
+        "fix": {"width": 320},
+        "confidence": {"width": 80, "align": "center"},
+        "action": {"width": 90, "align": "center"},
+        "status": {"width": 90, "align": "center"},
         "finding_id": {"width": 80},
     }
     suggestion_table = table(
@@ -1608,12 +1745,12 @@ def data_quality_agent() -> dict:
     )
     suggestion_table.pop("eventHandlers", None)
     suggestion_table["showLastUpdated"] = False
-    recorded_table = table("Recorded decision", "ds_dq_save", count=3)
+    recorded_table = table("Recorded decision", "ds_dq_recorded", count=3)
     recorded_table.pop("eventHandlers", None)
     recorded_table["showLastUpdated"] = False
     return {
         "title": "Derek+ Data Quality Agent",
-        "description": "Click Select, then APPROVE or DISMISS, then SAVE. Search does not open.",
+        "description": "Click Select, then click APPROVE or DISMISS. That records the decision. Search does not open.",
         "defaults": defaults(),
         "inputs": {
             "input_global_trp": timerange("-24h@h,now"),
@@ -1632,11 +1769,6 @@ def data_quality_agent() -> dict:
                 "title": "Decision latch (set by APPROVE or DISMISS)",
                 "options": {"token": "tok_decision", "defaultValue": "review"},
             },
-            "input_commit": {
-                "type": "input.text",
-                "title": "Save latch (set by the SAVE tile)",
-                "options": {"token": "tok_commit", "defaultValue": "WAIT"},
-            },
             "input_ai_confirm": {
                 "type": "input.text",
                 "title": "Optional: type ASK for a second opinion",
@@ -1647,7 +1779,7 @@ def data_quality_agent() -> dict:
             "ds_dq_findings": ds("Agent cycle findings", Q_DQ_AGENT_FINDINGS, "-24h", "now"),
             "ds_dq_asked": chain("Asked findings", "ds_dq_findings", Q_DQ_AGENT_ASK),
             "ds_dq_queue": chain("Work queue", "ds_dq_asked", Q_DQ_QUEUE_VIEW),
-            "ds_dq_status": chain("Agent status", "ds_dq_findings", Q_DQ_AGENT_STATUS),
+            "ds_dq_status": chain("Agent status", "ds_dq_asked", Q_DQ_AGENT_STATUS),
             "ds_dq_selected": chain("Selected suggestion", "ds_dq_asked", Q_DQ_SUGGESTION),
             "ds_dq_brief": chain(
                 "AI briefing",
@@ -1659,8 +1791,8 @@ def data_quality_agent() -> dict:
             ),
             "ds_dq_approve": ds("Approve control", Q_DQ_CHOOSE_APPROVE, "0", "now", refresh="30s"),
             "ds_dq_dismiss": ds("Dismiss control", Q_DQ_CHOOSE_DISMISS, "0", "now", refresh="30s"),
-            "ds_dq_ready": ds("Implement control", Q_DQ_IMPLEMENT_READY, "0", "now", refresh="30s"),
-            "ds_dq_save": ds("Save decision", Q_DQ_SAVE_DECISION, "0", "now", refresh="5m"),
+            "ds_dq_save": ds("Write agent decision", Q_DQ_SAVE_DECISION, "0", "now", refresh="5m"),
+            "ds_dq_recorded": ds("Recorded decision", Q_DQ_RECORDED_READ, "0", "now", refresh="10s"),
             "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_STATUS, "0", "now", refresh="30s"),
             "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_READY, "0", "now", refresh="30s"),
             "ds_dq_ai_replies": ds("AI provider replies", Q_DQ_AI_REPLIES, "-24h", "now", refresh="30s"),
@@ -1670,7 +1802,7 @@ def data_quality_agent() -> dict:
                 "# Derek+ Data Quality Agent\n"
                 "**1. Click Select** on a row. "
                 "**2. Read** the suggested fix. "
-                "**3. Click APPROVE or DISMISS**, then click **SAVE**. "
+                "**3. Click APPROVE or DISMISS** to record the decision. "
                 "Search does not open. The agent never changes Splunk by itself."
             ),
             "viz_status": single_status("Queue health", "ds_dq_status", "agent_status", "issues"),
@@ -1690,35 +1822,22 @@ def data_quality_agent() -> dict:
             },
             "viz_findings": findings_table,
             "viz_selected": suggestion_table,
-            "viz_approve": click_tile("3. Approve this suggestion", "ds_dq_approve", "tok_decision"),
-            "viz_dismiss": click_tile("Or dismiss — not a real issue", "ds_dq_dismiss", "tok_decision"),
-            "viz_implement": {
+            "viz_approve": decision_button("3. Click APPROVE", "ds_dq_approve"),
+            "viz_dismiss": decision_button("Or click DISMISS", "ds_dq_dismiss"),
+            "viz_recorded": recorded_table,
+            "viz_write": {
                 "type": "splunk.singlevalue",
-                "title": "3. Save decision — click SAVE",
-                "dataSources": {"primary": "ds_dq_ready"},
+                "title": "",
+                "dataSources": {"primary": "ds_dq_save"},
+                "hideWhenNoData": True,
                 "showLastUpdated": False,
                 "showProgressBar": False,
                 "options": {
-                    "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-                    "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+                    "majorValue": "> primary | seriesByName(\"decision\") | lastPoint()",
                     "backgroundColor": "transparent",
-                    "majorFontSize": 36,
-                    "underLabel": "Click APPROVE or DISMISS first. Search does not open.",
-                    "underLabelFontSize": 14,
+                    "majorFontSize": 14,
                 },
-                "context": {"statusColors": STATUS_COLORS},
-                "eventHandlers": [
-                    {
-                        "type": "drilldown.setToken",
-                        "options": {
-                            "tokens": [
-                                {"token": "tok_commit", "key": "row.click_action.value"},
-                            ]
-                        },
-                    }
-                ],
             },
-            "viz_recorded": recorded_table,
             "viz_brief": table("Optional — briefing to paste into Splunk AI Assistant", "ds_dq_brief", count=1),
             "viz_ai_ask": {
                 "type": "splunk.singlevalue",
@@ -1766,7 +1885,7 @@ def data_quality_agent() -> dict:
             },
             "viz_ai_replies": table("Provider replies for this suggestion", "ds_dq_ai_replies", count=5),
             "viz_footer": md(
-                "Approve/Dismiss only records a decision. UF, HEC, and index repairs stay runbooks. "
+                "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. "
                 "API keys stay on **Configure → AI provider** / your gateway — never in this queue."
             ),
         },
@@ -1778,14 +1897,14 @@ def data_quality_agent() -> dict:
                 block("viz_ai_status", 800, 90, 400, 130),
                 block("viz_findings", 0, 220, 1200, 300),
                 block("viz_selected", 0, 520, 1200, 220),
-                block("viz_approve", 0, 740, 400, 150),
-                block("viz_dismiss", 400, 740, 400, 150),
-                block("viz_implement", 800, 740, 400, 150),
-                block("viz_recorded", 0, 890, 1200, 120),
-                block("viz_brief", 0, 1010, 800, 150),
-                block("viz_ai_ask", 800, 1010, 400, 150),
-                block("viz_ai_replies", 0, 1160, 1200, 150),
-                block("viz_footer", 0, 1310, 1200, 80),
+                block("viz_approve", 0, 740, 400, 140),
+                block("viz_dismiss", 400, 740, 400, 140),
+                block("viz_recorded", 800, 740, 400, 140),
+                block("viz_write", 0, 1260, 1200, 40),
+                block("viz_brief", 0, 880, 800, 150),
+                block("viz_ai_ask", 800, 880, 400, 150),
+                block("viz_ai_replies", 0, 1030, 1200, 150),
+                block("viz_footer", 0, 1180, 1200, 80),
             ],
             extra_inputs=[
                 "input_ask",
@@ -1965,7 +2084,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.5"
+APP_VERSION = "1.7.9"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2013,7 +2132,8 @@ def about() -> dict:
                 "- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n"
                 "- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n"
                 "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n"
-                "- The Data Quality Agent records a decision only after a human clicks APPROVE or DISMISS, then SAVE (no Python LLM client, no API keys)\n\n"
+                "- The Data Quality Agent records a decision only after a human clicks APPROVE or DISMISS (no Python LLM client, no API keys)\n"
+                "- `commands.conf` marks `outputlookup` not-risky in this app so the approvals lookup can be written from the dashboard\n\n"
                 "Self-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** "
                 "(`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via "
                 "**Apps → Manage apps → Install app from file**."
@@ -2058,8 +2178,8 @@ def readme() -> dict:
                 "- **Host Heartbeat & Ingestion Latency** — last indexed data vs last `_internal` heartbeat; 24-hour 2σ volume baseline\n"
                 "- **HEC Token Performance** — events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n"
                 "- **SC4S Syslog & Edge/Ingest Processors** — syslog sources, Edge in vs out, filter efficiency\n"
-                "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index, and forwarder → indexer\n"
-                "- **Derek+ Data Quality Agent** — agentic loop over health tiles and learned ingest bounds; a human must APPROVE or DISMISS, then SAVE\n"
+                "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index; click a source for latest event, totals, 24h trend, and 2σ drop/burst outliers\n"
+                "- **Derek+ Data Quality Agent** — agentic loop over health tiles and learned ingest bounds; a human must APPROVE or DISMISS\n"
                 "- **AI provider setup** — Configure → AI provider: mode, model, endpoint, HEC inbox (no API keys)\n\n"
                 "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
             ),
@@ -2319,12 +2439,12 @@ def main() -> None:
         ),
         "data_topology.xml": (
             "Data Topology",
-            "Network topology of data sources, ingest paths, and Splunk receivers.",
+            "Click a data source for latest event, volume, trend, and drop/burst outliers.",
             data_topology(),
         ),
         "data_quality_agent.xml": (
             "Derek+ Data Quality Agent",
-            "Click Select, then APPROVE or DISMISS, then SAVE. Search does not open.",
+            "Click Select, then APPROVE or DISMISS to record the decision. Search does not open.",
             data_quality_agent(),
         ),
         "ai_provider_setup.xml": (
