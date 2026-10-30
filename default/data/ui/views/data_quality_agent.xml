@@ -89,8 +89,6 @@
       "name": "Agent cycle findings",
       "options": {
         "query": "| makeresults\n| eval _seed=1\n| append [\n    | tstats count as count where index=`exec_health_idx` earliest=-7d@h latest=@h by _time span=1h\n    | timechart span=1h sum(count) as count\n    | fillnull value=0 count\n    | predict count as prediction future_timespan=0 holdback=0 upper95=upper lower95=lower algorithm=LLP5\n    | tail 1\n    | where isnotnull(lower) AND count < lower\n    | eval issue=\"Ingestion below learned predict() bound\", severity=\"RED\", entity=\"environment\", evidence=\"hour_count=\"+tostring(count)+\", predict=\"+tostring(round(prediction,0))+\", lower=\"+tostring(round(lower,0)), suggested_fix=\"Identify which index dropped vs the 7-day seasonal baseline. Check UF/HF phone-home, HEC tokens, and syslog listeners. Do not raise the learned bound to hide a real drop.\", fix_type=\"investigate\", proposed_config=\"none \u2014 human investigates the dropped source\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-8d@h latest=@h by _time span=1h index\n    | streamstats window=168 current=f avg(events) as ma_7d by index\n    | where _time >= relative_time(now(), \"-1h@h\") AND _time < relative_time(now(), \"@h\")\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-events)/ma_7d)*100, 1), 0)\n    | where drop_pct >= `exec_health_drop_red_pct` AND ma_7d>10\n    | eval issue=\"Index volume below 7-day moving average\", severity=\"RED\", entity=index, evidence=\"last_hour=\"+tostring(events)+\", ma_7d=\"+tostring(round(ma_7d,0))+\", drop_pct=\"+tostring(drop_pct)+\"%\", suggested_fix=\"Confirm whether this index was expected to be quiet (maintenance, source retirement). If not, check the last forwarder or HEC route that writes here. Macro exec_health_idx can be narrowed after review.\", fix_type=\"runbook_index\", proposed_config=\"optional: Settings > Search macros > exec_health_idx\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n| tstats count as events where index=`exec_health_idx` earliest=-25h@m latest=@m by _time span=15m host\n| timechart span=15m limit=0 useother=f sum(events) as events by host\n| fillnull value=0\n| untable _time host events\n| where _time+900+300 <= now()\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples by host\n| eventstats max(_time) as scored_bucket\n| where _time=scored_bucket\n| eval sigma=`exec_health_sigma`, mean_vol=round(mean_vol, 1), stdev_vol=round(stdev_vol, 1), lower_bound=round(mean_vol-(sigma*stdev_vol), 1)\n| eval baseline_state=case(samples<8, \"WARMUP\", stdev_vol>0 AND events < lower_bound AND mean_vol>10, \"ALERT\", 1=1, \"OK\")\n| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)\n| where baseline_state=\"ALERT\"\n| eval issue=\"Host volume below learned 2-sigma bound\", severity=\"RED\", entity=host, evidence=\"events=\"+tostring(events)+\", mean=\"+tostring(mean_vol)+\", lower=\"+tostring(lower_bound)+\", z=\"+tostring(z_score), suggested_fix=\"Compare this host's sourcetypes to the prior 24 hours. Repair the stopped monitor, UF outputs.conf, or an index-time filter. Do not suppress the host without change control.\", fix_type=\"runbook_input\", proposed_config=\"none \u2014 human repairs the forwarder or input\", action=\"Review\"\n| head 25\n| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\nsearch `exec_health_hec_metrics` earliest=-2h@m latest=-1m@m\n| `exec_health_hec_normalize`\n| timechart span=1m limit=0 useother=f sum(hec_events) as events by token\n| fillnull value=0\n| untable _time token events\n| eval minutes_ago=round((relative_time(now(), \"-1m@m\")-_time)/60, 0)\n| eval window=case(minutes_ago>=1 AND minutes_ago<=`exec_health_hec_silence_min`, \"recent\", minutes_ago>`exec_health_hec_silence_min` AND minutes_ago<=`exec_health_hec_silence_min`+60, \"baseline\")\n| stats sum(eval(if(window=\"recent\", events, 0))) as recent_events, sum(eval(if(window=\"baseline\", events, 0))) as baseline_events, count(eval(window=\"recent\" AND events=0)) as silent_minutes by token\n| eval baseline_eps=round(baseline_events/3600, 2), recent_eps=round(recent_events/(60*`exec_health_hec_silence_min`), 2)\n| lookup hec_token_map token OUTPUT token_name, owner\n| eval token_label=coalesce(token_name, token), owner=coalesce(owner, \"unmapped\")\n| eval hec_state=case(\n    baseline_eps >= `exec_health_hec_baseline_eps` AND recent_events=0, \"ALERT\",\n    baseline_eps >= 10 AND recent_events=0, \"YELLOW\",\n    1=1, \"OK\")\n| where hec_state=\"ALERT\"\n| eval issue=\"HEC token silent vs learned baseline\", severity=\"RED\", entity=token_label, evidence=\"baseline_eps=\"+tostring(baseline_eps)+\", recent_events=\"+tostring(recent_events)+\", silent_min=\"+tostring(silent_minutes), suggested_fix=\"In Splunk Web open Settings > Data inputs > HTTP Event Collector and confirm this input is enabled. Then check the sender, network path, and index routing. Never paste the HEC token secret into this app.\", fix_type=\"runbook_hec\", proposed_config=\"none \u2014 human checks the HEC input and sender\", action=\"Review\"\n| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) earliest=-24h latest=now by index host\n    | eval kind=if(index=\"_internal\", \"heartbeat\", \"data\")\n    | stats max(eval(if(kind=\"data\", last_seen, null()))) as last_data, max(eval(if(kind=\"heartbeat\", last_seen, null()))) as last_heartbeat by host\n    | eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat\n    | eval state=case(isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"HEARTBEAT ONLY\", data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"DATA SILENT\", (isnull(last_data) OR data_age_sec > `exec_health_silence_sec`) AND (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_heartbeat_sec`), \"HOST DOWN\", 1=1, \"OK\")\n    | where state=\"DATA SILENT\" OR state=\"HEARTBEAT ONLY\" OR state=\"HOST DOWN\"\n    | eval issue=case(state=\"HOST DOWN\", \"Host down \u2014 no heartbeat and no indexed data\", 1=1, \"Host data silent while heartbeat is fresh\")\n    | eval severity=\"RED\", entity=host, evidence=\"state=\"+state+\", data_age_sec=\"+tostring(data_age_sec)+\", heartbeat_age_sec=\"+tostring(heartbeat_age_sec)\n    | eval suggested_fix=case(state=\"HOST DOWN\", \"The host is not phoning home and not sending data. Check power, network, and splunkd. Do not remove the host from this app.\", 1=1, \"The UF is up but indexed data stopped. Check outputs.conf, blocked queues, sourcetype transforms, and the destination index. Restart the forwarder only after change control.\")\n    | eval fix_type=if(state=\"HOST DOWN\", \"runbook_host_down\", \"runbook_uf\")\n    | eval proposed_config=if(state=\"HOST DOWN\", \"none \u2014 human restores the endpoint\", \"none \u2014 human repairs the UF pipeline\"), action=\"Review\"\n    | head 40\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search `exec_health_health_report` earliest=-15m\n    | eval health_val=lower(coalesce(color, \"unknown\"))\n    | stats latest(health_val) as health_val by host, feature\n    | eval score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n    | where score<2\n    | eval issue=\"Instance health feature not GREEN\", severity=if(score=0, \"RED\", \"YELLOW\"), entity=host.\" / \".feature, evidence=\"host=\"+host+\", feature=\"+feature+\", color=\"+health_val, suggested_fix=\"On that instance inspect the red or yellow feature (disk, buckets, splunkd). Do not clear or suppress the health report from this dashboard.\", fix_type=\"runbook_instance\", proposed_config=\"none \u2014 human inspects the instance feature\", action=\"Review\"\n    | sort score, host, feature\n    | head 25\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-15m latest=now\n    | appendpipe [ stats count | where count=0 | eval events=0 ]\n    | where events=0\n    | eval issue=\"No live indexed events in the last 15 minutes\", severity=\"RED\", entity=\"environment\", evidence=\"events_15m=0\", suggested_fix=\"Check UF/HF phone-home, HEC tokens, syslog listeners, and whether macro exec_health_idx excludes the indexes that should be live.\", fix_type=\"runbook_ingest_live\", proposed_config=\"optional: Settings > Search macros > exec_health_idx\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search `exec_health_license_usage` earliest=-8d@d latest=@d\n    | bin _time span=1d\n    | stats sum(b) as bytes by _time\n    | eval daily_GB=bytes/1024/1024/1024\n    | streamstats window=7 current=f avg(daily_GB) as ma_7d\n    | sort 0 -_time\n    | head 1\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-daily_GB)/ma_7d)*100, 1), 0)\n    | eval health_score=case(isnull(ma_7d), 2, drop_pct>=`exec_health_drop_red_pct`, 0, drop_pct>=`exec_health_drop_yellow_pct`, 1, 1=1, 2)\n    | where health_score<2\n    | eval issue=\"Daily ingestion below 7-day moving average\", severity=if(health_score=0, \"RED\", \"YELLOW\"), entity=\"environment\", evidence=\"daily_GB=\"+tostring(round(daily_GB,2))+\", ma_7d=\"+tostring(round(ma_7d,2))+\", drop_pct=\"+tostring(drop_pct)+\"%\", suggested_fix=\"Compare indexes and sourcetypes for yesterday vs the prior week. Confirm maintenance or a retired source before treating this as an outage.\", fix_type=\"runbook_license_ma\", proposed_config=\"none \u2014 human reviews license usage\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search index=_introspection sourcetype=splunk_resource_usage component=Hostwide earliest=-15m\n    | eval cpu_pct=coalesce('data.cpu_system_pct', 0)+coalesce('data.cpu_user_pct', 0)\n    | stats avg(cpu_pct) as avg_cpu, max(cpu_pct) as max_cpu by host\n    | eval avg_cpu=round(avg_cpu, 1), max_cpu=round(max_cpu, 1)\n    | where max_cpu>=75\n    | eval issue=\"Instance CPU above health bound\", severity=if(max_cpu>=90, \"RED\", \"YELLOW\"), entity=host, evidence=\"avg_cpu=\"+tostring(avg_cpu)+\"%, max_cpu=\"+tostring(max_cpu)+\"%\", suggested_fix=\"List expensive searches on this host and pause non-essential scheduled searches after change control. Do not kill user searches from this dashboard.\", fix_type=\"runbook_sh\", proposed_config=\"none \u2014 human manages search load\", action=\"Review\"\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search index=`exec_health_sc4s_idx` `exec_health_sc4s` (error OR warn OR fail OR \"connection refused\" OR hang OR dropped) earliest=-15m\n    | stats count as sc4s_issues, dc(sourcetype) as sourcetypes by host\n    | where sc4s_issues>0\n    | eval issue=\"SC4S / syslog errors in the last 15 minutes\", severity=\"RED\", entity=host, evidence=\"issues=\"+tostring(sc4s_issues)+\", sourcetypes=\"+tostring(sourcetypes), suggested_fix=\"Check the collector process, destination port, TLS, and that the destination index exists. Use this app's SC4S view for the time series.\", fix_type=\"runbook_sc4s\", proposed_config=\"none \u2014 human repairs the syslog collector\", action=\"Review\"\n    | sort 0 -sc4s_issues\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | mstats max(queue_size_bytes) as queue_size_bytes, max(queue_max_bytes) as queue_max_bytes, rate_sum(export_destination_errors_total) as export_errors_per_sec, rate_sum(processor_events_in_total) as events_in_eps, rate_sum(processor_events_out_total) as events_out_eps where `exec_health_edge_mstats` earliest=-15m latest=now by host\n    | eval queue_fill_pct=if(queue_max_bytes>0, round(queue_size_bytes/queue_max_bytes*100, 1), null())\n    | eval export_errors_per_sec=round(coalesce(export_errors_per_sec, 0), 3)\n    | eval events_in_eps=round(coalesce(events_in_eps, 0), 2), events_out_eps=round(coalesce(events_out_eps, 0), 2)\n    | where export_errors_per_sec>0 OR queue_fill_pct>=80 OR (events_in_eps>0 AND events_out_eps=0)\n    | eval issue=\"Edge / Ingest Processor queue or export unhealthy\", severity=\"RED\", entity=host, evidence=\"queue_fill_pct=\"+tostring(queue_fill_pct)+\", export_errors_per_sec=\"+tostring(export_errors_per_sec)+\", in_eps=\"+tostring(events_in_eps)+\", out_eps=\"+tostring(events_out_eps), suggested_fix=\"Inspect Edge pipelines for a blocked destination or a filter that drops everything. Do not clear the queue from this dashboard.\", fix_type=\"runbook_edge\", proposed_config=\"none \u2014 human repairs the processor pipeline\", action=\"Review\"\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| where isnull(_seed)\n| append [\n    search index=_internal source=*metrics.log group=tcpin_connections earliest=-2h\n    | eval entity=coalesce(sourceHost, hostname)\n    | eval tool_fwdType=lower(trim(coalesce(fwdType, \"\")))\n    | eval tool_conn=lower(trim(coalesce(connectionType, \"\")))\n    | where isnotnull(entity)\n    | stats latest(tool_fwdType) as tool_fwdType, latest(tool_conn) as tool_conn by entity\n]\n| append [\n    search index=_internal sourcetype=splunkd (log_level=ERROR OR log_level=WARN) earliest=-2h\n    | eval entity=host\n    | where isnotnull(entity)\n    | stats count as tool_err_count, latest(component) as tool_err_component by entity\n]\n| eventstats latest(tool_fwdType) as tool_fwdType, latest(tool_conn) as tool_conn, latest(tool_err_component) as tool_err_component, max(tool_err_count) as tool_err_count by entity\n| where isnotnull(issue)\n| eval finding_id=sha256(issue.\"|\".entity)\n| lookup dq_agent_playbooks fix_type OUTPUT playbook_name, likely_cause, confidence, tool_plan, splunk_web_path\n| lookup dq_agent_approvals finding_id OUTPUT decision, decided_at, actor\n| eval status=case(decision=\"approve\", \"approved\", decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval action=if(status=\"open\", \"Review\", \"Resolved\")\n| eval agent_thought=\"OBSERVE: \"+issue+\" on \"+entity+\". INVESTIGATE: \"+coalesce(tool_plan, \"learned baselines\")+\". TOOLS: fwdType=\"+coalesce(tool_fwdType, \"n/a\")+\" conn=\"+coalesce(tool_conn, \"n/a\")+\" err_component=\"+coalesce(tool_err_component, \"none\")+\" err_count=\"+coalesce(tostring(tool_err_count), \"0\")+\". HYPOTHESIZE: \"+coalesce(likely_cause, \"needs human review\")+\" (confidence \"+coalesce(confidence, \"n/a\")+\"). PROPOSE: \"+suggested_fix+\". ACT: wait for human APPROVE or DISMISS \u2014 never change Splunk unattended.\"\n| eval ai_brief=\"Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: \"+issue+\". Entity: \"+entity+\". Evidence: \"+evidence+\". Forwarder type: \"+coalesce(tool_fwdType, \"unknown\")+\". Connection: \"+coalesce(tool_conn, \"unknown\")+\". Recent _internal errors: \"+coalesce(tostring(tool_err_count), \"0\")+\" (\"+coalesce(tool_err_component, \"none\")+\"). Playbook: \"+coalesce(playbook_name, \"none\")+\". Likely cause: \"+coalesce(likely_cause, \"unknown\")+\". Suggested fix: \"+suggested_fix+\". Splunk Web: \"+coalesce(splunk_web_path, \"n/a\")+\". Reply with root cause, confidence, and step-by-step admin actions. Do not request secrets or HEC token values.\"\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank\n| sort _color_rank, issue, entity",
-        "refresh": "5m",
-        "refreshType": "delay",
         "queryParameters": {
           "earliest": "-24h",
           "latest": "now"
@@ -110,7 +108,7 @@
       "name": "Work queue",
       "options": {
         "extend": "ds_dq_asked",
-        "query": "| eval _gate=\"$tok_decision$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision\n| eval status=case(rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval action=if(status=\"open\", \"Select\", \"Done\")\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| eval fix=coalesce(suggested_fix, \"\")\n| eval fix=if(len(fix)>80, substr(fix,1,80).\"...\", fix)\n| eval _ai_brief=ai_brief, _reset_decision=\"review\"\n| table finding_id, severity, issue, entity, fix, confidence, action, status, _ai_brief, _reset_decision, _color_rank"
+        "query": "| eval _gate=\"$tok_decision$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision\n| eval status=case(rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval action=if(status=\"open\", \"Select\", \"Done\")\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| eval fix=coalesce(suggested_fix, \"\")\n| eval fix=if(len(fix)>80, substr(fix,1,80).\"...\", fix)\n| eval _ai_brief=ai_brief, _reset_decision=\"review\", _ai_auto=\"ask\"\n| table finding_id, severity, issue, entity, fix, confidence, action, status, _ai_brief, _reset_decision, _ai_auto, _color_rank"
       }
     },
     "ds_dq_status": {
@@ -142,8 +140,6 @@
       "name": "Approve control",
       "options": {
         "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval button_label=if(picked=1, \"APPROVE\", \"PICK A ROW FIRST\")\n| eval click_action=\"approve\"\n| eval _color_rank=if(picked=1, 2, 1)\n| table button_label, click_action, _color_rank",
-        "refresh": "30s",
-        "refreshType": "delay",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -155,8 +151,6 @@
       "name": "Dismiss control",
       "options": {
         "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval button_label=if(picked=1, \"DISMISS\", \"PICK A ROW FIRST\")\n| eval click_action=\"dismiss\"\n| eval _color_rank=if(picked=1, 2, 1)\n| table button_label, click_action, _color_rank",
-        "refresh": "30s",
-        "refreshType": "delay",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -168,8 +162,6 @@
       "name": "Write agent decision",
       "options": {
         "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\"\n| where (decision=\"approve\" OR decision=\"dismiss\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\"\n| eval actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\", entity=\"none\"\n| table finding_id, decision, actor, decided_at, note, entity\n| appendpipe [\n    | inputlookup append=true dq_agent_approvals\n    | stats latest(decision) as decision, latest(actor) as actor, latest(decided_at) as decided_at, latest(note) as note, latest(entity) as entity by finding_id\n    | outputlookup dq_agent_approvals\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank",
-        "refresh": "5m",
-        "refreshType": "delay",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -177,25 +169,18 @@
       }
     },
     "ds_dq_recorded": {
-      "type": "ds.search",
+      "type": "ds.chain",
       "name": "Recorded decision",
       "options": {
-        "query": "| inputlookup dq_agent_approvals\n| eval _gate=\"$tok_decision$\"\n| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\" AND finding_id!=\"placeholder\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank",
-        "refresh": "10s",
-        "refreshType": "delay",
-        "queryParameters": {
-          "earliest": "0",
-          "latest": "now"
-        }
+        "extend": "ds_dq_save",
+        "query": "| head 0\n| append [\n| inputlookup dq_agent_approvals\n| eval _gate=\"$tok_decision$\"\n| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\" AND finding_id!=\"placeholder\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank\n]"
       }
     },
     "ds_dq_ai_status": {
       "type": "ds.search",
       "name": "AI provider status",
       "options": {
-        "query": "| inputlookup dq_agent_ai_config\n| where stanza=\"default\"\n| head 1\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval key_state=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", \"SET\", \"MISSING\")\n| eval model_ok=if(isnotnull(model) AND model!=\"\" AND model!=\"none\", 1, 0)\n| eval endpoint_ok=if(isnotnull(endpoint) AND endpoint!=\"\" AND endpoint!=\"none\", 1, 0)\n| eval endpoint_https=if(match(lower(coalesce(endpoint, \"\")), \"^https://[a-z0-9]\"), 1, 0)\n| eval key_shape=if(key_state=\"SET\" AND len(api_key)>=8, \"ok\", \"bad\")\n| eval setup_reason=case(\n    mode!=\"provider\" OR provider=\"none\" OR provider=\"\", \"Local only. No provider is saved.\",\n    key_state!=\"SET\", \"Setup incomplete: API key is missing. Enter a key and click SAVE.\",\n    model_ok=0, \"Setup incomplete: model is missing. Enter a model id and click SAVE.\",\n    endpoint_ok=0, \"Setup incomplete: \".coalesce(provider_label, provider).\" has no endpoint. Set default_endpoint in the provider catalog, then SAVE again.\",\n    1=1, \"Ready. Provider \".coalesce(provider_label, provider).\", model \".model.\", key SET.\")\n| eval ai_status=case(\n    mode!=\"provider\" OR provider=\"none\" OR provider=\"\", \"LOCAL\",\n    key_state=\"SET\" AND model_ok=1 AND endpoint_ok=1, \"READY\",\n    1=1, \"FAILED\")\n| fields - api_key\n| eval finding_id=\"connection_test\"\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS ping_status, requested_at AS ping_at, note AS ping_note\n| eval ping_at_epoch=if(isnotnull(ping_at) AND ping_at!=\"0\" AND ping_at!=\"\", strptime(ping_at, \"%Y-%m-%d %H:%M:%S\"), null())\n| eval wait_sec=if(isnotnull(ping_at_epoch), now()-ping_at_epoch, null())\n| eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())\n| eval ping_replied=0, dispatch_runs=0, ping_reply_at=0\n| append [\n    search [| inputlookup dq_agent_ai_config | where stanza=\"default\" | head 1 | eval inbox_index=replace(coalesce(inbox_index, \"_internal\"), \"[^A-Za-z0-9_]\", \"\") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\"), \"[^A-Za-z0-9_]\", \"\") | eval search=\"index=\".inbox_index.\" sourcetype=\".inbox_sourcetype.\" (finding_id=connection_test OR connection_test) earliest=-24h latest=now\" | return $search]\n    | sort 0 -_time\n    | head 1\n    | eval ping_replied=1, ping_reply_at=_time\n    | eval ping_reply_status=lower(coalesce(status, conn_status, \"replied\"))\n    | eval ping_fail_msg=substr(replace(coalesce(reply, error, \"none\"), \"[^A-Za-z0-9 .:_-]\", \"\"), 1, 120)\n    | table ping_replied, ping_reply_at, ping_reply_status, ping_fail_msg\n]\n| append [\n    search index=_internal sourcetype=scheduler savedsearch_name=\"Exec Health - AI provider dispatch\" earliest=-2h latest=now\n    | stats count as dispatch_runs, latest(status) as dispatch_status\n    | table dispatch_runs, dispatch_status\n]\n| stats first(mode) as mode, first(provider) as provider, first(provider_label) as provider_label, first(model) as model, first(key_state) as key_state, first(endpoint) as endpoint, first(inbox_index) as inbox_index, first(inbox_sourcetype) as inbox_sourcetype, first(notes) as notes, first(setup_reason) as setup_reason, first(ai_status) as ai_status, first(key_shape) as key_shape, first(endpoint_https) as endpoint_https, first(ping_status) as ping_status, first(ping_at) as ping_at, first(ping_note) as ping_note, first(ping_at_epoch) as ping_at_epoch, first(wait_min) as wait_min, max(ping_replied) as ping_replied, max(ping_reply_at) as ping_reply_at, values(ping_reply_status) as ping_reply_status, values(ping_fail_msg) as ping_fail_msg, max(dispatch_runs) as dispatch_runs, values(dispatch_status) as dispatch_status\n| eval ping_replied=if(ping_replied=1 AND (isnull(ping_at_epoch) OR ping_reply_at+60>=ping_at_epoch), 1, 0)\n| eval conn_status=case(\n    ai_status=\"LOCAL\", \"SKIP\",\n    ai_status=\"FAILED\", \"FAIL\",\n    key_shape!=\"ok\", \"FAIL\",\n    endpoint_https!=1, \"FAIL\",\n    ping_replied=1 AND (ping_reply_status=\"failed\" OR ping_reply_status=\"error\" OR ping_reply_status=\"fail\"), \"FAIL\",\n    ping_replied=1, \"PASS\",\n    ping_status=\"failed\" OR ping_status=\"error\", \"FAIL\",\n    ping_status=\"pending\" AND wait_min>=5 AND dispatch_runs=0, \"FAIL\",\n    ping_status=\"pending\" AND wait_min>=5, \"FAIL\",\n    ping_status=\"pending\", \"TESTING\",\n    1=1, \"TESTING\")\n| eval conn_reason=case(\n    conn_status=\"SKIP\", \"No provider is set. Connection test was not run.\",\n    ai_status=\"FAILED\", setup_reason,\n    key_shape!=\"ok\", \"Connection test failed: API key is missing or too short. Enter a key and click SAVE.\",\n    endpoint_https!=1, \"Connection test failed: endpoint is not HTTPS. Set default_endpoint to an https URL in the provider catalog, then SAVE.\",\n    ping_replied=1 AND (ping_reply_status=\"failed\" OR ping_reply_status=\"error\" OR ping_reply_status=\"fail\"), \"Provider rejected the connection test. \".if(ping_fail_msg=\"none\" OR isnull(ping_fail_msg), \"Check the API key and endpoint.\", ping_fail_msg),\n    conn_status=\"PASS\", \"Connection test passed. \".coalesce(provider_label, provider).\" replied to the ping.\",\n    ping_status=\"pending\" AND wait_min>=5 AND dispatch_runs=0, \"No reply after \".tostring(wait_min).\" minutes and dispatch has not run. Enable Exec Health - AI provider dispatch and attach a webhook to your AI gateway, then SAVE to test again.\",\n    ping_status=\"pending\" AND wait_min>=5, \"Dispatch ran but no provider reply in HEC after \".tostring(wait_min).\" minutes. Check the gateway, API key, and inbox index/sourcetype. Click SAVE to test again.\",\n    ping_status=\"pending\", \"Connection test ping queued at \".coalesce(ping_at, \"unknown\")+\". Waiting for the gateway to call the provider and reply via HEC.\",\n    1=1, \"Connection test ping is being queued. Click SAVE if this stays TESTING.\")\n| eval tile_status=case(conn_status=\"SKIP\", \"LOCAL\", conn_status=\"FAIL\", \"FAILED\", 1=1, conn_status)\n| eval status_color=ai_status\n| eval _color_rank=case(conn_status=\"FAIL\" OR ai_status=\"FAILED\", 1, conn_status=\"TESTING\", 2, 1=1, 3)\n| table setup_reason, ai_status, conn_status, conn_reason, tile_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
-        "refresh": "10s",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval stanza=\"default\", mode=\"off\", provider=\"none\", model=\"none\", endpoint=\"none\", api_key=\"none\", inbox_index=\"_internal\", inbox_sourcetype=\"derek_health_ai_unconfigured\", updated_by=\"system\", updated_at=\"0\", note=\"seed\", _seed=1\n| inputlookup append=true dq_agent_ai_config\n| eval stanza=coalesce(stanza, \"default\")\n| eval _seed=coalesce(_seed, 0)\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval rank=case(key_ok=1, 3, _seed=0, 2, 1=1, 1)\n| sort 0 -rank\n| dedup stanza\n| where stanza=\"default\"\n| head 1\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval key_state=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", \"SET\", \"MISSING\")\n| eval model_ok=if(isnotnull(model) AND model!=\"\" AND model!=\"none\", 1, 0)\n| eval endpoint_ok=if(isnotnull(endpoint) AND endpoint!=\"\" AND endpoint!=\"none\", 1, 0)\n| eval endpoint_https=if(match(lower(coalesce(endpoint, \"\")), \"^https://[a-z0-9]\"), 1, 0)\n| eval key_shape=if(key_state=\"SET\" AND len(api_key)>=8, \"ok\", \"bad\")\n| eval setup_reason=case(\n    mode!=\"provider\" OR provider=\"none\" OR provider=\"\", \"Local only. No provider is saved.\",\n    key_state!=\"SET\", \"Setup incomplete: API key is missing. Enter a key and click SAVE.\",\n    model_ok=0, \"Setup incomplete: model is missing. Enter a model id and click SAVE.\",\n    endpoint_ok=0, \"Setup incomplete: \".coalesce(provider_label, provider).\" has no endpoint. Set default_endpoint in the provider catalog, then SAVE again.\",\n    1=1, \"Ready. Provider \".coalesce(provider_label, provider).\", model \".model.\", key SET.\")\n| eval ai_status=case(\n    mode!=\"provider\" OR provider=\"none\" OR provider=\"\", \"LOCAL\",\n    key_state=\"SET\" AND model_ok=1 AND endpoint_ok=1, \"READY\",\n    1=1, \"FAILED\")\n| fields - api_key\n| eval finding_id=\"connection_test\"\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS ping_status, requested_at AS ping_at, note AS ping_note, provider AS ping_provider\n| eval ping_match=if(coalesce(ping_provider, \"\") = provider, 1, 0)\n| eval conn_status=case(\n    ai_status=\"LOCAL\", \"SKIP\",\n    ai_status=\"FAILED\", \"FAIL\",\n    key_shape!=\"ok\", \"FAIL\",\n    endpoint_https!=1, \"FAIL\",\n    ping_match=1 AND ping_status=\"replied\", \"PASS\",\n    ping_match=1 AND (ping_status=\"failed\" OR ping_status=\"error\"), \"FAIL\",\n    1=1, \"TESTING\")\n| eval conn_reason=case(\n    conn_status=\"SKIP\", \"No provider is set. Connection test was not run.\",\n    ai_status=\"FAILED\", setup_reason,\n    key_shape!=\"ok\", \"Connection test failed: API key is missing or too short. Enter a key and click SAVE.\",\n    endpoint_https!=1, \"Connection test failed: endpoint is not HTTPS. Set default_endpoint to an https URL in the provider catalog, then SAVE.\",\n    conn_status=\"PASS\" AND provider=\"anthropic\", \"Connection test passed at \".ping_at.\". Anthropic Messages API (https://api.anthropic.com/v1/messages) replied from this search head.\",\n    conn_status=\"PASS\", \"Connection test passed at \".ping_at.\". \".coalesce(provider_label, provider).\" replied from this search head.\",\n    conn_status=\"FAIL\", coalesce(ping_note, \"Connection test failed.\").\" Fix it, then click SAVE to test again.\",\n    1=1, \"No connection test has run for this provider yet. Click SAVE to test.\")\n| eval tile_status=case(conn_status=\"SKIP\", \"LOCAL\", conn_status=\"FAIL\", \"FAILED\", 1=1, conn_status)\n| eval status_color=ai_status\n| eval _color_rank=case(conn_status=\"FAIL\" OR ai_status=\"FAILED\", 1, conn_status=\"TESTING\", 2, 1=1, 3)\n| table setup_reason, ai_status, conn_status, conn_reason, tile_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -206,9 +191,7 @@
       "type": "ds.search",
       "name": "Ask AI control",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, api_key, updated_at\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1, 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", configured=0, \"OPEN AI SETUP FIRST\", 1=1, \"ASK\")\n| eval click_action=\"ask\"\n| eval _color_rank=if(picked=1 AND configured=1, 3, 1)\n| table button_label, click_action, _color_rank",
-        "refresh": "30s",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1, 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", configured=0, \"OPEN AI SETUP FIRST\", 1=1, \"ASK AGAIN\")\n| eval click_action=\"retry\".tostring(now())\n| eval _color_rank=if(picked=1 AND configured=1, 3, 1)\n| table button_label, click_action, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -219,9 +202,7 @@
       "type": "ds.search",
       "name": "Write ASK request",
       "options": {
-        "query": "| makeresults\n| eval ask=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| where ask=\"ask\" AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1\n| eval status=\"pending\", actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ask_ai_provider\"\n| eval entity=if(entity=\"\" OR isnull(entity), \"none\", entity)\n| eval issue=if(issue=\"\" OR isnull(issue), \"none\", issue)\n| eval ai_brief=if(ai_brief=\"\" OR isnull(ai_brief), \"none\", ai_brief)\n| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_requests\n    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief by finding_id\n    | outputlookup dq_agent_ai_requests\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=2\n| table requested_at, finding_id, provider, status, _color_rank",
-        "refresh": "5m",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval ask=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| where match(ask, \"^(ask|retry)\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS prev_status, requested_at AS prev_at\n| eval prev_age=coalesce(now()-strptime(coalesce(tostring(prev_at), \"\"), \"%Y-%m-%d %H:%M:%S\"), 99999)\n| where NOT (prev_status=\"replied\" AND prev_age<3600 AND ask=\"ask\")\n| lookup dq_agent_ai_providers provider OUTPUT default_endpoint\n| eval endpoint=if(endpoint=\"none\" OR isnull(endpoint) OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\")\n| eval entity=if(entity=\"\" OR isnull(entity), \"none\", entity)\n| eval issue=if(issue=\"\" OR isnull(issue), \"none\", issue)\n| eval ai_brief=if(ai_brief=\"\" OR isnull(ai_brief), \"none\", ai_brief)\n| eval is_ping=0\n| derekaiping\n| eval status=if(ai_result=\"replied\", \"replied\", \"failed\")\n| eval note=if(ai_result=\"replied\", \"ask_ai_provider\", \"ask failed: \".coalesce(ai_error, \"no reply\"))\n| eval reply=if(ai_result=\"replied\", ai_reply, \"none\")\n| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_requests\n    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id\n    | outputlookup dq_agent_ai_requests\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(status=\"replied\", 3, 1)\n| table requested_at, finding_id, provider, status, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -229,29 +210,19 @@
       }
     },
     "ds_dq_ai_ask_status": {
-      "type": "ds.search",
+      "type": "ds.chain",
       "name": "ASK wait or fail",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", ask=\"$tok_ai_ask$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, api_key, endpoint, updated_at\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1 AND isnotnull(model) AND model!=\"none\" AND model!=\"\", 1, 0)\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider AS req_provider, note AS req_note\n| eval wait_sec=if(isnotnull(requested_at) AND requested_at!=\"0\" AND requested_at!=\"\", now()-strptime(requested_at, \"%Y-%m-%d %H:%M:%S\"), null())\n| eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())\n| eval ask_state=case(\n    picked=0, \"IDLE\",\n    ask=\"ask\" AND configured=0, \"FAILED\",\n    req_status=\"failed\" OR req_status=\"error\", \"FAILED\",\n    req_status=\"done\" OR req_status=\"replied\", \"REPLIED\",\n    req_status=\"pending\" AND wait_min>=15, \"STALLED\",\n    req_status=\"pending\", \"WAITING\",\n    ask=\"ask\" AND configured=1 AND (isnull(req_status) OR req_status=\"\" OR req_status=\"none\"), \"FAILED\",\n    1=1, \"IDLE\")\n| eval ask_message=case(\n    ask_state=\"IDLE\" AND picked=0, \"Select a suggestion, then click ASK.\",\n    ask_state=\"IDLE\", \"No ASK has been sent for this suggestion yet.\",\n    ask_state=\"FAILED\" AND configured=0, \"ASK failed: AI provider is not ready. Open AI provider setup and SAVE provider, model, and key.\",\n    ask_state=\"FAILED\" AND picked=1 AND (isnull(req_status) OR req_status=\"\" OR req_status=\"none\"), \"ASK failed: the request was not queued. Confirm a suggestion is selected and the provider is READY, then click ASK again.\",\n    ask_state=\"FAILED\", \"ASK failed: \".coalesce(req_note, \"the provider returned an error.\"),\n    ask_state=\"WAITING\", \"Waiting on \".coalesce(req_provider, provider, \"the provider\")+\". Queued at \".coalesce(requested_at, \"unknown\")+\". Enable Exec Health - AI provider dispatch if this stays pending.\",\n    ask_state=\"STALLED\", \"Still waiting after \".tostring(wait_min).\" minutes. Dispatch may be disabled, the webhook may be missing, or the provider did not reply.\",\n    ask_state=\"REPLIED\", \"Provider replied. See the replies table below.\",\n    1=1, \"ASK status unknown.\")\n| eval _color_rank=case(ask_state=\"FAILED\" OR ask_state=\"STALLED\", 1, ask_state=\"WAITING\", 2, ask_state=\"REPLIED\", 3, 1=1, 3)\n| table ask_state, ask_message, _color_rank",
-        "refresh": "10s",
-        "refreshType": "delay",
-        "queryParameters": {
-          "earliest": "0",
-          "latest": "now"
-        }
+        "extend": "ds_dq_ai_write",
+        "query": "| head 0\n| append [\n| makeresults\n| eval finding_id=\"$tok_finding_id$\", ask=\"$tok_ai_ask$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, api_key, endpoint, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1 AND isnotnull(model) AND model!=\"none\" AND model!=\"\", 1, 0)\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider AS req_provider, note AS req_note\n| eval wait_sec=now()-strptime(coalesce(tostring(requested_at), \"\"), \"%Y-%m-%d %H:%M:%S\")\n| eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())\n| eval ask_state=case(\n    picked=0, \"IDLE\",\n    mode!=\"provider\", \"IDLE\",\n    match(ask, \"^(ask|retry)\") AND configured=0, \"FAILED\",\n    req_status=\"failed\" OR req_status=\"error\", \"FAILED\",\n    req_status=\"done\" OR req_status=\"replied\", \"REPLIED\",\n    req_status=\"pending\" AND wait_min>=15, \"STALLED\",\n    req_status=\"pending\", \"WAITING\",\n    match(ask, \"^(ask|retry)\") AND configured=1 AND (isnull(req_status) OR req_status=\"\" OR req_status=\"none\"), \"WAITING\",\n    1=1, \"IDLE\")\n| eval ask_message=case(\n    ask_state=\"IDLE\" AND picked=0, \"Select a row in the work queue. The AI suggested fix fills in automatically.\",\n    ask_state=\"IDLE\" AND mode!=\"provider\", \"AI provider is off, so the playbook fix above is the suggestion. Open AI provider setup and SAVE a provider to get an AI suggested fix automatically.\",\n    ask_state=\"IDLE\", \"No AI request yet for this suggestion.\",\n    ask_state=\"FAILED\" AND configured=0, \"ASK failed: AI provider is not ready. Open AI provider setup and SAVE provider, model, and key.\",\n    ask_state=\"FAILED\", \"ASK failed: \".coalesce(req_note, \"the provider returned an error.\"),\n    ask_state=\"WAITING\", \"Asking \".coalesce(req_provider, provider, \"the provider\")+\" for a suggested fix...\",\n    ask_state=\"STALLED\", \"Still waiting after \".tostring(wait_min).\" minutes. Click ASK AGAIN.\",\n    ask_state=\"REPLIED\", \"Provider replied. See the replies table below.\",\n    1=1, \"ASK status unknown.\")\n| eval _color_rank=case(ask_state=\"FAILED\" OR ask_state=\"STALLED\", 1, ask_state=\"WAITING\", 2, ask_state=\"REPLIED\", 3, 1=1, 3)\n| table ask_state, ask_message, _color_rank\n]"
       }
     },
     "ds_dq_ai_replies": {
-      "type": "ds.search",
-      "name": "AI provider replies",
+      "type": "ds.chain",
+      "name": "AI suggested fix",
       "options": {
-        "query": "search [| inputlookup dq_agent_ai_config | where stanza=\"default\" | head 1 | eval inbox_index=replace(coalesce(inbox_index, \"_internal\"), \"[^A-Za-z0-9_]\", \"\") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\"), \"[^A-Za-z0-9_]\", \"\") | eval search=\"index=\".inbox_index.\" sourcetype=\".inbox_sourcetype | return $search]\n| eval _gate=\"$tok_ai_ask$\"\n| eval fid=\"$tok_finding_id$\"\n| where fid!=\"none\" AND fid!=\"\" AND (finding_id=fid OR match(coalesce(_raw, \"\"), fid))\n| eval reply=coalesce(reply, ai_reply, _raw)\n| sort 0 -_time\n| head 10\n| table _time, provider, model, finding_id, reply",
-        "refresh": "30s",
-        "refreshType": "delay",
-        "queryParameters": {
-          "earliest": "-24h",
-          "latest": "now"
-        }
+        "extend": "ds_dq_ai_write",
+        "query": "| head 0\n| append [\n| makeresults\n| eval _gate=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider, model, reply, note AS req_note\n| eval ai_suggested_fix=case(\n    picked=0, \"Select a row in the work queue. The AI suggested fix fills in here automatically.\",\n    req_status=\"replied\", reply,\n    req_status=\"failed\", \"The AI could not answer: \".coalesce(req_note, \"provider error\").\". Use the playbook fix above or click ASK AGAIN.\",\n    1=1, \"Asking the AI provider for a suggested fix... If no provider is set, use the playbook fix above.\")\n| eval from_ai=if(req_status=\"replied\", provider.\" / \".model, \"none\")\n| eval _color_rank=case(req_status=\"replied\", 3, req_status=\"failed\", 1, 1=1, 2)\n| table ai_suggested_fix, from_ai, requested_at, _color_rank\n]"
       }
     }
   },
@@ -259,7 +230,7 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Derek+ Data Quality Agent\n**1. Click Select** on a row. **2. Read** the suggested fix. **3. Click APPROVE or DISMISS** to record the decision. Search does not open. The agent never changes Splunk by itself.",
+        "markdown": "# Derek+ Data Quality Agent\n**1. Click Select** on a row. The AI asks your saved provider for a suggested fix automatically. **2. Read** the playbook fix and the AI suggested fix. **3. Click APPROVE or DISMISS** to record the decision. Search does not open. The agent never changes Splunk by itself.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -564,6 +535,10 @@
               {
                 "token": "tok_decision",
                 "key": "row._reset_decision.value"
+              },
+              {
+                "token": "tok_ai_ask",
+                "key": "row._ai_auto.value"
               }
             ]
           }
@@ -1002,18 +977,29 @@
     },
     "viz_ai_replies": {
       "type": "splunk.table",
-      "title": "Provider replies for this suggestion",
+      "title": "3. AI suggested fix \u2014 fills in when you select a row",
       "dataSources": {
         "primary": "ds_dq_ai_replies"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
-        "count": 5,
+        "count": 1,
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "columnFormat": {
+          "ai_suggested_fix": {
+            "width": 800
+          },
+          "from_ai": {
+            "width": 160
+          },
+          "requested_at": {
+            "width": 140
+          }
         }
       },
       "context": {
@@ -1039,7 +1025,7 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. Click **ASK** to queue a briefing for the saved provider. Search does not open. The API key stays in the AI provider lookup \u2014 never in this queue table.",
+        "markdown": "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. Selecting a row asks the saved provider automatically; **ASK AGAIN** retries. Search does not open. The API key stays in the AI provider lookup \u2014 never in this queue table.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -1109,53 +1095,13 @@
         }
       },
       {
-        "item": "viz_approve",
+        "item": "viz_ai_replies",
         "type": "block",
         "position": {
           "x": 0,
           "y": 740,
-          "w": 400,
-          "h": 90
-        }
-      },
-      {
-        "item": "viz_dismiss",
-        "type": "block",
-        "position": {
-          "x": 400,
-          "y": 740,
-          "w": 400,
-          "h": 90
-        }
-      },
-      {
-        "item": "viz_recorded",
-        "type": "block",
-        "position": {
-          "x": 800,
-          "y": 740,
-          "w": 400,
-          "h": 90
-        }
-      },
-      {
-        "item": "viz_brief",
-        "type": "block",
-        "position": {
-          "x": 0,
-          "y": 830,
-          "w": 800,
-          "h": 150
-        }
-      },
-      {
-        "item": "viz_ai_ask",
-        "type": "block",
-        "position": {
-          "x": 800,
-          "y": 830,
-          "w": 400,
-          "h": 150
+          "w": 1200,
+          "h": 170
         }
       },
       {
@@ -1163,7 +1109,7 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 980,
+          "y": 910,
           "w": 280,
           "h": 130
         }
@@ -1173,19 +1119,59 @@
         "type": "block",
         "position": {
           "x": 280,
-          "y": 980,
+          "y": 910,
           "w": 920,
           "h": 130
         }
       },
       {
-        "item": "viz_ai_replies",
+        "item": "viz_approve",
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1110,
+          "y": 1040,
+          "w": 400,
+          "h": 90
+        }
+      },
+      {
+        "item": "viz_dismiss",
+        "type": "block",
+        "position": {
+          "x": 400,
+          "y": 1040,
+          "w": 400,
+          "h": 90
+        }
+      },
+      {
+        "item": "viz_ai_ask",
+        "type": "block",
+        "position": {
+          "x": 800,
+          "y": 1040,
+          "w": 400,
+          "h": 90
+        }
+      },
+      {
+        "item": "viz_recorded",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1130,
           "w": 1200,
-          "h": 150
+          "h": 130
+        }
+      },
+      {
+        "item": "viz_brief",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1260,
+          "w": 1200,
+          "h": 130
         }
       },
       {
@@ -1193,7 +1179,7 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1260,
+          "y": 1390,
           "w": 1200,
           "h": 80
         }
@@ -1203,7 +1189,7 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1340,
+          "y": 1470,
           "w": 1200,
           "h": 40
         }
@@ -1213,7 +1199,7 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1380,
+          "y": 1510,
           "w": 1200,
           "h": 40
         }

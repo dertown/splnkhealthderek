@@ -1,7 +1,7 @@
 provider,provider_label,default_endpoint,notes
 none,Off local briefing only,none,Default. No outbound AI call. Paste ai_brief into Splunk AI Assistant if you want a second opinion.
-openai,OpenAI,https://api.openai.com/v1/chat/completions,Enter the API key on AI provider setup. It is stored in dq_agent_ai_config on this search head.
+openai,OpenAI,https://api.openai.com/v1/chat/completions,Enter the API key on AI provider setup. It is stored in KV Store dq_agent_ai_config on this search head and survives app updates.
 cisco,Cisco AI Defense,none,Enter the Cisco token on AI provider setup. Set a custom endpoint in the provider catalog if your tenant URL is not the default.
 azure,Azure OpenAI,none,Enter the Azure key on AI provider setup. Default endpoint stays none until your deployment URL is in the catalog.
-anthropic,Anthropic,https://api.anthropic.com/v1/messages,Enter the API key on AI provider setup. It is stored in dq_agent_ai_config on this search head.
+anthropic,Anthropic,https://api.anthropic.com/v1/messages,Enter the Anthropic API key on setup. SAVE pings https://api.anthropic.com/v1/messages (Claude). The key is stored in KV Store and survives app updates.
 custom,Custom OpenAI-compatible,none,Enter the key on AI provider setup. Point default_endpoint at your proxy in the provider catalog.

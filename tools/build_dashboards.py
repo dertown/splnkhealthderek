@@ -2,6 +2,7 @@
 """Generate Dashboard Studio XML views. Run from the repo root."""
 from __future__ import annotations
 
+import csv
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -51,6 +52,33 @@ ROW_COLORS = [
 ]
 
 
+def model_dropdown_items() -> list[dict]:
+    """Static Model dropdown entries so Studio always renders a list of names."""
+    prov_labels: dict[str, str] = {}
+    with (ROOT / "lookups" / "dq_agent_ai_providers.csv").open(newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            prov_labels[(row.get("provider") or "").strip()] = (row.get("provider_label") or row.get("provider") or "").strip()
+    items: list[dict] = []
+    seen: set[str] = set()
+    with (ROOT / "lookups" / "dq_agent_ai_models.csv").open(newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            provider = (row.get("provider") or "none").strip()
+            model = (row.get("model") or "none").strip()
+            name = (row.get("model_label") or model).strip()
+            if provider == "none" or model == "none":
+                if "none" not in seen:
+                    seen.add("none")
+                    items.append({"label": "None — local briefing only", "value": "none"})
+                continue
+            key = f"{provider}|{model}"
+            if key in seen:
+                continue
+            seen.add(key)
+            pl = prov_labels.get(provider, provider)
+            items.append({"label": f"{name} ({pl})", "value": model})
+    return items
+
+
 def wrap(label: str, description: str, definition: dict) -> str:
     body = json.dumps(definition, indent=2)
     return (
@@ -62,12 +90,11 @@ def wrap(label: str, description: str, definition: dict) -> str:
     )
 
 
-def ds(name: str, query: str, earliest: str | None = None, latest: str | None = None, refresh: str = "5m") -> dict:
-    options: dict = {
-        "query": query.strip(),
-        "refresh": refresh,
-        "refreshType": "delay",
-    }
+def ds(name: str, query: str, earliest: str | None = None, latest: str | None = None, refresh: str | None = "5m") -> dict:
+    options: dict = {"query": query.strip()}
+    if refresh:
+        options["refresh"] = refresh
+        options["refreshType"] = "delay"
     if earliest is not None or latest is not None:
         options["queryParameters"] = {
             "earliest": earliest if earliest is not None else "$global_time.earliest$",
@@ -1609,8 +1636,8 @@ Q_DQ_QUEUE_VIEW = r"""
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval fix=coalesce(suggested_fix, "")
 | eval fix=if(len(fix)>80, substr(fix,1,80)."...", fix)
-| eval _ai_brief=ai_brief, _reset_decision="review"
-| table finding_id, severity, issue, entity, fix, confidence, action, status, _ai_brief, _reset_decision, _color_rank
+| eval _ai_brief=ai_brief, _reset_decision="review", _ai_auto="ask"
+| table finding_id, severity, issue, entity, fix, confidence, action, status, _ai_brief, _reset_decision, _ai_auto, _color_rank
 """
 
 Q_DQ_PICKER = r"""
@@ -1630,10 +1657,19 @@ Q_DQ_SUGGESTION = r"""
 """
 
 Q_DQ_AI_CFG_ROW = r"""
-| inputlookup dq_agent_ai_config
+| makeresults
+| eval stanza="default", mode="off", provider="none", model="none", endpoint="none", api_key="none", inbox_index="_internal", inbox_sourcetype="derek_health_ai_unconfigured", updated_by="system", updated_at="0", note="seed", _seed=1
+| inputlookup append=true dq_agent_ai_config
+| eval stanza=coalesce(stanza, "default")
+| eval _seed=coalesce(_seed, 0)
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
+| eval rank=case(key_ok=1, 3, _seed=0, 2, 1=1, 1)
+| sort 0 -rank
+| dedup stanza
 | where stanza="default"
 | head 1
-| eval used_ui=if(updated_at="0" OR isnull(updated_at), 0, 1)
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
 | eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
 | eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
 | eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
@@ -1667,14 +1703,15 @@ Q_DQ_AI_ASK_BUTTON = r"""
 | makeresults
 | eval finding_id="$tok_finding_id$", stanza="default"
 | lookup dq_agent_ai_config stanza OUTPUT mode, provider, api_key, updated_at
-| eval used_ui=if(updated_at="0" OR isnull(updated_at), 0, 1)
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
 | eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
 | eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
 | eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
 | eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
 | eval configured=if(mode="provider" AND provider!="none" AND provider!="" AND key_ok=1, 1, 0)
-| eval button_label=case(picked=0, "PICK A ROW FIRST", configured=0, "OPEN AI SETUP FIRST", 1=1, "ASK")
-| eval click_action="ask"
+| eval button_label=case(picked=0, "PICK A ROW FIRST", configured=0, "OPEN AI SETUP FIRST", 1=1, "ASK AGAIN")
+| eval click_action="retry".tostring(now())
 | eval _color_rank=if(picked=1 AND configured=1, 3, 1)
 | table button_label, click_action, _color_rank
 """
@@ -1684,32 +1721,46 @@ Q_DQ_AI_ASK_WRITE = r"""
 | makeresults
 | eval ask="$tok_ai_ask$", finding_id="$tok_finding_id$", entity="$tok_entity$", issue="$tok_issue$", ai_brief="$tok_ai_brief$", stanza="default"
 | lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at
-| eval used_ui=if(updated_at="0" OR isnull(updated_at), 0, 1)
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
 | eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
 | eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
 | eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
 | eval endpoint=if(used_ui=0, "`exec_health_ai_endpoint`", coalesce(endpoint, "none"))
 | eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
-| where ask="ask" AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder" AND mode="provider" AND provider!="none" AND provider!="" AND key_ok=1
-| eval status="pending", actor="human_dashboard", requested_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="ask_ai_provider"
+| where match(ask, "^(ask|retry)") AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder" AND mode="provider" AND provider!="none" AND provider!="" AND key_ok=1
+| lookup dq_agent_ai_requests finding_id OUTPUT status AS prev_status, requested_at AS prev_at
+| eval prev_age=coalesce(now()-strptime(coalesce(tostring(prev_at), ""), "%Y-%m-%d %H:%M:%S"), 99999)
+| where NOT (prev_status="replied" AND prev_age<3600 AND ask="ask")
+| lookup dq_agent_ai_providers provider OUTPUT default_endpoint
+| eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
+| eval actor="human_dashboard", requested_at=strftime(now(), "%Y-%m-%d %H:%M:%S")
 | eval entity=if(entity="" OR isnull(entity), "none", entity)
 | eval issue=if(issue="" OR isnull(issue), "none", issue)
 | eval ai_brief=if(ai_brief="" OR isnull(ai_brief), "none", ai_brief)
-| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief
+| eval is_ping=0
+| derekaiping
+| eval status=if(ai_result="replied", "replied", "failed")
+| eval note=if(ai_result="replied", "ask_ai_provider", "ask failed: ".coalesce(ai_error, "no reply"))
+| eval reply=if(ai_result="replied", ai_reply, "none")
+| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply
 | appendpipe [
     | inputlookup append=true dq_agent_ai_requests
-    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief by finding_id
+    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id
     | outputlookup dq_agent_ai_requests
 ]
 | where finding_id="$tok_finding_id$"
-| eval _color_rank=2
+| eval _color_rank=if(status="replied", 3, 1)
 | table requested_at, finding_id, provider, status, _color_rank
 """
 
 Q_DQ_AI_SAVE_BUTTON = r"""
 | makeresults
+| eval p=replace(lower("$tok_cfg_provider$"), "[^a-z]", ""), m=replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", ""), k=len(replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", ""))
 | eval button_label="SAVE"
-| eval click_action="save"
+| eval click_action="save|".p."|".m."|".tostring(k)
 | eval _color_rank=3
 | table button_label, click_action, _color_rank
 """
@@ -1725,11 +1776,13 @@ Q_DQ_AI_MODELS = r"""
 """
 
 # Writes only after SAVE is clicked. Empty page-load skips outputlookup.
-# api_key is stored on this search head lookup, never in the app package.
+# api_key is stored in KV Store (dq_agent_ai_config), not in a packaged CSV, so app
+# updates do not wipe it. Leave the key field blank to keep the stored value.
 Q_DQ_AI_SAVE_CONFIG = r"""
 | makeresults
 | eval save="$tok_cfg_save$"
-| eval stanza="default"
+| eval want="save|".replace(lower("$tok_cfg_provider$"), "[^a-z]", "")."|".replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")."|".tostring(len(replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")))
+| eval stanza="default", _key="default"
 | lookup dq_agent_ai_config stanza OUTPUT inbox_index AS prev_inbox, inbox_sourcetype AS prev_st, endpoint AS prev_endpoint, api_key AS prev_key
 | eval provider=replace(lower("$tok_cfg_provider$"), "[^a-z]", "")
 | eval provider=if(provider="openai" OR provider="cisco" OR provider="azure" OR provider="anthropic" OR provider="custom", provider, "none")
@@ -1738,17 +1791,20 @@ Q_DQ_AI_SAVE_CONFIG = r"""
 | eval api_key=replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")
 | eval api_key=if(api_key="" OR isnull(api_key) OR api_key="none", coalesce(prev_key, "none"), api_key)
 | eval api_key=if(provider="none", "none", api_key)
-| where save="save"
+| where save=want
 | eval mode=if(provider="none", "off", "provider")
 | lookup dq_agent_ai_providers provider OUTPUT default_endpoint
 | eval endpoint=coalesce(default_endpoint, prev_endpoint, "none")
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
 | eval inbox_index=coalesce(prev_inbox, "main")
 | eval inbox_sourcetype=coalesce(prev_st, "derek_health_ai")
 | eval updated_by="human_dashboard", updated_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="ui_config"
-| table stanza, mode, provider, model, endpoint, api_key, inbox_index, inbox_sourcetype, updated_by, updated_at, note
+| table _key, stanza, mode, provider, model, endpoint, api_key, inbox_index, inbox_sourcetype, updated_by, updated_at, note
 | appendpipe [
     | inputlookup append=true dq_agent_ai_config
     | stats latest(mode) as mode, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(api_key) as api_key, latest(inbox_index) as inbox_index, latest(inbox_sourcetype) as inbox_sourcetype, latest(updated_by) as updated_by, latest(updated_at) as updated_at, latest(note) as note by stanza
+    | eval _key=stanza
     | outputlookup dq_agent_ai_config
 ]
 | where stanza="default"
@@ -1757,11 +1813,12 @@ Q_DQ_AI_SAVE_CONFIG = r"""
 | table updated_at, provider, model, key_state, mode, _color_rank
 """
 
-# Queues a short provider ping after SAVE when the config is complete. The Cloud
-# app cannot HTTPS to OpenAI/Cisco; dispatch + webhook + HEC is the path.
+# After SAVE, sends one short ping straight to the provider with the derekaiping
+# command (Python, runs on the search head) and records PASS/FAIL in dq_agent_ai_requests.
 Q_DQ_AI_CONN_WRITE = r"""
 | makeresults
 | eval save="$tok_cfg_save$"
+| eval want="save|".replace(lower("$tok_cfg_provider$"), "[^a-z]", "")."|".replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")."|".tostring(len(replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")))
 | eval stanza="default"
 | lookup dq_agent_ai_config stanza OUTPUT api_key AS prev_key, endpoint AS prev_endpoint
 | eval provider=replace(lower("$tok_cfg_provider$"), "[^a-z]", "")
@@ -1773,27 +1830,36 @@ Q_DQ_AI_CONN_WRITE = r"""
 | eval api_key=if(provider="none", "none", api_key)
 | lookup dq_agent_ai_providers provider OUTPUT default_endpoint
 | eval endpoint=coalesce(default_endpoint, prev_endpoint, "none")
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
 | eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none" AND len(api_key)>=8, 1, 0)
 | eval model_ok=if(model!="none" AND model!="", 1, 0)
 | eval endpoint_ok=if(match(lower(coalesce(endpoint, "")), "^https://[a-z0-9]"), 1, 0)
-| where save="save" AND provider!="none" AND key_ok=1 AND model_ok=1 AND endpoint_ok=1
-| eval finding_id="connection_test", entity="ai_setup", issue="connection_test", status="pending", actor="human_dashboard"
-| eval requested_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="connection_test"
-| eval ai_brief="Connection test. Reply with the single word PONG. Do not request secrets. Do not claim you changed Splunk."
-| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief
+| where save=want AND provider!="none" AND key_ok=1 AND model_ok=1 AND endpoint_ok=1
+| eval finding_id="connection_test", entity="ai_setup", issue="connection_test", actor="human_dashboard"
+| eval requested_at=strftime(now(), "%Y-%m-%d %H:%M:%S")
+| eval ai_brief="Connection test. Reply with the single word PONG."
+| eval is_ping=1
+| derekaiping
+| eval status=if(ai_result="replied", "replied", "failed")
+| eval note=if(ai_result="replied", "connection_test ok", "connection_test failed: ".coalesce(ai_error, "no reply"))
+| eval reply=if(ai_result="replied", ai_reply, "none")
+| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply
 | appendpipe [
     | inputlookup append=true dq_agent_ai_requests
-    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief by finding_id
+    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id
     | outputlookup dq_agent_ai_requests
 ]
 | where finding_id="connection_test"
-| eval _color_rank=2
+| eval _color_rank=if(status="replied", 3, 1)
 | table requested_at, finding_id, provider, status, _color_rank
 """
 
 Q_DQ_AI_CONN_TEST = Q_DQ_AI_CFG_ROW + r"""
 | lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes
 | eval endpoint=if(endpoint="none" OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
 | eval key_state=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", "SET", "MISSING")
 | eval model_ok=if(isnotnull(model) AND model!="" AND model!="none", 1, 0)
 | eval endpoint_ok=if(isnotnull(endpoint) AND endpoint!="" AND endpoint!="none", 1, 0)
@@ -1811,50 +1877,25 @@ Q_DQ_AI_CONN_TEST = Q_DQ_AI_CFG_ROW + r"""
     1=1, "FAILED")
 | fields - api_key
 | eval finding_id="connection_test"
-| lookup dq_agent_ai_requests finding_id OUTPUT status AS ping_status, requested_at AS ping_at, note AS ping_note
-| eval ping_at_epoch=if(isnotnull(ping_at) AND ping_at!="0" AND ping_at!="", strptime(ping_at, "%Y-%m-%d %H:%M:%S"), null())
-| eval wait_sec=if(isnotnull(ping_at_epoch), now()-ping_at_epoch, null())
-| eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())
-| eval ping_replied=0, dispatch_runs=0, ping_reply_at=0
-| append [
-    search [| inputlookup dq_agent_ai_config | where stanza="default" | head 1 | eval inbox_index=replace(coalesce(inbox_index, "_internal"), "[^A-Za-z0-9_]", "") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, "derek_health_ai_unconfigured"), "[^A-Za-z0-9_]", "") | eval search="index=".inbox_index." sourcetype=".inbox_sourcetype." (finding_id=connection_test OR connection_test) earliest=-24h latest=now" | return $search]
-    | sort 0 -_time
-    | head 1
-    | eval ping_replied=1, ping_reply_at=_time
-    | eval ping_reply_status=lower(coalesce(status, conn_status, "replied"))
-    | eval ping_fail_msg=substr(replace(coalesce(reply, error, "none"), "[^A-Za-z0-9 .:_-]", ""), 1, 120)
-    | table ping_replied, ping_reply_at, ping_reply_status, ping_fail_msg
-]
-| append [
-    search index=_internal sourcetype=scheduler savedsearch_name="Exec Health - AI provider dispatch" earliest=-2h latest=now
-    | stats count as dispatch_runs, latest(status) as dispatch_status
-    | table dispatch_runs, dispatch_status
-]
-| stats first(mode) as mode, first(provider) as provider, first(provider_label) as provider_label, first(model) as model, first(key_state) as key_state, first(endpoint) as endpoint, first(inbox_index) as inbox_index, first(inbox_sourcetype) as inbox_sourcetype, first(notes) as notes, first(setup_reason) as setup_reason, first(ai_status) as ai_status, first(key_shape) as key_shape, first(endpoint_https) as endpoint_https, first(ping_status) as ping_status, first(ping_at) as ping_at, first(ping_note) as ping_note, first(ping_at_epoch) as ping_at_epoch, first(wait_min) as wait_min, max(ping_replied) as ping_replied, max(ping_reply_at) as ping_reply_at, values(ping_reply_status) as ping_reply_status, values(ping_fail_msg) as ping_fail_msg, max(dispatch_runs) as dispatch_runs, values(dispatch_status) as dispatch_status
-| eval ping_replied=if(ping_replied=1 AND (isnull(ping_at_epoch) OR ping_reply_at+60>=ping_at_epoch), 1, 0)
+| lookup dq_agent_ai_requests finding_id OUTPUT status AS ping_status, requested_at AS ping_at, note AS ping_note, provider AS ping_provider
+| eval ping_match=if(coalesce(ping_provider, "") = provider, 1, 0)
 | eval conn_status=case(
     ai_status="LOCAL", "SKIP",
     ai_status="FAILED", "FAIL",
     key_shape!="ok", "FAIL",
     endpoint_https!=1, "FAIL",
-    ping_replied=1 AND (ping_reply_status="failed" OR ping_reply_status="error" OR ping_reply_status="fail"), "FAIL",
-    ping_replied=1, "PASS",
-    ping_status="failed" OR ping_status="error", "FAIL",
-    ping_status="pending" AND wait_min>=5 AND dispatch_runs=0, "FAIL",
-    ping_status="pending" AND wait_min>=5, "FAIL",
-    ping_status="pending", "TESTING",
+    ping_match=1 AND ping_status="replied", "PASS",
+    ping_match=1 AND (ping_status="failed" OR ping_status="error"), "FAIL",
     1=1, "TESTING")
 | eval conn_reason=case(
     conn_status="SKIP", "No provider is set. Connection test was not run.",
     ai_status="FAILED", setup_reason,
     key_shape!="ok", "Connection test failed: API key is missing or too short. Enter a key and click SAVE.",
     endpoint_https!=1, "Connection test failed: endpoint is not HTTPS. Set default_endpoint to an https URL in the provider catalog, then SAVE.",
-    ping_replied=1 AND (ping_reply_status="failed" OR ping_reply_status="error" OR ping_reply_status="fail"), "Provider rejected the connection test. ".if(ping_fail_msg="none" OR isnull(ping_fail_msg), "Check the API key and endpoint.", ping_fail_msg),
-    conn_status="PASS", "Connection test passed. ".coalesce(provider_label, provider)." replied to the ping.",
-    ping_status="pending" AND wait_min>=5 AND dispatch_runs=0, "No reply after ".tostring(wait_min)." minutes and dispatch has not run. Enable Exec Health - AI provider dispatch and attach a webhook to your AI gateway, then SAVE to test again.",
-    ping_status="pending" AND wait_min>=5, "Dispatch ran but no provider reply in HEC after ".tostring(wait_min)." minutes. Check the gateway, API key, and inbox index/sourcetype. Click SAVE to test again.",
-    ping_status="pending", "Connection test ping queued at ".coalesce(ping_at, "unknown")+". Waiting for the gateway to call the provider and reply via HEC.",
-    1=1, "Connection test ping is being queued. Click SAVE if this stays TESTING.")
+    conn_status="PASS" AND provider="anthropic", "Connection test passed at ".ping_at.". Anthropic Messages API (https://api.anthropic.com/v1/messages) replied from this search head.",
+    conn_status="PASS", "Connection test passed at ".ping_at.". ".coalesce(provider_label, provider)." replied from this search head.",
+    conn_status="FAIL", coalesce(ping_note, "Connection test failed.")." Fix it, then click SAVE to test again.",
+    1=1, "No connection test has run for this provider yet. Click SAVE to test.")
 | eval tile_status=case(conn_status="SKIP", "LOCAL", conn_status="FAIL", "FAILED", 1=1, conn_status)
 | eval status_color=ai_status
 | eval _color_rank=case(conn_status="FAIL" OR ai_status="FAILED", 1, conn_status="TESTING", 2, 1=1, 3)
@@ -1873,7 +1914,8 @@ Q_DQ_AI_ASK_STATUS = r"""
 | makeresults
 | eval finding_id="$tok_finding_id$", ask="$tok_ai_ask$", stanza="default"
 | lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, api_key, endpoint, updated_at
-| eval used_ui=if(updated_at="0" OR isnull(updated_at), 0, 1)
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
 | eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
 | eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
 | eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
@@ -1881,25 +1923,26 @@ Q_DQ_AI_ASK_STATUS = r"""
 | eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
 | eval configured=if(mode="provider" AND provider!="none" AND provider!="" AND key_ok=1 AND isnotnull(model) AND model!="none" AND model!="", 1, 0)
 | lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider AS req_provider, note AS req_note
-| eval wait_sec=if(isnotnull(requested_at) AND requested_at!="0" AND requested_at!="", now()-strptime(requested_at, "%Y-%m-%d %H:%M:%S"), null())
+| eval wait_sec=now()-strptime(coalesce(tostring(requested_at), ""), "%Y-%m-%d %H:%M:%S")
 | eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())
 | eval ask_state=case(
     picked=0, "IDLE",
-    ask="ask" AND configured=0, "FAILED",
+    mode!="provider", "IDLE",
+    match(ask, "^(ask|retry)") AND configured=0, "FAILED",
     req_status="failed" OR req_status="error", "FAILED",
     req_status="done" OR req_status="replied", "REPLIED",
     req_status="pending" AND wait_min>=15, "STALLED",
     req_status="pending", "WAITING",
-    ask="ask" AND configured=1 AND (isnull(req_status) OR req_status="" OR req_status="none"), "FAILED",
+    match(ask, "^(ask|retry)") AND configured=1 AND (isnull(req_status) OR req_status="" OR req_status="none"), "WAITING",
     1=1, "IDLE")
 | eval ask_message=case(
-    ask_state="IDLE" AND picked=0, "Select a suggestion, then click ASK.",
-    ask_state="IDLE", "No ASK has been sent for this suggestion yet.",
+    ask_state="IDLE" AND picked=0, "Select a row in the work queue. The AI suggested fix fills in automatically.",
+    ask_state="IDLE" AND mode!="provider", "AI provider is off, so the playbook fix above is the suggestion. Open AI provider setup and SAVE a provider to get an AI suggested fix automatically.",
+    ask_state="IDLE", "No AI request yet for this suggestion.",
     ask_state="FAILED" AND configured=0, "ASK failed: AI provider is not ready. Open AI provider setup and SAVE provider, model, and key.",
-    ask_state="FAILED" AND picked=1 AND (isnull(req_status) OR req_status="" OR req_status="none"), "ASK failed: the request was not queued. Confirm a suggestion is selected and the provider is READY, then click ASK again.",
     ask_state="FAILED", "ASK failed: ".coalesce(req_note, "the provider returned an error."),
-    ask_state="WAITING", "Waiting on ".coalesce(req_provider, provider, "the provider")+". Queued at ".coalesce(requested_at, "unknown")+". Enable Exec Health - AI provider dispatch if this stays pending.",
-    ask_state="STALLED", "Still waiting after ".tostring(wait_min)." minutes. Dispatch may be disabled, the webhook may be missing, or the provider did not reply.",
+    ask_state="WAITING", "Asking ".coalesce(req_provider, provider, "the provider")+" for a suggested fix...",
+    ask_state="STALLED", "Still waiting after ".tostring(wait_min)." minutes. Click ASK AGAIN.",
     ask_state="REPLIED", "Provider replied. See the replies table below.",
     1=1, "ASK status unknown.")
 | eval _color_rank=case(ask_state="FAILED" OR ask_state="STALLED", 1, ask_state="WAITING", 2, ask_state="REPLIED", 3, 1=1, 3)
@@ -1907,28 +1950,18 @@ Q_DQ_AI_ASK_STATUS = r"""
 """
 
 Q_DQ_AI_REPLIES = r"""
-search [| inputlookup dq_agent_ai_config | where stanza="default" | head 1 | eval inbox_index=replace(coalesce(inbox_index, "_internal"), "[^A-Za-z0-9_]", "") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, "derek_health_ai_unconfigured"), "[^A-Za-z0-9_]", "") | eval search="index=".inbox_index." sourcetype=".inbox_sourcetype | return $search]
-| eval _gate="$tok_ai_ask$"
-| eval fid="$tok_finding_id$"
-| where fid!="none" AND fid!="" AND (finding_id=fid OR match(coalesce(_raw, ""), fid))
-| eval reply=coalesce(reply, ai_reply, _raw)
-| sort 0 -_time
-| head 10
-| table _time, provider, model, finding_id, reply
-"""
-
-Q_DQ_AI_DISPATCH = r"""
-| inputlookup dq_agent_ai_requests
-| where status="pending" AND provider!="none" AND provider!=""
-| eval stanza="default"
-| lookup dq_agent_ai_config stanza OUTPUT mode AS cfg_mode, updated_at AS cfg_updated, api_key AS cfg_key
-| eval used_ui=if(cfg_updated="0" OR isnull(cfg_updated), 0, 1)
-| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(cfg_mode, "off"))
-| where mode="provider"
-| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint
-| eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
-| eval api_key=if(used_ui=0, "none", coalesce(cfg_key, "none"))
-| table requested_at, finding_id, entity, issue, provider, provider_label, model, endpoint, api_key, ai_brief, status, actor, note
+| makeresults
+| eval _gate="$tok_ai_ask$", finding_id="$tok_finding_id$"
+| eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
+| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider, model, reply, note AS req_note
+| eval ai_suggested_fix=case(
+    picked=0, "Select a row in the work queue. The AI suggested fix fills in here automatically.",
+    req_status="replied", reply,
+    req_status="failed", "The AI could not answer: ".coalesce(req_note, "provider error").". Use the playbook fix above or click ASK AGAIN.",
+    1=1, "Asking the AI provider for a suggested fix... If no provider is set, use the playbook fix above.")
+| eval from_ai=if(req_status="replied", provider." / ".model, "none")
+| eval _color_rank=case(req_status="replied", 3, req_status="failed", 1, 1=1, 2)
+| table ai_suggested_fix, from_ai, requested_at, _color_rank
 """
 
 
@@ -1949,6 +1982,7 @@ def data_quality_agent() -> dict:
                     {"token": "tok_issue", "key": "row.issue.value"},
                     {"token": "tok_ai_brief", "key": "row._ai_brief.value"},
                     {"token": "tok_decision", "key": "row._reset_decision.value"},
+                    {"token": "tok_ai_ask", "key": "row._ai_auto.value"},
                 ]
             },
         }
@@ -1976,8 +2010,14 @@ def data_quality_agent() -> dict:
     recorded_table["showLastUpdated"] = False
     brief_table = table("Optional — briefing to paste into Splunk AI Assistant", "ds_dq_brief", count=1)
     brief_table.pop("eventHandlers", None)
-    replies_table = table("Provider replies for this suggestion", "ds_dq_ai_replies", count=5)
+    replies_table = table("3. AI suggested fix — fills in when you select a row", "ds_dq_ai_replies", count=1)
     replies_table.pop("eventHandlers", None)
+    replies_table["showLastUpdated"] = False
+    replies_table["options"]["columnFormat"] = {
+        "ai_suggested_fix": {"width": 800},
+        "from_ai": {"width": 160},
+        "requested_at": {"width": 140},
+    }
     ask_msg_table = table("ASK result — waiting or failed", "ds_dq_ai_ask_status", count=1)
     ask_msg_table.pop("eventHandlers", None)
     ask_msg_table["showLastUpdated"] = False
@@ -2024,7 +2064,7 @@ def data_quality_agent() -> dict:
             },
         },
         "dataSources": {
-            "ds_dq_findings": ds("Agent cycle findings", Q_DQ_AGENT_FINDINGS, "-24h", "now"),
+            "ds_dq_findings": ds("Agent cycle findings", Q_DQ_AGENT_FINDINGS, "-24h", "now", refresh=None),
             "ds_dq_asked": chain("Asked findings", "ds_dq_findings", Q_DQ_AGENT_ASK),
             "ds_dq_queue": chain("Work queue", "ds_dq_asked", Q_DQ_QUEUE_VIEW),
             "ds_dq_status": chain("Agent status", "ds_dq_asked", Q_DQ_AGENT_STATUS),
@@ -2037,21 +2077,21 @@ def data_quality_agent() -> dict:
 | table ai_brief
 """.strip(),
             ),
-            "ds_dq_approve": ds("Approve control", Q_DQ_CHOOSE_APPROVE, "0", "now", refresh="30s"),
-            "ds_dq_dismiss": ds("Dismiss control", Q_DQ_CHOOSE_DISMISS, "0", "now", refresh="30s"),
-            "ds_dq_save": ds("Write agent decision", Q_DQ_SAVE_DECISION, "0", "now", refresh="5m"),
-            "ds_dq_recorded": ds("Recorded decision", Q_DQ_RECORDED_READ, "0", "now", refresh="10s"),
-            "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_CONN_TEST, "0", "now", refresh="10s"),
-            "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_BUTTON, "0", "now", refresh="30s"),
-            "ds_dq_ai_write": ds("Write ASK request", Q_DQ_AI_ASK_WRITE, "0", "now", refresh="5m"),
-            "ds_dq_ai_ask_status": ds("ASK wait or fail", Q_DQ_AI_ASK_STATUS, "0", "now", refresh="10s"),
-            "ds_dq_ai_replies": ds("AI provider replies", Q_DQ_AI_REPLIES, "-24h", "now", refresh="30s"),
+            "ds_dq_approve": ds("Approve control", Q_DQ_CHOOSE_APPROVE, "0", "now", refresh=None),
+            "ds_dq_dismiss": ds("Dismiss control", Q_DQ_CHOOSE_DISMISS, "0", "now", refresh=None),
+            "ds_dq_save": ds("Write agent decision", Q_DQ_SAVE_DECISION, "0", "now", refresh=None),
+            "ds_dq_recorded": chain("Recorded decision", "ds_dq_save", "| head 0\n| append [\n" + Q_DQ_RECORDED_READ.strip() + "\n]"),
+            "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_CONN_TEST, "0", "now", refresh=None),
+            "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_BUTTON, "0", "now", refresh=None),
+            "ds_dq_ai_write": ds("Write ASK request", Q_DQ_AI_ASK_WRITE, "0", "now", refresh=None),
+            "ds_dq_ai_ask_status": chain("ASK wait or fail", "ds_dq_ai_write", "| head 0\n| append [\n" + Q_DQ_AI_ASK_STATUS.strip() + "\n]"),
+            "ds_dq_ai_replies": chain("AI suggested fix", "ds_dq_ai_write", "| head 0\n| append [\n" + Q_DQ_AI_REPLIES.strip() + "\n]"),
         },
         "visualizations": {
             "viz_header": md(
                 "# Derek+ Data Quality Agent\n"
-                "**1. Click Select** on a row. "
-                "**2. Read** the suggested fix. "
+                "**1. Click Select** on a row. The AI asks your saved provider for a suggested fix automatically. "
+                "**2. Read** the playbook fix and the AI suggested fix. "
                 "**3. Click APPROVE or DISMISS** to record the decision. "
                 "Search does not open. The agent never changes Splunk by itself."
             ),
@@ -2108,7 +2148,7 @@ def data_quality_agent() -> dict:
             "viz_ai_replies": replies_table,
             "viz_footer": md(
                 "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. "
-                "Click **ASK** to queue a briefing for the saved provider. Search does not open. "
+                "Selecting a row asks the saved provider automatically; **ASK AGAIN** retries. Search does not open. "
                 "The API key stays in the AI provider lookup — never in this queue table."
             ),
         },
@@ -2120,17 +2160,17 @@ def data_quality_agent() -> dict:
                 block("viz_ai_status", 800, 90, 400, 130),
                 block("viz_findings", 0, 220, 1200, 300),
                 block("viz_selected", 0, 520, 1200, 220),
-                block("viz_approve", 0, 740, 400, 90),
-                block("viz_dismiss", 400, 740, 400, 90),
-                block("viz_recorded", 800, 740, 400, 90),
-                block("viz_brief", 0, 830, 800, 150),
-                block("viz_ai_ask", 800, 830, 400, 150),
-                block("viz_ai_ask_state", 0, 980, 280, 130),
-                block("viz_ai_ask_msg", 280, 980, 920, 130),
-                block("viz_ai_replies", 0, 1110, 1200, 150),
-                block("viz_footer", 0, 1260, 1200, 80),
-                block("viz_write", 0, 1340, 1200, 40),
-                block("viz_ai_write", 0, 1380, 1200, 40),
+                block("viz_ai_replies", 0, 740, 1200, 170),
+                block("viz_ai_ask_state", 0, 910, 280, 130),
+                block("viz_ai_ask_msg", 280, 910, 920, 130),
+                block("viz_approve", 0, 1040, 400, 90),
+                block("viz_dismiss", 400, 1040, 400, 90),
+                block("viz_ai_ask", 800, 1040, 400, 90),
+                block("viz_recorded", 0, 1130, 1200, 130),
+                block("viz_brief", 0, 1260, 1200, 130),
+                block("viz_footer", 0, 1390, 1200, 80),
+                block("viz_write", 0, 1470, 1200, 40),
+                block("viz_ai_write", 0, 1510, 1200, 40),
             ],
             extra_inputs=[
                 "input_ask",
@@ -2191,7 +2231,7 @@ def ai_provider_setup() -> dict:
                     "token": "tok_cfg_model",
                     "defaultValue": "none",
                     "selectFirstSearchResult": True,
-                    "items": "> frame(label, value)",
+                    "items": model_dropdown_items(),
                 },
                 "dataSources": {"primary": "ds_ai_models"},
             },
@@ -2207,12 +2247,10 @@ def ai_provider_setup() -> dict:
             },
         },
         "dataSources": {
-            "ds_ai_current": ds(
+            "ds_ai_current": chain(
                 "Saved AI config",
-                Q_DQ_AI_CONN_TEST + '\n| eval _gate="$tok_cfg_save$"',
-                "0",
-                "now",
-                refresh="10s",
+                "ds_ai_conn_write",
+                "| head 0\n| append [\n" + Q_DQ_AI_CONN_TEST.strip() + '\n| eval _gate="$tok_cfg_save$"\n]',
             ),
             "ds_ai_reason": chain(
                 "Setup reason",
@@ -2234,19 +2272,19 @@ def ai_provider_setup() -> dict:
                 "| inputlookup dq_agent_ai_providers | eval _color_rank=3 | table provider, provider_label, default_endpoint, notes, _color_rank",
                 "0",
                 "now",
-                refresh="5m",
+                refresh=None,
             ),
-            "ds_ai_models": ds("Models for selected provider", Q_DQ_AI_MODELS, "0", "now", refresh="30s"),
-            "ds_ai_save": ds("Save control", Q_DQ_AI_SAVE_BUTTON, "0", "now", refresh="30s"),
-            "ds_ai_write": ds("Write AI config", Q_DQ_AI_SAVE_CONFIG, "0", "now", refresh="5m"),
-            "ds_ai_conn_write": ds("Queue connection test", Q_DQ_AI_CONN_WRITE, "0", "now", refresh="5m"),
+            "ds_ai_models": ds("Models for selected provider", Q_DQ_AI_MODELS, "0", "now", refresh=None),
+            "ds_ai_save": ds("Save control", Q_DQ_AI_SAVE_BUTTON, "0", "now", refresh=None),
+            "ds_ai_write": ds("Write AI config", Q_DQ_AI_SAVE_CONFIG, "0", "now", refresh=None),
+            "ds_ai_conn_write": chain("Connection test", "ds_ai_write", "| head 0\n| append [\n" + Q_DQ_AI_CONN_WRITE.strip() + "\n]"),
         },
         "visualizations": {
             "viz_header": md(
                 "# AI provider setup\n"
-                "Pick an **AI provider**, then a **model** from that provider's list, enter the **API key**, and click **SAVE**. "
-                "That writes Splunk config on this search head (`dq_agent_ai_config`) and runs a **connection test**. Search does not open. "
-                "The key is never shown after save. Leave key blank to keep the value already stored."
+                "Pick an **AI provider**, then a **model** from the dropdown, enter the **API key**, and click **SAVE**. "
+                "That writes provider config to KV Store on this search head (`dq_agent_ai_config`) and runs a **connection test**. Search does not open. "
+                "The key is never shown after save and **survives app updates**. Leave key blank to keep the value already stored."
             ),
             "viz_status": single_status("Setup status", "ds_ai_current", "ai_status", "status_color"),
             "viz_conn": single_status("Connection test", "ds_ai_current", "conn_status", "conn_status"),
@@ -2254,17 +2292,18 @@ def ai_provider_setup() -> dict:
             "viz_conn_reason": conn_reason_table,
             "viz_steps": md(
                 "## After a READY save\n"
-                "SAVE queues a short ping. **PASS** means the gateway reached the provider and a reply landed in HEC. "
-                "**TESTING** is waiting on dispatch. **FAIL** has the reason in **Connection test**.\n"
-                "1. Enable **Exec Health - AI provider dispatch**.\n"
-                "2. Attach a **webhook** in Splunk Web to your gateway if replies should return via HEC.\n"
+                "SAVE sends one short ping **straight from this search head** to the provider with the `derekaiping` command. "
+                "**Anthropic** goes to `https://api.anthropic.com/v1/messages` with a Claude model. No gateway or webhook. "
+                "**PASS** means the provider replied. **FAIL** has the provider's reason in **Connection test** (for example HTTP 401 means the key was rejected).\n"
+                "1. Pick the provider and model, enter the key, click **SAVE**.\n"
+                "2. Splunk Cloud must allow outbound HTTPS from the search head to the provider host. If the reason says it cannot reach the provider, ask Splunk Support to allow it.\n"
                 "3. Open **Derek+ Data Quality Agent**, review a finding, click **ASK**.\n"
                 "**FAILED** setup means provider, model, key, or endpoint is missing. "
                 "Pick **None** and SAVE to turn the provider off."
             ),
             "viz_current": saved_table,
             "viz_providers": providers_table,
-            "viz_save": decision_button("", "ds_ai_save", token="tok_cfg_save", fill="#009CEB"),
+            "viz_save": decision_button("", "ds_ai_save", token="tok_cfg_save", fill=GREEN),
             "viz_write": write_viz,
             "viz_conn_write": {
                 "type": "splunk.singlevalue",
@@ -2280,8 +2319,9 @@ def ai_provider_setup() -> dict:
                 },
             },
             "viz_footer": md(
-                "SAVE updates `lookups/dq_agent_ai_config.csv` on this search head only. "
-                "The install package ships `api_key=none`. HEC token secrets and webhook URLs still do not belong in this app."
+                "SAVE stores the key in KV Store collection `dq_agent_ai_config` on this search head. "
+                "App updates do not overwrite it. The install package does not ship a live API key. "
+                "HEC token secrets and webhook URLs still do not belong in this app. The key is read only by the search that calls the provider."
             ),
         },
         "layout": grid(
@@ -2295,19 +2335,19 @@ def ai_provider_setup() -> dict:
                 block("viz_conn", 200, 185, 200, 140),
                 block("viz_reason", 400, 185, 400, 140),
                 block("viz_conn_reason", 800, 185, 400, 140),
-                block("viz_steps", 0, 325, 1200, 110),
-                block("viz_current", 0, 435, 1200, 180),
-                block("viz_providers", 0, 615, 1200, 220),
-                block("viz_footer", 0, 835, 1200, 80),
-                block("viz_write", 0, 915, 1200, 40),
-                block("viz_conn_write", 0, 955, 1200, 40),
+                block("viz_steps", 0, 325, 1200, 150),
+                block("viz_current", 0, 475, 1200, 180),
+                block("viz_providers", 0, 655, 1200, 220),
+                block("viz_footer", 0, 875, 1200, 80),
+                block("viz_write", 0, 955, 1200, 40),
+                block("viz_conn_write", 0, 995, 1200, 40),
             ],
             include_time=False,
         ),
     }
 
 
-APP_VERSION = "1.7.16"
+APP_VERSION = "1.7.25"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2352,10 +2392,10 @@ def about() -> dict:
                 "- Search-head app only (`targetWorkloads: _search_heads` in `app.manifest`)\n"
                 "- No cluster-manager or search-head-cluster REST (those endpoints 403 on Cloud)\n"
                 "- Instance health from the `_internal` health report (PeriodicHealthReporter); search-head load from `_introspection`\n"
-                "- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n"
+                "- One Python search command, `bin/derekaiping.py` (standard library only), calls the AI provider directly from the search head. No modular inputs or indexes.conf. Splunk Cloud vetting may ask for review of the command\n"
                 "- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n"
                 "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n"
-                "- The Data Quality Agent records a decision only after a human clicks APPROVE or DISMISS (no Python LLM client). AI provider, model, and key are saved from the setup page to a search-head lookup; SAVE also queues a connection-test ping\n"
+                "- The Data Quality Agent records a decision only after a human clicks APPROVE or DISMISS AI provider, model, and key are saved from the setup page to KV Store so the key survives app updates; SAVE also runs a direct connection test against the provider\n"
                 "- `commands.conf` marks `outputlookup` not-risky in this app so the approvals lookup can be written from the dashboard\n\n"
                 "Self-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** "
                 "(`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via "
@@ -2366,7 +2406,7 @@ def about() -> dict:
                 "This app does **not** store SMTP passwords, Slack webhooks, API tokens, LLM keys, HEC token secrets, "
                 "certificates, or other credentials. Map HEC token **names** only in `lookups/hec_token_map.csv`. "
                 "Playbooks, approvals, and AI request lookups hold runbook text only. "
-                "Optional AI providers are configured on **Configure → AI provider**. Keys and webhook URLs belong in Splunk Web or your gateway, never in this app."
+                "Optional AI providers are configured on **Configure → AI provider**. The API key is entered once on the setup page and stored in KV Store; it is never in the package."
             ),
         },
         "layout": grid(
@@ -2403,7 +2443,7 @@ def readme() -> dict:
                 "- **SC4S Syslog & Edge/Ingest Processors** — syslog sources, Edge in vs out, filter efficiency\n"
                 "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index; click a source for latest event, totals, 24h trend, and 2σ drop/burst outliers\n"
                 "- **Derek+ Data Quality Agent** — agentic loop over health tiles and learned ingest bounds; a human must APPROVE or DISMISS\n"
-                "- **AI provider setup** — Configure → AI provider: provider, model, and key, then SAVE (runs a connection test)\n\n"
+                "- **AI provider setup** — Configure → AI provider: provider, model dropdown, and key, then SAVE (runs a connection test; key persists in KV Store across app updates)\n\n"
                 "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
             ),
             "viz_heartbeat": md(
@@ -2443,17 +2483,17 @@ def readme() -> dict:
             ),
             "viz_alerts": md(
                 "## Alerts\n"
-                "Saved searches ship **disabled** (`enableSched = 0`) with **no email action**.\n\n"
+                "Health alerts ship **disabled** (`enableSched = 0`) with **no email action**. "
+                "AI calls do not use an alert or a webhook. SAVE and ASK call the provider directly with the `derekaiping` command.\n\n"
                 "1. Confirm the searches return expected rows on your stack\n"
-                "2. **Settings → Searches, reports, and alerts** (this app) → enable\n"
+                "2. **Settings → Searches, reports, and alerts** (this app) → enable the health alerts you want\n"
                 "3. Attach email or Slack **in Splunk Web** — do not put webhook URLs or passwords in this app\n\n"
                 "Searches:\n"
                 "- Ingestion below `predict()` 95% lower bound (hourly, last complete hour)\n"
                 "- Host volume 2σ drop\n"
                 "- HEC token silence\n"
                 "- Host data silent with heartbeat\n"
-                "- Data quality agent report (open findings + proposed fixes; enable email yourself — the agent never auto-fixes)\n"
-                "- AI provider dispatch (pending ASK and connection-test pings; attach a webhook in Splunk Web — never put the webhook URL in this app)"
+                "- Data quality agent report (open findings + proposed fixes; enable email yourself — the agent never auto-fixes)"
             ),
             "viz_hec": md(
                 "## HEC token names\n"
@@ -2606,19 +2646,6 @@ SAVED_SEARCHES = [
             ("alert.suppress.period", "1h"),
         ],
     ),
-    (
-        "Exec Health - AI provider dispatch",
-        Q_DQ_AI_DISPATCH,
-        "Lists pending ASK requests and connection-test pings for the configured AI provider, including the key saved on AI provider setup. Enable after you SAVE a provider. Attach a webhook in Splunk Web to your gateway. Do not put webhook URLs or HEC tokens in this app, and do not attach email to this search. The search never calls a provider itself.",
-        [
-            ("cron_schedule", "*/5 * * * *"),
-            ("dispatch.earliest_time", "-15m"),
-            ("dispatch.latest_time", "now"),
-            ("alert.digest_mode", "1"),
-            ("alert.severity", "3"),
-            ("alert.suppress.period", "5m"),
-        ],
-    ),
 ]
 
 
@@ -2630,7 +2657,9 @@ def render_savedsearches() -> str:
         out.append(f"\n[{name}]")
         out.append(f"search = {body}")
         out.append(f"description = {description}")
-        for key, value in sorted(specific + SS_COMMON):
+        merged = dict(SS_COMMON)
+        merged.update(dict(specific))
+        for key, value in sorted(merged.items()):
             out.append(f"{key} = {value}")
     return "\n".join(out) + "\n"
 
