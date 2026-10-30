@@ -155,9 +155,9 @@ def decision_button(title: str, ds_id: str, token: str = "tok_decision", fill: s
         }
     ]
     viz["options"]["headerVisibility"] = "none"
-    viz["options"]["fontSize"] = "large"
+    viz["options"]["fontSize"] = "default"
     viz["options"]["columnFormat"] = {
-        "button_label": {"width": 380, "align": "center"},
+        "button_label": {"width": BUTTON_W - 2 * BUTTON_PAD_X - 4, "align": "center"},
         "click_action": {"width": 1},
     }
     if fill:
@@ -386,6 +386,12 @@ ACCENT_CHART = "#009CEB"
 ACCENT_GRAPH = "#DD9900"
 GUTTER = 6
 BAR_H = 4
+# Buttons render as a compact rounded pill centered in their grid cell.
+BUTTON_W = 220
+BUTTON_H = 44
+BUTTON_RX = 8
+BUTTON_PAD_X = 6
+BUTTON_PAD_Y = 4
 HIDDEN_PREFIXES = ()
 TRANSPARENT_TYPES = (
     "splunk.table", "splunk.line", "splunk.area", "splunk.column", "splunk.linkgraph", "splunk.sankey",
@@ -438,7 +444,19 @@ def studio_cards(definition: dict) -> dict:
             continue
         viz = vizzes[item]
         is_button = viz.get("type") == "splunk.table" and viz.get("options", {}).get("headerVisibility") == "none"
-        if is_button or item.startswith(HIDDEN_PREFIXES):
+        if is_button:
+            n += 1
+            bw = min(BUTTON_W, w - 2 * GUTTER)
+            bx = x + (w - bw) // 2
+            by = y + (h - BUTTON_H) // 2
+            pill_id = f"pill_{n}"
+            vizzes[pill_id] = _rect(viz["options"].get("backgroundColor", ACCENT_TABLE), None, rx=BUTTON_RX)
+            structure.append(block(pill_id, bx, by, bw, BUTTON_H))
+            structure.append(block(
+                item, bx + BUTTON_PAD_X, by + BUTTON_PAD_Y, bw - 2 * BUTTON_PAD_X, BUTTON_H - 2 * BUTTON_PAD_Y,
+            ))
+            continue
+        if item.startswith(HIDDEN_PREFIXES):
             structure.append(block(item, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - 2 * GUTTER))
             continue
         n += 1
@@ -2387,7 +2405,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.31"
+APP_VERSION = "1.7.32"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
