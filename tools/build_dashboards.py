@@ -369,6 +369,107 @@ def grid(structure: list, extra_inputs: list | None = None, include_time: bool =
 
 
 # ---------------------------------------------------------------------------
+# Dashboard Studio card styling
+#
+# Every view is written as a grid of blocks. studio_cards() turns that grid into a
+# Dashboard Studio absolute layout: a dark canvas, a rounded card behind each panel,
+# and a thin colored accent bar per panel type. Panels keep their ids and data.
+# ---------------------------------------------------------------------------
+
+CANVAS = "#0B0F19"
+CARD_FILL = "#151B2B"
+CARD_LINE = "#26304A"
+HEADER_FILL = "#1B2342"
+ACCENT_KPI = "#00CDAF"
+ACCENT_TABLE = "#7B56DB"
+ACCENT_CHART = "#009CEB"
+ACCENT_GRAPH = "#DD9900"
+GUTTER = 6
+BAR_H = 4
+HIDDEN_PREFIXES = ("viz_write", "viz_ai_write", "viz_conn_write")
+TRANSPARENT_TYPES = (
+    "splunk.table", "splunk.line", "splunk.area", "splunk.column", "splunk.linkgraph", "splunk.sankey",
+    "splunk.singlevalue", "splunk.markdown",
+)
+
+
+def _rect(fill: str, stroke: str | None = None, rx: int = 10) -> dict:
+    options: dict = {"fillColor": fill, "rx": rx}
+    if stroke:
+        options["strokeColor"] = stroke
+        options["strokeWidth"] = 1
+    return {"type": "splunk.rectangle", "options": options}
+
+
+def _accent_for(viz: dict) -> str | None:
+    vtype = viz.get("type", "")
+    if vtype == "splunk.singlevalue":
+        return ACCENT_KPI
+    if vtype == "splunk.table":
+        return ACCENT_TABLE
+    if vtype in ("splunk.linkgraph", "splunk.sankey"):
+        return ACCENT_GRAPH
+    if vtype in ("splunk.line", "splunk.area", "splunk.column"):
+        return ACCENT_CHART
+    return None
+
+
+def studio_cards(definition: dict) -> dict:
+    layout = definition.get("layout", {})
+    if layout.get("type") != "grid":
+        return definition
+    vizzes = definition.setdefault("visualizations", {})
+    for viz in vizzes.values():
+        if viz.get("type") in TRANSPARENT_TYPES:
+            viz.setdefault("options", {}).setdefault("backgroundColor", "transparent")
+        if "showLastUpdated" in viz:
+            viz["showLastUpdated"] = False
+
+    structure: list = []
+    bottom = 0
+    n = 0
+    for block_def in layout.get("structure", []):
+        item = block_def["item"]
+        pos = block_def["position"]
+        x, y, w, h = pos["x"], pos["y"], pos["w"], pos["h"]
+        bottom = max(bottom, y + h)
+        if block_def.get("type") == "input":
+            structure.append(block(item, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - GUTTER) | {"type": "input"})
+            continue
+        viz = vizzes[item]
+        is_button = viz.get("type") == "splunk.table" and viz.get("options", {}).get("headerVisibility") == "none"
+        if is_button or item.startswith(HIDDEN_PREFIXES):
+            structure.append(block(item, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - 2 * GUTTER))
+            continue
+        n += 1
+        header = item == "viz_header"
+        card_id, bar_id = f"card_{n}", f"bar_{n}"
+        vizzes[card_id] = _rect(HEADER_FILL if header else CARD_FILL, CARD_LINE)
+        structure.append(block(card_id, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - 2 * GUTTER))
+        accent = ACCENT_TABLE if header else _accent_for(viz)
+        inset_left, inset_top = 14, 14
+        if header:
+            vizzes[bar_id] = _rect(accent, None, rx=3)
+            structure.append(block(bar_id, x + GUTTER, y + GUTTER, 6, h - 2 * GUTTER))
+            inset_left = 22
+        elif accent:
+            vizzes[bar_id] = _rect(accent, None, rx=2)
+            structure.append(block(bar_id, x + GUTTER, y + GUTTER, w - 2 * GUTTER, BAR_H))
+            inset_top = 14
+        structure.append(block(item, x + inset_left, y + inset_top, w - inset_left - 14, h - inset_top - 12))
+
+    new_layout: dict = {
+        "type": "absolute",
+        "options": {"width": 1200, "height": bottom + GUTTER * 2, "display": "auto-scale", "backgroundColor": CANVAS},
+        "structure": structure,
+    }
+    if layout.get("globalInputs"):
+        new_layout["globalInputs"] = layout["globalInputs"]
+    definition["layout"] = new_layout
+    return definition
+
+
+# ---------------------------------------------------------------------------
 # Executive Overview
 # ---------------------------------------------------------------------------
 
@@ -1603,11 +1704,10 @@ Q_DQ_SAVE_DECISION = r"""
 | eval finding_id="$tok_finding_id$", decision="$tok_decision$"
 | where (decision="approve" OR decision="dismiss") AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder"
 | eval actor="human_dashboard", decided_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="human_in_the_loop", entity="none"
-| table finding_id, decision, actor, decided_at, note, entity
+| eval _key=finding_id
+| table _key, finding_id, decision, actor, decided_at, note, entity
 | appendpipe [
-    | inputlookup append=true dq_agent_approvals
-    | stats latest(decision) as decision, latest(actor) as actor, latest(decided_at) as decided_at, latest(note) as note, latest(entity) as entity by finding_id
-    | outputlookup dq_agent_approvals
+    | outputlookup append=true dq_agent_approvals
 ]
 | where finding_id="$tok_finding_id$"
 | eval _color_rank=if(decision="approve" OR decision="dismiss", 3, 2)
@@ -2347,7 +2447,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.26"
+APP_VERSION = "1.7.28"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2717,6 +2817,7 @@ def main() -> None:
     }
     for filename, (label, desc, definition) in dashboards.items():
         path = VIEWS / filename
+        definition = studio_cards(definition)
         xml_text = wrap(label, desc, definition)
         path.write_text(xml_text, encoding="utf-8")
         json.loads(json.dumps(definition))

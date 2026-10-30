@@ -46,7 +46,7 @@ rsync -a \
   --exclude 'metadata/local.meta' --exclude '.DS_Store' --exclude '__pycache__' \
   --exclude '*.pyc' --exclude '*.tgz' --exclude '*.spl' --exclude 'tools' \
   --exclude '.idea' --exclude '.vscode' --exclude '.venv' \
-  --exclude 'lookups/dq_agent_ai_config.csv' \
+  --exclude 'lookups/dq_agent_ai_config.csv' --exclude 'lookups/dq_agent_approvals.csv' \
   "$ROOT/" "$STAGING/$APP_ID/"
 
 find "$STAGING/$APP_ID" \( -name '.DS_Store' -o -name '._*' -o -name '*.pyc' \) -delete
@@ -101,7 +101,8 @@ required = [
 missing = [item for item in required if item not in names]
 if missing:
     raise SystemExit("Missing required Cloud files: " + ", ".join(missing))
-if "splunk_exec_health/lookups/dq_agent_ai_config.csv" in names:
-    raise SystemExit("dq_agent_ai_config.csv must not ship in the Cloud package; it would wipe the saved API key on upgrade")
+for runtime_csv in ("dq_agent_ai_config.csv", "dq_agent_approvals.csv"):
+    if "splunk_exec_health/lookups/" + runtime_csv in names:
+        raise SystemExit(runtime_csv + " must not ship in the package; runtime data lives in KV Store and an upgrade would wipe it")
 print(f"packaged {path} ({path.stat().st_size} bytes, {len(names)} entries)")
 PY

@@ -64,79 +64,235 @@
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
+    },
+    "card_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#1B2342",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 3
+      }
+    },
+    "card_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "card_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "card_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "card_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "card_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "card_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
     }
   },
   "layout": {
-    "type": "grid",
+    "type": "absolute",
+    "options": {
+      "width": 1200,
+      "height": 1052,
+      "display": "auto-scale",
+      "backgroundColor": "#0B0F19"
+    },
     "structure": [
+      {
+        "item": "card_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 1188,
+          "h": 88
+        }
+      },
+      {
+        "item": "bar_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 6,
+          "h": 88
+        }
+      },
       {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 0,
-          "w": 1200,
-          "h": 100
+          "x": 22,
+          "y": 14,
+          "w": 1164,
+          "h": 74
+        }
+      },
+      {
+        "item": "card_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 106,
+          "w": 588,
+          "h": 308
         }
       },
       {
         "item": "viz_dashboards",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 100,
-          "w": 600,
-          "h": 320
+          "x": 14,
+          "y": 114,
+          "w": 572,
+          "h": 294
+        }
+      },
+      {
+        "item": "card_3",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 106,
+          "w": 588,
+          "h": 308
         }
       },
       {
         "item": "viz_heartbeat",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 100,
-          "w": 600,
-          "h": 320
+          "x": 614,
+          "y": 114,
+          "w": 572,
+          "h": 294
+        }
+      },
+      {
+        "item": "card_4",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 426,
+          "w": 588,
+          "h": 288
         }
       },
       {
         "item": "viz_indexes",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 420,
-          "w": 600,
-          "h": 300
+          "x": 14,
+          "y": 434,
+          "w": 572,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_5",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 426,
+          "w": 588,
+          "h": 288
         }
       },
       {
         "item": "viz_macros",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 420,
-          "w": 600,
-          "h": 300
+          "x": 614,
+          "y": 434,
+          "w": 572,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 726,
+          "w": 588,
+          "h": 308
         }
       },
       {
         "item": "viz_alerts",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 720,
-          "w": 600,
-          "h": 320
+          "x": 14,
+          "y": 734,
+          "w": 572,
+          "h": 294
+        }
+      },
+      {
+        "item": "card_7",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 726,
+          "w": 588,
+          "h": 308
         }
       },
       {
         "item": "viz_hec",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 720,
-          "w": 600,
-          "h": 320
+          "x": 614,
+          "y": 734,
+          "w": 572,
+          "h": 294
         }
       }
     ]

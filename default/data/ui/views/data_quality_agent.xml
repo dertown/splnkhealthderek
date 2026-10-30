@@ -161,7 +161,7 @@
       "type": "ds.search",
       "name": "Write agent decision",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\"\n| where (decision=\"approve\" OR decision=\"dismiss\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\"\n| eval actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\", entity=\"none\"\n| table finding_id, decision, actor, decided_at, note, entity\n| appendpipe [\n    | inputlookup append=true dq_agent_approvals\n    | stats latest(decision) as decision, latest(actor) as actor, latest(decided_at) as decided_at, latest(note) as note, latest(entity) as entity by finding_id\n    | outputlookup dq_agent_approvals\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\"\n| where (decision=\"approve\" OR decision=\"dismiss\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\"\n| eval actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\", entity=\"none\"\n| eval _key=finding_id\n| table _key, finding_id, decision, actor, decided_at, note, entity\n| appendpipe [\n    | outputlookup append=true dq_agent_approvals\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -241,7 +241,7 @@
       "dataSources": {
         "primary": "ds_dq_status"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"agent_status\") | lastPoint()",
@@ -332,7 +332,7 @@
       "dataSources": {
         "primary": "ds_dq_status"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"issues\") | lastPoint()",
@@ -350,7 +350,7 @@
       "dataSources": {
         "primary": "ds_dq_ai_status"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"tile_status\") | lastPoint()",
@@ -490,7 +490,8 @@
           "finding_id": {
             "width": 80
           }
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -559,7 +560,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -705,7 +707,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -748,7 +751,7 @@
       "dataSources": {
         "primary": "ds_dq_brief"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 1,
@@ -756,7 +759,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -839,7 +843,7 @@
       "dataSources": {
         "primary": "ds_dq_ai_ask_status"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"ask_state\") | lastPoint()",
@@ -938,7 +942,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -1000,7 +1005,8 @@
           "requested_at": {
             "width": 140
           }
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -1029,179 +1035,600 @@
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
+    },
+    "card_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#1B2342",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 3
+      }
+    },
+    "card_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_10": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_10": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_12": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
     }
   },
   "layout": {
-    "type": "grid",
+    "type": "absolute",
+    "options": {
+      "width": 1200,
+      "height": 1562,
+      "display": "auto-scale",
+      "backgroundColor": "#0B0F19"
+    },
     "structure": [
+      {
+        "item": "card_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 1188,
+          "h": 78
+        }
+      },
+      {
+        "item": "bar_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 6,
+          "h": 78
+        }
+      },
       {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 0,
-          "w": 1200,
-          "h": 90
+          "x": 22,
+          "y": 14,
+          "w": 1164,
+          "h": 64
+        }
+      },
+      {
+        "item": "card_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 96,
+          "w": 388,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 96,
+          "w": 388,
+          "h": 4
         }
       },
       {
         "item": "viz_status",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 90,
-          "w": 400,
-          "h": 130
+          "x": 14,
+          "y": 104,
+          "w": 372,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_3",
+        "type": "block",
+        "position": {
+          "x": 406,
+          "y": 96,
+          "w": 388,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_3",
+        "type": "block",
+        "position": {
+          "x": 406,
+          "y": 96,
+          "w": 388,
+          "h": 4
         }
       },
       {
         "item": "viz_count",
         "type": "block",
         "position": {
-          "x": 400,
-          "y": 90,
-          "w": 400,
-          "h": 130
+          "x": 414,
+          "y": 104,
+          "w": 372,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_4",
+        "type": "block",
+        "position": {
+          "x": 806,
+          "y": 96,
+          "w": 388,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_4",
+        "type": "block",
+        "position": {
+          "x": 806,
+          "y": 96,
+          "w": 388,
+          "h": 4
         }
       },
       {
         "item": "viz_ai_status",
         "type": "block",
         "position": {
-          "x": 800,
-          "y": 90,
-          "w": 400,
-          "h": 130
+          "x": 814,
+          "y": 104,
+          "w": 372,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_5",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 226,
+          "w": 1188,
+          "h": 288
+        }
+      },
+      {
+        "item": "bar_5",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 226,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_findings",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 220,
-          "w": 1200,
-          "h": 300
+          "x": 14,
+          "y": 234,
+          "w": 1172,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 526,
+          "w": 1188,
+          "h": 208
+        }
+      },
+      {
+        "item": "bar_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 526,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_selected",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 520,
-          "w": 1200,
-          "h": 220
+          "x": 14,
+          "y": 534,
+          "w": 1172,
+          "h": 194
+        }
+      },
+      {
+        "item": "card_7",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 746,
+          "w": 1188,
+          "h": 158
+        }
+      },
+      {
+        "item": "bar_7",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 746,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_ai_replies",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 740,
-          "w": 1200,
-          "h": 170
+          "x": 14,
+          "y": 754,
+          "w": 1172,
+          "h": 144
+        }
+      },
+      {
+        "item": "card_8",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 916,
+          "w": 268,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_8",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 916,
+          "w": 268,
+          "h": 4
         }
       },
       {
         "item": "viz_ai_ask_state",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 910,
-          "w": 280,
-          "h": 130
+          "x": 14,
+          "y": 924,
+          "w": 252,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_9",
+        "type": "block",
+        "position": {
+          "x": 286,
+          "y": 916,
+          "w": 908,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_9",
+        "type": "block",
+        "position": {
+          "x": 286,
+          "y": 916,
+          "w": 908,
+          "h": 4
         }
       },
       {
         "item": "viz_ai_ask_msg",
         "type": "block",
         "position": {
-          "x": 280,
-          "y": 910,
-          "w": 920,
-          "h": 130
+          "x": 294,
+          "y": 924,
+          "w": 892,
+          "h": 104
         }
       },
       {
         "item": "viz_approve",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1040,
-          "w": 400,
-          "h": 90
+          "x": 6,
+          "y": 1046,
+          "w": 388,
+          "h": 78
         }
       },
       {
         "item": "viz_dismiss",
         "type": "block",
         "position": {
-          "x": 400,
-          "y": 1040,
-          "w": 400,
-          "h": 90
+          "x": 406,
+          "y": 1046,
+          "w": 388,
+          "h": 78
         }
       },
       {
         "item": "viz_ai_ask",
         "type": "block",
         "position": {
-          "x": 800,
-          "y": 1040,
-          "w": 400,
-          "h": 90
+          "x": 806,
+          "y": 1046,
+          "w": 388,
+          "h": 78
+        }
+      },
+      {
+        "item": "card_10",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1136,
+          "w": 1188,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_10",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1136,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_recorded",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1130,
-          "w": 1200,
-          "h": 130
+          "x": 14,
+          "y": 1144,
+          "w": 1172,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_11",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1266,
+          "w": 1188,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_11",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1266,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_brief",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1260,
-          "w": 1200,
-          "h": 130
+          "x": 14,
+          "y": 1274,
+          "w": 1172,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_12",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1396,
+          "w": 1188,
+          "h": 68
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1390,
-          "w": 1200,
-          "h": 80
+          "x": 14,
+          "y": 1404,
+          "w": 1172,
+          "h": 54
         }
       },
       {
         "item": "viz_write",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1470,
-          "w": 1200,
-          "h": 40
+          "x": 6,
+          "y": 1476,
+          "w": 1188,
+          "h": 28
         }
       },
       {
         "item": "viz_ai_write",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1510,
-          "w": 1200,
-          "h": 40
+          "x": 6,
+          "y": 1516,
+          "w": 1188,
+          "h": 28
         }
       }
     ],

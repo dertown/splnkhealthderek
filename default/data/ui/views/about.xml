@@ -28,7 +28,7 @@
     "viz_identity": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## App identity\n- **Display name:** Splunk Health Derek+\n- **App id:** `splunk_exec_health`\n- **Version:** 1.7.26\n- **Author:** SplunkHealth\n- **License:** Apache License 2.0 (`LICENSE` in the app package)\n- **UI:** Dashboard Studio (dark theme)\n- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\nThe folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`.",
+        "markdown": "## App identity\n- **Display name:** Splunk Health Derek+\n- **App id:** `splunk_exec_health`\n- **Version:** 1.7.28\n- **Author:** SplunkHealth\n- **License:** Apache License 2.0 (`LICENSE` in the app package)\n- **UI:** Dashboard Studio (dark theme)\n- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\nThe folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -48,59 +48,177 @@
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
+    },
+    "card_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#1B2342",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 3
+      }
+    },
+    "card_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "card_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "card_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "card_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
     }
   },
   "layout": {
-    "type": "grid",
+    "type": "absolute",
+    "options": {
+      "width": 1200,
+      "height": 772,
+      "display": "auto-scale",
+      "backgroundColor": "#0B0F19"
+    },
     "structure": [
+      {
+        "item": "card_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 1188,
+          "h": 88
+        }
+      },
+      {
+        "item": "bar_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 6,
+          "h": 88
+        }
+      },
       {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 0,
-          "w": 1200,
-          "h": 100
+          "x": 22,
+          "y": 14,
+          "w": 1164,
+          "h": 74
+        }
+      },
+      {
+        "item": "card_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 106,
+          "w": 588,
+          "h": 368
         }
       },
       {
         "item": "viz_what",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 100,
-          "w": 600,
-          "h": 380
+          "x": 14,
+          "y": 114,
+          "w": 572,
+          "h": 354
+        }
+      },
+      {
+        "item": "card_3",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 106,
+          "w": 588,
+          "h": 368
         }
       },
       {
         "item": "viz_identity",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 100,
-          "w": 600,
-          "h": 380
+          "x": 614,
+          "y": 114,
+          "w": 572,
+          "h": 354
+        }
+      },
+      {
+        "item": "card_4",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 486,
+          "w": 588,
+          "h": 268
         }
       },
       {
         "item": "viz_cloud",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 480,
-          "w": 600,
-          "h": 280
+          "x": 14,
+          "y": 494,
+          "w": 572,
+          "h": 254
+        }
+      },
+      {
+        "item": "card_5",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 486,
+          "w": 588,
+          "h": 268
         }
       },
       {
         "item": "viz_security",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 480,
-          "w": 600,
-          "h": 280
+          "x": 614,
+          "y": 494,
+          "w": 572,
+          "h": 254
         }
       }
     ]

@@ -226,8 +226,9 @@ def check_collections() -> None:
         err("collections.conf", "missing; AI provider config needs KV Store so the API key survives app updates")
         return
     conf = parse_conf(path)
-    if "dq_agent_ai_config" not in conf:
-        err("collections.conf", "missing [dq_agent_ai_config] collection")
+    for required in ("dq_agent_ai_config", "dq_agent_approvals"):
+        if required not in conf:
+            err("collections.conf", f"missing [{required}] collection")
     for stanza, keys in conf.items():
         for key in keys:
             if key in COLLECTION_KEYS or key.startswith("field.") or key.startswith("accelerated_fields."):
@@ -412,6 +413,7 @@ VIZ_OPTIONS = {
     "splunk.line": COMMON_CHART | {"nullValueDisplay", "lineWidth", "markerDisplay", "lineDashStyle"},
     "splunk.area": COMMON_CHART | {"nullValueDisplay", "areaOpacity"},
     "splunk.column": COMMON_CHART | {"columnSpacing", "seriesSpacing"},
+    "splunk.rectangle": {"fillColor", "fillOpacity", "strokeColor", "strokeWidth", "rx"},
     "splunk.markdown": {"markdown", "fontColor", "backgroundColor", "fontSize", "fontFamily"},
     "splunk.linkgraph": {"backgroundColor", "fieldOrder", "linkColor", "linkWidth", "nodeColor",
                          "nodeTextColor", "nodeHeight", "nodeHighlightColor",
@@ -557,7 +559,7 @@ def check_dashboard(path: Path, macros: dict, transforms: dict) -> None:
         for ref in viz.get("dataSources", {}).values():
             if ref not in data_sources:
                 err(loc, f"references missing data source {ref!r}")
-        if vtype != "splunk.markdown" and not viz.get("dataSources"):
+        if vtype not in ("splunk.markdown", "splunk.rectangle") and not viz.get("dataSources"):
             err(loc, "has no data source")
         ctx = set(viz.get("context", {}))
         for name in CONTEXT_FN_RE.findall(json.dumps(opts)):

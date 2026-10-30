@@ -183,7 +183,7 @@
       "dataSources": {
         "primary": "ds_overall_health"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"overall_status\") | lastPoint()",
@@ -274,7 +274,7 @@
       "dataSources": {
         "primary": "ds_license_daily"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"daily_GB\") | lastPoint()",
@@ -297,7 +297,7 @@
       "dataSources": {
         "primary": "ds_license_daily"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"variance_pct\") | lastPoint()",
@@ -307,7 +307,8 @@
         "sparklineDisplay": "off",
         "trendDisplay": "off",
         "numberPrecision": 1,
-        "majorFontSize": 32
+        "majorFontSize": 32,
+        "backgroundColor": "transparent"
       },
       "context": {
         "healthColors": [
@@ -333,7 +334,7 @@
       "dataSources": {
         "primary": "ds_live"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"events\") | lastPoint()",
@@ -351,7 +352,7 @@
       "dataSources": {
         "primary": "ds_indexer_cluster"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"clustering_status\") | lastPoint()",
@@ -442,7 +443,7 @@
       "dataSources": {
         "primary": "ds_shc"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"shc_status\") | lastPoint()",
@@ -533,14 +534,15 @@
       "dataSources": {
         "primary": "ds_silent"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"silent_hosts\") | lastPoint()",
         "majorColor": "> primary | seriesByName(\"health_score\") | lastPoint() | rangeValue(healthColors)",
         "sparklineDisplay": "off",
         "trendDisplay": "off",
-        "majorFontSize": 32
+        "majorFontSize": 32,
+        "backgroundColor": "transparent"
       },
       "context": {
         "healthColors": [
@@ -566,7 +568,7 @@
       "dataSources": {
         "primary": "ds_license_daily"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "seriesColors": [
@@ -580,7 +582,8 @@
         "yAxisTitleText": "GB / day",
         "nullValueDisplay": "connect",
         "lineWidth": 2,
-        "markerDisplay": "off"
+        "markerDisplay": "off",
+        "backgroundColor": "transparent"
       }
     },
     "viz_topo": {
@@ -589,7 +592,7 @@
       "dataSources": {
         "primary": "ds_topo_overview"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "fieldOrder": [
@@ -605,7 +608,8 @@
         "nodeSpacingY": 12,
         "resultLimit": 40,
         "showNodeCounts": true,
-        "showValueCounts": true
+        "showValueCounts": true,
+        "backgroundColor": "transparent"
       },
       "eventHandlers": [
         {
@@ -624,7 +628,7 @@
       "dataSources": {
         "primary": "ds_top_indexes"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 15,
@@ -632,7 +636,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -669,7 +674,7 @@
       "dataSources": {
         "primary": "ds_introspection"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 15,
@@ -677,7 +682,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -714,7 +720,7 @@
       "dataSources": {
         "primary": "ds_host_alerts"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 25,
@@ -722,7 +728,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -759,7 +766,7 @@
       "dataSources": {
         "primary": "ds_health_components"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 20,
@@ -767,7 +774,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -804,7 +812,7 @@
       "dataSources": {
         "primary": "ds_dq_preview"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 8,
@@ -812,7 +820,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -851,169 +860,734 @@
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
+    },
+    "card_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#1B2342",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 3
+      }
+    },
+    "card_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#009CEB",
+        "rx": 2
+      }
+    },
+    "card_10": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_10": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#DD9900",
+        "rx": 2
+      }
+    },
+    "card_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_12": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_12": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_13": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_13": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_14": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_14": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_15": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_15": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_16": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
     }
   },
   "layout": {
-    "type": "grid",
+    "type": "absolute",
+    "options": {
+      "width": 1200,
+      "height": 2112,
+      "display": "auto-scale",
+      "backgroundColor": "#0B0F19"
+    },
     "structure": [
+      {
+        "item": "card_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 1188,
+          "h": 78
+        }
+      },
+      {
+        "item": "bar_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 6,
+          "h": 78
+        }
+      },
       {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 0,
-          "w": 1200,
-          "h": 90
+          "x": 22,
+          "y": 14,
+          "w": 1164,
+          "h": 64
+        }
+      },
+      {
+        "item": "card_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 96,
+          "w": 288,
+          "h": 168
+        }
+      },
+      {
+        "item": "bar_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_overall",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 90,
-          "w": 300,
-          "h": 180
+          "x": 14,
+          "y": 104,
+          "w": 272,
+          "h": 154
+        }
+      },
+      {
+        "item": "card_3",
+        "type": "block",
+        "position": {
+          "x": 306,
+          "y": 96,
+          "w": 288,
+          "h": 168
+        }
+      },
+      {
+        "item": "bar_3",
+        "type": "block",
+        "position": {
+          "x": 306,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_gb",
         "type": "block",
         "position": {
-          "x": 300,
-          "y": 90,
-          "w": 300,
-          "h": 180
+          "x": 314,
+          "y": 104,
+          "w": 272,
+          "h": 154
+        }
+      },
+      {
+        "item": "card_4",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 96,
+          "w": 288,
+          "h": 168
+        }
+      },
+      {
+        "item": "bar_4",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_var",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 90,
-          "w": 300,
-          "h": 180
+          "x": 614,
+          "y": 104,
+          "w": 272,
+          "h": 154
+        }
+      },
+      {
+        "item": "card_5",
+        "type": "block",
+        "position": {
+          "x": 906,
+          "y": 96,
+          "w": 288,
+          "h": 168
+        }
+      },
+      {
+        "item": "bar_5",
+        "type": "block",
+        "position": {
+          "x": 906,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_live",
         "type": "block",
         "position": {
-          "x": 900,
-          "y": 90,
-          "w": 300,
-          "h": 180
+          "x": 914,
+          "y": 104,
+          "w": 272,
+          "h": 154
+        }
+      },
+      {
+        "item": "card_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 276,
+          "w": 388,
+          "h": 148
+        }
+      },
+      {
+        "item": "bar_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 276,
+          "w": 388,
+          "h": 4
         }
       },
       {
         "item": "viz_idx_cluster",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 270,
-          "w": 400,
-          "h": 160
+          "x": 14,
+          "y": 284,
+          "w": 372,
+          "h": 134
+        }
+      },
+      {
+        "item": "card_7",
+        "type": "block",
+        "position": {
+          "x": 406,
+          "y": 276,
+          "w": 388,
+          "h": 148
+        }
+      },
+      {
+        "item": "bar_7",
+        "type": "block",
+        "position": {
+          "x": 406,
+          "y": 276,
+          "w": 388,
+          "h": 4
         }
       },
       {
         "item": "viz_shc",
         "type": "block",
         "position": {
-          "x": 400,
-          "y": 270,
-          "w": 400,
-          "h": 160
+          "x": 414,
+          "y": 284,
+          "w": 372,
+          "h": 134
+        }
+      },
+      {
+        "item": "card_8",
+        "type": "block",
+        "position": {
+          "x": 806,
+          "y": 276,
+          "w": 388,
+          "h": 148
+        }
+      },
+      {
+        "item": "bar_8",
+        "type": "block",
+        "position": {
+          "x": 806,
+          "y": 276,
+          "w": 388,
+          "h": 4
         }
       },
       {
         "item": "viz_silent",
         "type": "block",
         "position": {
-          "x": 800,
-          "y": 270,
-          "w": 400,
-          "h": 160
+          "x": 814,
+          "y": 284,
+          "w": 372,
+          "h": 134
+        }
+      },
+      {
+        "item": "card_9",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 436,
+          "w": 1188,
+          "h": 288
+        }
+      },
+      {
+        "item": "bar_9",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 436,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_ingest_chart",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 430,
-          "w": 1200,
-          "h": 300
+          "x": 14,
+          "y": 444,
+          "w": 1172,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_10",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 736,
+          "w": 1188,
+          "h": 328
+        }
+      },
+      {
+        "item": "bar_10",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 736,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_topo",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 730,
-          "w": 1200,
-          "h": 340
+          "x": 14,
+          "y": 744,
+          "w": 1172,
+          "h": 314
+        }
+      },
+      {
+        "item": "card_11",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1076,
+          "w": 588,
+          "h": 288
+        }
+      },
+      {
+        "item": "bar_11",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1076,
+          "w": 588,
+          "h": 4
         }
       },
       {
         "item": "viz_top_indexes",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1070,
-          "w": 600,
-          "h": 300
+          "x": 14,
+          "y": 1084,
+          "w": 572,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_12",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 1076,
+          "w": 588,
+          "h": 288
+        }
+      },
+      {
+        "item": "bar_12",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 1076,
+          "w": 588,
+          "h": 4
         }
       },
       {
         "item": "viz_intro",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 1070,
-          "w": 600,
-          "h": 300
+          "x": 614,
+          "y": 1084,
+          "w": 572,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_13",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1376,
+          "w": 688,
+          "h": 308
+        }
+      },
+      {
+        "item": "bar_13",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1376,
+          "w": 688,
+          "h": 4
         }
       },
       {
         "item": "viz_host_alerts",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1370,
-          "w": 700,
-          "h": 320
+          "x": 14,
+          "y": 1384,
+          "w": 672,
+          "h": 294
+        }
+      },
+      {
+        "item": "card_14",
+        "type": "block",
+        "position": {
+          "x": 706,
+          "y": 1376,
+          "w": 488,
+          "h": 308
+        }
+      },
+      {
+        "item": "bar_14",
+        "type": "block",
+        "position": {
+          "x": 706,
+          "y": 1376,
+          "w": 488,
+          "h": 4
         }
       },
       {
         "item": "viz_components",
         "type": "block",
         "position": {
-          "x": 700,
-          "y": 1370,
-          "w": 500,
-          "h": 320
+          "x": 714,
+          "y": 1384,
+          "w": 472,
+          "h": 294
+        }
+      },
+      {
+        "item": "card_15",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1696,
+          "w": 1188,
+          "h": 288
+        }
+      },
+      {
+        "item": "bar_15",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1696,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_dq_preview",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1690,
-          "w": 1200,
-          "h": 300
+          "x": 14,
+          "y": 1704,
+          "w": 1172,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_16",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1996,
+          "w": 1188,
+          "h": 98
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1990,
-          "w": 1200,
-          "h": 110
+          "x": 14,
+          "y": 2004,
+          "w": 1172,
+          "h": 84
         }
       }
     ],

@@ -158,7 +158,7 @@
       "dataSources": {
         "primary": "ds_state_ok"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"hosts\") | lastPoint()",
@@ -176,7 +176,7 @@
       "dataSources": {
         "primary": "ds_state_delayed"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"hosts\") | lastPoint()",
@@ -194,7 +194,7 @@
       "dataSources": {
         "primary": "ds_state_silent"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"hosts\") | lastPoint()",
@@ -212,7 +212,7 @@
       "dataSources": {
         "primary": "ds_state_down"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"hosts\") | lastPoint()",
@@ -230,7 +230,7 @@
       "dataSources": {
         "primary": "ds_phone_home"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 30,
@@ -238,7 +238,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -275,7 +276,7 @@
       "dataSources": {
         "primary": "ds_baseline"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 30,
@@ -283,7 +284,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -320,7 +322,7 @@
       "dataSources": {
         "primary": "ds_host_volume"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "seriesColors": [
@@ -333,7 +335,8 @@
         "legendDisplay": "right",
         "yAxisTitleText": "events / 15m",
         "areaOpacity": 0.35,
-        "nullValueDisplay": "connect"
+        "nullValueDisplay": "connect",
+        "backgroundColor": "transparent"
       }
     },
     "viz_meta": {
@@ -342,7 +345,7 @@
       "dataSources": {
         "primary": "ds_metadata"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 20,
@@ -350,7 +353,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -388,109 +392,458 @@
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
+    },
+    "card_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#1B2342",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 3
+      }
+    },
+    "card_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#009CEB",
+        "rx": 2
+      }
+    },
+    "card_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_10": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
     }
   },
   "layout": {
-    "type": "grid",
+    "type": "absolute",
+    "options": {
+      "width": 1200,
+      "height": 1582,
+      "display": "auto-scale",
+      "backgroundColor": "#0B0F19"
+    },
     "structure": [
+      {
+        "item": "card_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 1188,
+          "h": 78
+        }
+      },
+      {
+        "item": "bar_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 6,
+          "h": 78
+        }
+      },
       {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 0,
-          "w": 1200,
-          "h": 90
+          "x": 22,
+          "y": 14,
+          "w": 1164,
+          "h": 64
+        }
+      },
+      {
+        "item": "card_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 96,
+          "w": 288,
+          "h": 138
+        }
+      },
+      {
+        "item": "bar_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_ok",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 90,
-          "w": 300,
-          "h": 150
+          "x": 14,
+          "y": 104,
+          "w": 272,
+          "h": 124
+        }
+      },
+      {
+        "item": "card_3",
+        "type": "block",
+        "position": {
+          "x": 306,
+          "y": 96,
+          "w": 288,
+          "h": 138
+        }
+      },
+      {
+        "item": "bar_3",
+        "type": "block",
+        "position": {
+          "x": 306,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_delayed",
         "type": "block",
         "position": {
-          "x": 300,
-          "y": 90,
-          "w": 300,
-          "h": 150
+          "x": 314,
+          "y": 104,
+          "w": 272,
+          "h": 124
+        }
+      },
+      {
+        "item": "card_4",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 96,
+          "w": 288,
+          "h": 138
+        }
+      },
+      {
+        "item": "bar_4",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_silent",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 90,
-          "w": 300,
-          "h": 150
+          "x": 614,
+          "y": 104,
+          "w": 272,
+          "h": 124
+        }
+      },
+      {
+        "item": "card_5",
+        "type": "block",
+        "position": {
+          "x": 906,
+          "y": 96,
+          "w": 288,
+          "h": 138
+        }
+      },
+      {
+        "item": "bar_5",
+        "type": "block",
+        "position": {
+          "x": 906,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_down",
         "type": "block",
         "position": {
-          "x": 900,
-          "y": 90,
-          "w": 300,
-          "h": 150
+          "x": 914,
+          "y": 104,
+          "w": 272,
+          "h": 124
+        }
+      },
+      {
+        "item": "card_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 246,
+          "w": 1188,
+          "h": 328
+        }
+      },
+      {
+        "item": "bar_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 246,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_table",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 240,
-          "w": 1200,
-          "h": 340
+          "x": 14,
+          "y": 254,
+          "w": 1172,
+          "h": 314
+        }
+      },
+      {
+        "item": "card_7",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 586,
+          "w": 1188,
+          "h": 308
+        }
+      },
+      {
+        "item": "bar_7",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 586,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_baseline",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 580,
-          "w": 1200,
-          "h": 320
+          "x": 14,
+          "y": 594,
+          "w": 1172,
+          "h": 294
+        }
+      },
+      {
+        "item": "card_8",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 906,
+          "w": 1188,
+          "h": 288
+        }
+      },
+      {
+        "item": "bar_8",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 906,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_volume",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 900,
-          "w": 1200,
-          "h": 300
+          "x": 14,
+          "y": 914,
+          "w": 1172,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_9",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1206,
+          "w": 1188,
+          "h": 268
+        }
+      },
+      {
+        "item": "bar_9",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1206,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_meta",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1200,
-          "w": 1200,
-          "h": 280
+          "x": 14,
+          "y": 1214,
+          "w": 1172,
+          "h": 254
+        }
+      },
+      {
+        "item": "card_10",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1486,
+          "w": 1188,
+          "h": 78
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1480,
-          "w": 1200,
-          "h": 90
+          "x": 14,
+          "y": 1494,
+          "w": 1172,
+          "h": 64
         }
       }
     ],

@@ -5,7 +5,7 @@
     "id": {
       "group": null,
       "name": "splunk_exec_health",
-      "version": "1.7.26"
+      "version": "1.7.28"
     },
     "author": [
       {

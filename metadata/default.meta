@@ -18,6 +18,14 @@ export = none
 access = read : [ * ], write : [ admin, sc_admin ]
 export = none
 
+[lookups/dq_agent_approvals]
+access = read : [ * ], write : [ admin, sc_admin ]
+export = none
+
+[collections/dq_agent_approvals]
+access = read : [ * ], write : [ admin, sc_admin ]
+export = none
+
 [lookups/dq_agent_ai_config]
 access = read : [ admin, sc_admin ], write : [ admin, sc_admin ]
 export = none
