@@ -4,7 +4,7 @@
   <definition><![CDATA[
 {
   "title": "Host Heartbeat & Ingestion Latency",
-  "description": "Fleet liveness right now: last indexed data vs _internal heartbeat, and current 2-sigma volume status per host.",
+  "description": "Fleet liveness right now: last indexed data vs _internal heartbeat, ingestion latency, and current 2-sigma volume status per host.",
   "defaults": {
     "dataSources": {
       "ds.search": {
@@ -109,6 +109,19 @@
       "options": {
         "extend": "ds_state_counts",
         "query": "| append [| makeresults | eval state=\"HOST DOWN\", hosts=0] | where state=\"HOST DOWN\" | stats max(hosts) as hosts"
+      }
+    },
+    "ds_latency": {
+      "type": "ds.search",
+      "name": "Ingestion latency (last 15m)",
+      "options": {
+        "query": "search index=`exec_health_idx` host=$host_filter$ earliest=-15m@m latest=now\n| eval lag=_indextime-_time\n| stats count as events, avg(lag) as avg_lag, perc95(lag) as p95_lag, max(lag) as max_lag, min(lag) as min_lag by host\n| eval avg_lag_sec=round(avg_lag, 1), p95_lag_sec=round(p95_lag, 1), max_lag_sec=round(max_lag, 1)\n| eval latency_state=case(\n    min_lag < -300, \"CLOCK AHEAD\",\n    p95_lag > 3*`exec_health_latency_sec`, \"HIGH\",\n    p95_lag > `exec_health_latency_sec`, \"DELAYED\",\n    1=1, \"OK\")\n| eval _color_rank=case(latency_state=\"HIGH\" OR latency_state=\"CLOCK AHEAD\", 1, latency_state=\"DELAYED\", 2, 1=1, 3)\n| table host, events, avg_lag_sec, p95_lag_sec, max_lag_sec, latency_state, _color_rank\n| sort _color_rank, -p95_lag_sec",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-15m@m",
+          "latest": "now"
+        }
       }
     },
     "ds_baseline": {
@@ -252,6 +265,52 @@
         }
       ]
     },
+    "viz_latency": {
+      "type": "splunk.table",
+      "title": "Ingestion latency: index time minus event time, last 15 minutes (seconds)",
+      "dataSources": {
+        "primary": "ds_latency"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 30,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
     "viz_baseline": {
       "type": "splunk.table",
       "title": "Current volume vs 24-hour baseline, all hosts (streamstats window=96 @ 15m)",
@@ -301,7 +360,7 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "`tstats latest(_time)` is the source of truth for last data / last heartbeat. This page is the **fleet-wide, right-now** view. For one source's history (first/last event, 24-hour trend, drop/burst buckets) and how it reaches Splunk, open **Data Topology** and click a source. Override `exec_health_silence_sec` (default 3600) and `exec_health_sigma` (default 2) as needed.",
+        "markdown": "`tstats latest(_time)` is the source of truth for last data / last heartbeat. This page is the **fleet-wide, right-now** view. For one source's history (first/last event, 24-hour trend, drop/burst buckets) and how it reaches Splunk, open **Data Topology** and click a source. **Latency** is `_indextime - _time` over the last 15 minutes (fixed window; the time picker does not change it): DELAYED above `exec_health_latency_sec`, HIGH above 3x that, CLOCK AHEAD when events are stamped more than 5 minutes in the future. Override `exec_health_silence_sec` (default 3600), `exec_health_latency_sec` (default 300) and `exec_health_sigma` (default 2) as needed.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -426,13 +485,29 @@
         "strokeColor": "#26304A",
         "strokeWidth": 1
       }
+    },
+    "bar_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
     }
   },
   "layout": {
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 1052,
+      "height": 1382,
       "display": "auto-scale",
       "backgroundColor": "#0B0F19"
     },
@@ -624,7 +699,7 @@
           "x": 6,
           "y": 586,
           "w": 1188,
-          "h": 348
+          "h": 308
         }
       },
       {
@@ -638,13 +713,13 @@
         }
       },
       {
-        "item": "viz_baseline",
+        "item": "viz_latency",
         "type": "block",
         "position": {
           "x": 14,
           "y": 594,
           "w": 1172,
-          "h": 334
+          "h": 294
         }
       },
       {
@@ -652,9 +727,39 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 946,
+          "y": 906,
           "w": 1188,
-          "h": 88
+          "h": 348
+        }
+      },
+      {
+        "item": "bar_8",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 906,
+          "w": 1188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_baseline",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 914,
+          "w": 1172,
+          "h": 334
+        }
+      },
+      {
+        "item": "card_9",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1266,
+          "w": 1188,
+          "h": 98
         }
       },
       {
@@ -662,9 +767,9 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 954,
+          "y": 1274,
           "w": 1172,
-          "h": 74
+          "h": 84
         }
       }
     ],

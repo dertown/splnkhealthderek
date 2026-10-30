@@ -28,7 +28,7 @@
     "viz_identity": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## App identity\n- **Display name:** Splunk Health Derek+\n- **App id:** `splunk_exec_health`\n- **Version:** 1.7.30\n- **Author:** SplunkHealth\n- **License:** Apache License 2.0 (`LICENSE` in the app package)\n- **UI:** Dashboard Studio (dark theme)\n- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\nThe folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`.",
+        "markdown": "## App identity\n- **Display name:** Splunk Health Derek+\n- **App id:** `splunk_exec_health`\n- **Version:** 1.7.31\n- **Author:** SplunkHealth\n- **License:** Apache License 2.0 (`LICENSE` in the app package)\n- **UI:** Dashboard Studio (dark theme)\n- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\nThe folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }

@@ -1114,6 +1114,21 @@ Q_STATE_COUNTS = r"""
 | stats count as hosts by state
 """.strip()
 
+Q_LATENCY = r"""
+search index=`exec_health_idx` host=$host_filter$ earliest=-15m@m latest=now
+| eval lag=_indextime-_time
+| stats count as events, avg(lag) as avg_lag, perc95(lag) as p95_lag, max(lag) as max_lag, min(lag) as min_lag by host
+| eval avg_lag_sec=round(avg_lag, 1), p95_lag_sec=round(p95_lag, 1), max_lag_sec=round(max_lag, 1)
+| eval latency_state=case(
+    min_lag < -300, "CLOCK AHEAD",
+    p95_lag > 3*`exec_health_latency_sec`, "HIGH",
+    p95_lag > `exec_health_latency_sec`, "DELAYED",
+    1=1, "OK")
+| eval _color_rank=case(latency_state="HIGH" OR latency_state="CLOCK AHEAD", 1, latency_state="DELAYED", 2, 1=1, 3)
+| table host, events, avg_lag_sec, p95_lag_sec, max_lag_sec, latency_state, _color_rank
+| sort _color_rank, -p95_lag_sec
+""".strip()
+
 Q_BASELINE_ALL = host_baseline_core("host=$host_filter$") + r"""
 | eval current_eps=round(events/900, 2), baseline_eps=round(mean_vol/900, 2)
 | eval _color_rank=case(baseline_state="ALERT", 1, baseline_state="WARMUP", 2, 1=1, 3)
@@ -1133,7 +1148,7 @@ Q_HOST_LIST = r"""
 def host_heartbeat() -> dict:
     return {
         "title": "Host Heartbeat & Ingestion Latency",
-        "description": "Fleet liveness right now: last indexed data vs _internal heartbeat, and current 2-sigma volume status per host.",
+        "description": "Fleet liveness right now: last indexed data vs _internal heartbeat, ingestion latency, and current 2-sigma volume status per host.",
         "defaults": defaults(),
         "inputs": {
             "input_global_trp": timerange("-24h@h,now"),
@@ -1173,6 +1188,7 @@ def host_heartbeat() -> dict:
                 "ds_state_counts",
                 '| append [| makeresults | eval state="HOST DOWN", hosts=0] | where state="HOST DOWN" | stats max(hosts) as hosts',
             ),
+            "ds_latency": ds("Ingestion latency (last 15m)", Q_LATENCY, "-15m@m", "now"),
             "ds_baseline": ds("24h streamstats baseline", Q_BASELINE_ALL, "-25h@m", "@m"),
         },
         "visualizations": {
@@ -1186,12 +1202,14 @@ def host_heartbeat() -> dict:
             "viz_silent": single_number("Data silent / heartbeat only", "ds_state_silent", "hosts", "", None, 0),
             "viz_down": single_number("Host down", "ds_state_down", "hosts", "", None, 0),
             "viz_table": table("Last data received vs last internal heartbeat", "ds_phone_home", count=30),
+            "viz_latency": table("Ingestion latency: index time minus event time, last 15 minutes (seconds)", "ds_latency", count=30),
             "viz_baseline": table("Current volume vs 24-hour baseline, all hosts (streamstats window=96 @ 15m)", "ds_baseline", count=30),
             "viz_footer": md(
                 "`tstats latest(_time)` is the source of truth for last data / last heartbeat. "
                 "This page is the **fleet-wide, right-now** view. For one source's history "
                 "(first/last event, 24-hour trend, drop/burst buckets) and how it reaches Splunk, open **Data Topology** and click a source. "
-                "Override `exec_health_silence_sec` (default 3600) and `exec_health_sigma` (default 2) as needed."
+                "**Latency** is `_indextime - _time` over the last 15 minutes (fixed window; the time picker does not change it): DELAYED above `exec_health_latency_sec`, HIGH above 3x that, CLOCK AHEAD when events are stamped more than 5 minutes in the future. "
+                "Override `exec_health_silence_sec` (default 3600), `exec_health_latency_sec` (default 300) and `exec_health_sigma` (default 2) as needed."
             ),
         },
         "layout": grid(
@@ -1202,8 +1220,9 @@ def host_heartbeat() -> dict:
                 block("viz_silent", 600, 90, 300, 150),
                 block("viz_down", 900, 90, 300, 150),
                 block("viz_table", 0, 240, 1200, 340),
-                block("viz_baseline", 0, 580, 1200, 360),
-                block("viz_footer", 0, 940, 1200, 100),
+                block("viz_latency", 0, 580, 1200, 320),
+                block("viz_baseline", 0, 900, 1200, 360),
+                block("viz_footer", 0, 1260, 1200, 110),
             ],
             extra_inputs=["input_host"],
         ),
@@ -2368,7 +2387,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.30"
+APP_VERSION = "1.7.31"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2492,6 +2511,7 @@ def readme() -> dict:
                 "- `exec_health_sc4s_idx` — `*` — index glob for SC4S error event searches\n"
                 "- `exec_health_sigma` — `2` — stdevs below host mean → ALERT\n"
                 "- `exec_health_silence_sec` — `3600` — seconds without data → DATA SILENT\n"
+                "- `exec_health_latency_sec` — `300` — p95 index lag (seconds) before a host is DELAYED\n"
                 "- `exec_health_heartbeat_sec` — `600` — seconds without `_internal` → missing heartbeat\n"
                 "- `exec_health_drop_red_pct` — `50` — % below 7-day MA → RED\n"
                 "- `exec_health_drop_yellow_pct` — `20` — % below 7-day MA → YELLOW\n"
