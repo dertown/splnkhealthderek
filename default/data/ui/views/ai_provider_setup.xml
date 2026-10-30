@@ -613,10 +613,10 @@
           "align": "center"
         },
         "headerVisibility": "none",
-        "fontSize": "large",
+        "fontSize": "default",
         "columnFormat": {
           "button_label": {
-            "width": 380,
+            "width": 204,
             "align": "center"
           },
           "click_action": {
@@ -672,20 +672,11 @@
         "rx": 3
       }
     },
-    "card_2": {
+    "pill_2": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
-        "strokeWidth": 1
-      }
-    },
-    "bar_2": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#00CDAF",
-        "rx": 2
+        "fillColor": "#53A051",
+        "rx": 8
       }
     },
     "card_3": {
@@ -716,7 +707,7 @@
     "bar_4": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#7B56DB",
+        "fillColor": "#00CDAF",
         "rx": 2
       }
     },
@@ -745,6 +736,13 @@
         "strokeWidth": 1
       }
     },
+    "bar_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
     "card_7": {
       "type": "splunk.rectangle",
       "options": {
@@ -752,13 +750,6 @@
         "rx": 10,
         "strokeColor": "#26304A",
         "strokeWidth": 1
-      }
-    },
-    "bar_7": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
       }
     },
     "card_8": {
@@ -778,6 +769,22 @@
       }
     },
     "card_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_10": {
       "type": "splunk.rectangle",
       "options": {
         "fillColor": "#151B2B",
@@ -857,17 +864,27 @@
         }
       },
       {
-        "item": "viz_save",
+        "item": "pill_2",
         "type": "block",
         "position": {
-          "x": 906,
-          "y": 96,
-          "w": 288,
-          "h": 83
+          "x": 940,
+          "y": 115,
+          "w": 220,
+          "h": 44
         }
       },
       {
-        "item": "card_2",
+        "item": "viz_save",
+        "type": "block",
+        "position": {
+          "x": 946,
+          "y": 119,
+          "w": 208,
+          "h": 36
+        }
+      },
+      {
+        "item": "card_3",
         "type": "block",
         "position": {
           "x": 6,
@@ -877,7 +894,7 @@
         }
       },
       {
-        "item": "bar_2",
+        "item": "bar_3",
         "type": "block",
         "position": {
           "x": 6,
@@ -897,7 +914,7 @@
         }
       },
       {
-        "item": "card_3",
+        "item": "card_4",
         "type": "block",
         "position": {
           "x": 206,
@@ -907,7 +924,7 @@
         }
       },
       {
-        "item": "bar_3",
+        "item": "bar_4",
         "type": "block",
         "position": {
           "x": 206,
@@ -927,7 +944,7 @@
         }
       },
       {
-        "item": "card_4",
+        "item": "card_5",
         "type": "block",
         "position": {
           "x": 406,
@@ -937,7 +954,7 @@
         }
       },
       {
-        "item": "bar_4",
+        "item": "bar_5",
         "type": "block",
         "position": {
           "x": 406,
@@ -957,7 +974,7 @@
         }
       },
       {
-        "item": "card_5",
+        "item": "card_6",
         "type": "block",
         "position": {
           "x": 806,
@@ -967,7 +984,7 @@
         }
       },
       {
-        "item": "bar_5",
+        "item": "bar_6",
         "type": "block",
         "position": {
           "x": 806,
@@ -987,7 +1004,7 @@
         }
       },
       {
-        "item": "card_6",
+        "item": "card_7",
         "type": "block",
         "position": {
           "x": 6,
@@ -1007,7 +1024,7 @@
         }
       },
       {
-        "item": "card_7",
+        "item": "card_8",
         "type": "block",
         "position": {
           "x": 6,
@@ -1017,7 +1034,7 @@
         }
       },
       {
-        "item": "bar_7",
+        "item": "bar_8",
         "type": "block",
         "position": {
           "x": 6,
@@ -1037,7 +1054,7 @@
         }
       },
       {
-        "item": "card_8",
+        "item": "card_9",
         "type": "block",
         "position": {
           "x": 6,
@@ -1047,7 +1064,7 @@
         }
       },
       {
-        "item": "bar_8",
+        "item": "bar_9",
         "type": "block",
         "position": {
           "x": 6,
@@ -1067,7 +1084,7 @@
         }
       },
       {
-        "item": "card_9",
+        "item": "card_10",
         "type": "block",
         "position": {
           "x": 6,
