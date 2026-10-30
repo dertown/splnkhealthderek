@@ -1,10 +1,10 @@
 <dashboard version="2" theme="dark">
   <label>Derek+ Data Quality Agent</label>
-  <description>Pick a suggestion, review the fix, approve or dismiss. Nothing changes until you press Run.</description>
+  <description>Click Select, review the fix, then click SAVE. Search does not open.</description>
   <definition><![CDATA[
 {
   "title": "Derek+ Data Quality Agent",
-  "description": "Pick a suggestion, review the fix, then approve or dismiss. Nothing changes until you press Run.",
+  "description": "Click Select, review the fix, then approve or dismiss. Click SAVE \u2014 Search does not open.",
   "defaults": {
     "dataSources": {
       "ds.search": {
@@ -35,20 +35,11 @@
       }
     },
     "input_finding": {
-      "type": "input.dropdown",
-      "title": "Selected suggestion",
-      "dataSources": {
-        "primary": "ds_dq_picker"
-      },
+      "type": "input.text",
+      "title": "Selected suggestion (click Select in the queue)",
       "options": {
         "token": "tok_finding_id",
-        "defaultValue": "none",
-        "items": [
-          {
-            "label": "Click a row in the work queue",
-            "value": "none"
-          }
-        ]
+        "defaultValue": "none"
       }
     },
     "input_decision": {
@@ -79,6 +70,14 @@
       "options": {
         "token": "tok_confirm",
         "defaultValue": "NO"
+      }
+    },
+    "input_commit": {
+      "type": "input.text",
+      "title": "Save latch (set by the SAVE tile)",
+      "options": {
+        "token": "tok_commit",
+        "defaultValue": "WAIT"
       }
     },
     "input_ai_confirm": {
@@ -117,15 +116,7 @@
       "name": "Work queue",
       "options": {
         "extend": "ds_dq_asked",
-        "query": "| table severity, issue, entity, suggested_fix, confidence, action, finding_id, ai_brief, _color_rank"
-      }
-    },
-    "ds_dq_picker": {
-      "type": "ds.chain",
-      "name": "Suggestion picker",
-      "options": {
-        "extend": "ds_dq_asked",
-        "query": "| eval label=severity.\" \u00b7 \".issue.\" \u2014 \".entity\n| eval value=finding_id\n| table label, value"
+        "query": "| eval fix=coalesce(suggested_fix, \"\")\n| eval fix=if(len(fix)>80, substr(fix,1,80).\"...\", fix)\n| eval action=if(action=\"Resolved\", \"Done\", \"Select\")\n| eval _ai_brief=ai_brief, _reset=\"WAIT\"\n| table finding_id, severity, issue, entity, fix, confidence, action, _ai_brief, _reset, _color_rank"
       }
     },
     "ds_dq_status": {
@@ -156,8 +147,21 @@
       "type": "ds.search",
       "name": "Implement control",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\", confirm=\"$tok_confirm$\"\n| eval ready=if(confirm=\"APPLY\" AND finding_id!=\"none\" AND finding_id!=\"\" AND (decision=\"approve\" OR decision=\"dismiss\"), 1, 0)\n| eval button_label=if(ready=1, \"SAVE DECISION \u2014 THEN PRESS RUN\", \"PICK A SUGGESTION, CHOOSE APPROVE OR DISMISS, TYPE APPLY\")\n| eval button_color=if(ready=1, \"YELLOW\", \"N/A\")\n| table button_label, button_color, ready",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\", confirm=\"$tok_confirm$\", commit=\"$tok_commit$\"\n| eval ready=if(confirm=\"APPLY\" AND finding_id!=\"none\" AND finding_id!=\"\" AND (decision=\"approve\" OR decision=\"dismiss\"), 1, 0)\n| eval button_label=case(commit=\"SAVE\" AND ready=1, \"SAVED\", ready=1, \"SAVE\", 1=1, \"WAIT\")\n| eval button_color=case(commit=\"SAVE\" AND ready=1, \"GREEN\", ready=1, \"YELLOW\", 1=1, \"WAIT\")\n| eval click_action=if(ready=1, \"SAVE\", \"WAIT\")\n| table button_label, button_color, ready, click_action",
         "refresh": "30s",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "0",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_dq_save": {
+      "type": "ds.search",
+      "name": "Save decision",
+      "options": {
+        "query": "| inputlookup dq_agent_approvals\n| append [\n    | makeresults\n    | eval commit=\"$tok_commit$\", confirm=\"$tok_confirm$\", decision=\"$tok_decision$\", finding_id=\"$tok_finding_id$\"\n    | where commit=\"SAVE\" AND confirm=\"APPLY\" AND finding_id!=\"none\" AND finding_id!=\"\" AND (decision=\"approve\" OR decision=\"dismiss\")\n    | eval actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\", entity=\"none\"\n    | table finding_id, decision, actor, decided_at, note, entity\n]\n| stats latest(decision) as decision, latest(actor) as actor, latest(decided_at) as decided_at, latest(note) as note, latest(entity) as entity by finding_id\n| outputlookup dq_agent_approvals\n| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank",
+        "refresh": "5m",
         "refreshType": "delay",
         "queryParameters": {
           "earliest": "0",
@@ -209,7 +213,7 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Derek+ Data Quality Agent\n**1. Pick** a suggestion in the queue (or the dropdown). **2. Read** why it fired and the suggested fix. **3. Decide** Approve or Dismiss, type **APPLY**, click save, press **Run**. The agent never changes Splunk by itself.",
+        "markdown": "# Derek+ Data Quality Agent\n**1. Click Select** on a row. **2. Read** the suggested fix. **3. Decide** Approve or Dismiss, type **APPLY**, then click the **SAVE** tile. Search does not open. The agent never changes Splunk by itself.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -257,6 +261,10 @@
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
+          },
+          {
+            "match": "WAIT",
+            "value": "#6B6B6B"
           }
         ]
       }
@@ -322,6 +330,10 @@
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
+          },
+          {
+            "match": "WAIT",
+            "value": "#6B6B6B"
           }
         ]
       },
@@ -338,11 +350,11 @@
     },
     "viz_findings": {
       "type": "splunk.table",
-      "title": "1. Work queue \u2014 click a suggestion",
+      "title": "1. Work queue \u2014 click Select on a row",
       "dataSources": {
         "primary": "ds_dq_queue"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 20,
@@ -351,21 +363,31 @@
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
         },
+        "headerVisibility": "fixed",
         "columnFormat": {
-          "action": {
+          "severity": {
+            "width": 90,
             "align": "center"
           },
-          "severity": {
-            "align": "center"
+          "issue": {
+            "width": 250
+          },
+          "entity": {
+            "width": 150
+          },
+          "fix": {
+            "width": 380
           },
           "confidence": {
+            "width": 90,
+            "align": "center"
+          },
+          "action": {
+            "width": 120,
             "align": "center"
           },
           "finding_id": {
-            "width": 1
-          },
-          "ai_brief": {
-            "width": 1
+            "width": 80
           }
         }
       },
@@ -407,7 +429,11 @@
               },
               {
                 "token": "tok_ai_brief",
-                "key": "row.ai_brief.value"
+                "key": "row._ai_brief.value"
+              },
+              {
+                "token": "tok_commit",
+                "key": "row._reset.value"
               }
             ]
           }
@@ -420,7 +446,7 @@
       "dataSources": {
         "primary": "ds_dq_selected"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 3,
@@ -448,30 +474,23 @@
             "value": "#14301A"
           }
         ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
+      }
     },
     "viz_implement": {
       "type": "splunk.singlevalue",
-      "title": "3. Save your decision (opens Search; press Run)",
+      "title": "3. Save decision \u2014 click SAVE",
       "dataSources": {
         "primary": "ds_dq_ready"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": false,
       "options": {
         "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
         "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
         "backgroundColor": "transparent",
-        "majorFontSize": 18
+        "majorFontSize": 36,
+        "underLabel": "Type APPLY first. Search does not open.",
+        "underLabelFontSize": 14
       },
       "context": {
         "statusColors": [
@@ -502,19 +521,62 @@
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
+          },
+          {
+            "match": "WAIT",
+            "value": "#6B6B6B"
           }
         ]
       },
       "eventHandlers": [
         {
-          "type": "drilldown.linkToSearch",
+          "type": "drilldown.setToken",
           "options": {
-            "type": "custom",
-            "newTab": true,
-            "query": "| inputlookup dq_agent_approvals | append [ | makeresults | eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\", confirm=\"$tok_confirm$\", entity=\"$tok_entity$\", actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\" | where confirm=\"APPLY\" AND finding_id!=\"none\" AND finding_id!=\"\" AND (decision=\"approve\" OR decision=\"dismiss\") | table finding_id, decision, actor, decided_at, note, entity ] | outputlookup dq_agent_approvals"
+            "tokens": [
+              {
+                "token": "tok_commit",
+                "key": "row.click_action.value"
+              }
+            ]
           }
         }
       ]
+    },
+    "viz_recorded": {
+      "type": "splunk.table",
+      "title": "Recorded decision",
+      "dataSources": {
+        "primary": "ds_dq_save"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 3,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      }
     },
     "viz_brief": {
       "type": "splunk.table",
@@ -604,6 +666,10 @@
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
+          },
+          {
+            "match": "WAIT",
+            "value": "#6B6B6B"
           }
         ]
       },
@@ -682,7 +748,7 @@
           "x": 0,
           "y": 0,
           "w": 1200,
-          "h": 100
+          "h": 90
         }
       },
       {
@@ -690,9 +756,9 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 100,
+          "y": 90,
           "w": 400,
-          "h": 140
+          "h": 130
         }
       },
       {
@@ -700,9 +766,9 @@
         "type": "block",
         "position": {
           "x": 400,
-          "y": 100,
+          "y": 90,
           "w": 400,
-          "h": 140
+          "h": 130
         }
       },
       {
@@ -710,9 +776,9 @@
         "type": "block",
         "position": {
           "x": 800,
-          "y": 100,
+          "y": 90,
           "w": 400,
-          "h": 140
+          "h": 130
         }
       },
       {
@@ -720,9 +786,9 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 240,
+          "y": 220,
           "w": 1200,
-          "h": 320
+          "h": 300
         }
       },
       {
@@ -730,19 +796,29 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 560,
-          "w": 800,
-          "h": 260
+          "y": 520,
+          "w": 1200,
+          "h": 240
         }
       },
       {
         "item": "viz_implement",
         "type": "block",
         "position": {
-          "x": 800,
-          "y": 560,
-          "w": 400,
-          "h": 260
+          "x": 0,
+          "y": 760,
+          "w": 600,
+          "h": 170
+        }
+      },
+      {
+        "item": "viz_recorded",
+        "type": "block",
+        "position": {
+          "x": 600,
+          "y": 760,
+          "w": 600,
+          "h": 170
         }
       },
       {
@@ -750,9 +826,9 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 820,
+          "y": 930,
           "w": 800,
-          "h": 160
+          "h": 150
         }
       },
       {
@@ -760,9 +836,9 @@
         "type": "block",
         "position": {
           "x": 800,
-          "y": 820,
+          "y": 930,
           "w": 400,
-          "h": 160
+          "h": 150
         }
       },
       {
@@ -770,9 +846,9 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 980,
+          "y": 1080,
           "w": 1200,
-          "h": 160
+          "h": 150
         }
       },
       {
@@ -780,7 +856,7 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 1140,
+          "y": 1230,
           "w": 1200,
           "h": 80
         }
@@ -792,6 +868,7 @@
       "input_finding",
       "input_decision",
       "input_confirm",
+      "input_commit",
       "input_ai_confirm"
     ]
   }

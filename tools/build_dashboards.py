@@ -30,6 +30,7 @@ STATUS_COLORS = [
     {"match": "LOCAL", "value": GREEN},
     {"match": "PROVIDER", "value": YELLOW},
     {"match": "MISCONFIG", "value": RED},
+    {"match": "WAIT", "value": "#6B6B6B"},
 ]
 
 # Row colors: 1=red/alert, 2=yellow, 3=green/ok
@@ -550,7 +551,7 @@ def dq_agent_findings_core() -> str:
 
     Emits one row per issue with a suggested fix. Covers ingestion, hosts, HEC,
     instance health, search CPU, SC4S, and Edge. The agent never writes Splunk
-    configuration; humans review the row and must type APPLY plus Run in Search
+    configuration; humans review the row and must type APPLY, then click Save,
     before a decision is recorded in dq_agent_approvals.
     """
     host_findings = host_baseline_core() + r"""
@@ -1397,11 +1398,28 @@ Q_DQ_AGENT_STATUS = r"""
 
 Q_DQ_IMPLEMENT_READY = r"""
 | makeresults
-| eval finding_id="$tok_finding_id$", decision="$tok_decision$", confirm="$tok_confirm$"
+| eval finding_id="$tok_finding_id$", decision="$tok_decision$", confirm="$tok_confirm$", commit="$tok_commit$"
 | eval ready=if(confirm="APPLY" AND finding_id!="none" AND finding_id!="" AND (decision="approve" OR decision="dismiss"), 1, 0)
-| eval button_label=if(ready=1, "SAVE DECISION — THEN PRESS RUN", "PICK A SUGGESTION, CHOOSE APPROVE OR DISMISS, TYPE APPLY")
-| eval button_color=if(ready=1, "YELLOW", "N/A")
-| table button_label, button_color, ready
+| eval button_label=case(commit="SAVE" AND ready=1, "SAVED", ready=1, "SAVE", 1=1, "WAIT")
+| eval button_color=case(commit="SAVE" AND ready=1, "GREEN", ready=1, "YELLOW", 1=1, "WAIT")
+| eval click_action=if(ready=1, "SAVE", "WAIT")
+| table button_label, button_color, ready, click_action
+"""
+
+Q_DQ_SAVE_DECISION = r"""
+| inputlookup dq_agent_approvals
+| append [
+    | makeresults
+    | eval commit="$tok_commit$", confirm="$tok_confirm$", decision="$tok_decision$", finding_id="$tok_finding_id$"
+    | where commit="SAVE" AND confirm="APPLY" AND finding_id!="none" AND finding_id!="" AND (decision="approve" OR decision="dismiss")
+    | eval actor="human_dashboard", decided_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="human_in_the_loop", entity="none"
+    | table finding_id, decision, actor, decided_at, note, entity
+]
+| stats latest(decision) as decision, latest(actor) as actor, latest(decided_at) as decided_at, latest(note) as note, latest(entity) as entity by finding_id
+| outputlookup dq_agent_approvals
+| where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none"
+| eval _color_rank=if(decision="approve" OR decision="dismiss", 3, 2)
+| table decided_at, finding_id, decision, actor, _color_rank
 """
 
 Q_DQ_AGENT_ASK = r"""
@@ -1411,7 +1429,11 @@ Q_DQ_AGENT_ASK = r"""
 """
 
 Q_DQ_QUEUE_VIEW = r"""
-| table severity, issue, entity, suggested_fix, confidence, action, finding_id, ai_brief, _color_rank
+| eval fix=coalesce(suggested_fix, "")
+| eval fix=if(len(fix)>80, substr(fix,1,80)."...", fix)
+| eval action=if(action="Resolved", "Done", "Select")
+| eval _ai_brief=ai_brief, _reset="WAIT"
+| table finding_id, severity, issue, entity, fix, confidence, action, _ai_brief, _reset, _color_rank
 """
 
 Q_DQ_PICKER = r"""
@@ -1504,10 +1526,11 @@ Q_DQ_AI_DISPATCH = r"""
 
 def data_quality_agent() -> dict:
     findings_table = table(
-        "1. Work queue — click a suggestion",
+        "1. Work queue — click Select on a row",
         "ds_dq_queue",
         count=20,
     )
+    findings_table["showLastUpdated"] = False
     findings_table["eventHandlers"] = [
         {
             "type": "drilldown.setToken",
@@ -1516,26 +1539,35 @@ def data_quality_agent() -> dict:
                     {"token": "tok_finding_id", "key": "row.finding_id.value"},
                     {"token": "tok_entity", "key": "row.entity.value"},
                     {"token": "tok_issue", "key": "row.issue.value"},
-                    {"token": "tok_ai_brief", "key": "row.ai_brief.value"},
+                    {"token": "tok_ai_brief", "key": "row._ai_brief.value"},
+                    {"token": "tok_commit", "key": "row._reset.value"},
                 ]
             },
         }
     ]
+    findings_table["options"]["headerVisibility"] = "fixed"
     findings_table["options"]["columnFormat"] = {
-        "action": {"align": "center"},
-        "severity": {"align": "center"},
-        "confidence": {"align": "center"},
-        "finding_id": {"width": 1},
-        "ai_brief": {"width": 1},
+        "severity": {"width": 90, "align": "center"},
+        "issue": {"width": 250},
+        "entity": {"width": 150},
+        "fix": {"width": 380},
+        "confidence": {"width": 90, "align": "center"},
+        "action": {"width": 120, "align": "center"},
+        "finding_id": {"width": 80},
     }
     suggestion_table = table(
         "2. This suggestion — why it fired and what to do",
         "ds_dq_selected",
         count=3,
     )
+    suggestion_table.pop("eventHandlers", None)
+    suggestion_table["showLastUpdated"] = False
+    recorded_table = table("Recorded decision", "ds_dq_save", count=3)
+    recorded_table.pop("eventHandlers", None)
+    recorded_table["showLastUpdated"] = False
     return {
         "title": "Derek+ Data Quality Agent",
-        "description": "Pick a suggestion, review the fix, then approve or dismiss. Nothing changes until you press Run.",
+        "description": "Click Select, review the fix, then approve or dismiss. Click SAVE — Search does not open.",
         "defaults": defaults(),
         "inputs": {
             "input_global_trp": timerange("-24h@h,now"),
@@ -1545,14 +1577,9 @@ def data_quality_agent() -> dict:
                 "options": {"token": "tok_ask", "defaultValue": "all"},
             },
             "input_finding": {
-                "type": "input.dropdown",
-                "title": "Selected suggestion",
-                "dataSources": {"primary": "ds_dq_picker"},
-                "options": {
-                    "token": "tok_finding_id",
-                    "defaultValue": "none",
-                    "items": [{"label": "Click a row in the work queue", "value": "none"}],
-                },
+                "type": "input.text",
+                "title": "Selected suggestion (click Select in the queue)",
+                "options": {"token": "tok_finding_id", "defaultValue": "none"},
             },
             "input_decision": {
                 "type": "input.dropdown",
@@ -1572,6 +1599,11 @@ def data_quality_agent() -> dict:
                 "title": "Type APPLY to record the decision",
                 "options": {"token": "tok_confirm", "defaultValue": "NO"},
             },
+            "input_commit": {
+                "type": "input.text",
+                "title": "Save latch (set by the SAVE tile)",
+                "options": {"token": "tok_commit", "defaultValue": "WAIT"},
+            },
             "input_ai_confirm": {
                 "type": "input.text",
                 "title": "Optional: type ASK for a second opinion",
@@ -1582,7 +1614,6 @@ def data_quality_agent() -> dict:
             "ds_dq_findings": ds("Agent cycle findings", Q_DQ_AGENT_FINDINGS, "-24h", "now"),
             "ds_dq_asked": chain("Asked findings", "ds_dq_findings", Q_DQ_AGENT_ASK),
             "ds_dq_queue": chain("Work queue", "ds_dq_asked", Q_DQ_QUEUE_VIEW),
-            "ds_dq_picker": chain("Suggestion picker", "ds_dq_asked", Q_DQ_PICKER),
             "ds_dq_status": chain("Agent status", "ds_dq_findings", Q_DQ_AGENT_STATUS),
             "ds_dq_selected": chain("Selected suggestion", "ds_dq_asked", Q_DQ_SUGGESTION),
             "ds_dq_brief": chain(
@@ -1594,6 +1625,7 @@ def data_quality_agent() -> dict:
 """.strip(),
             ),
             "ds_dq_ready": ds("Implement control", Q_DQ_IMPLEMENT_READY, "0", "now", refresh="30s"),
+            "ds_dq_save": ds("Save decision", Q_DQ_SAVE_DECISION, "0", "now", refresh="5m"),
             "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_STATUS, "0", "now", refresh="30s"),
             "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_READY, "0", "now", refresh="30s"),
             "ds_dq_ai_replies": ds("AI provider replies", Q_DQ_AI_REPLIES, "-24h", "now", refresh="30s"),
@@ -1601,10 +1633,10 @@ def data_quality_agent() -> dict:
         "visualizations": {
             "viz_header": md(
                 "# Derek+ Data Quality Agent\n"
-                "**1. Pick** a suggestion in the queue (or the dropdown). "
-                "**2. Read** why it fired and the suggested fix. "
-                "**3. Decide** Approve or Dismiss, type **APPLY**, click save, press **Run**. "
-                "The agent never changes Splunk by itself."
+                "**1. Click Select** on a row. "
+                "**2. Read** the suggested fix. "
+                "**3. Decide** Approve or Dismiss, type **APPLY**, then click the **SAVE** tile. "
+                "Search does not open. The agent never changes Splunk by itself."
             ),
             "viz_status": single_status("Queue health", "ds_dq_status", "agent_status", "issues"),
             "viz_count": single_number("Open suggestions", "ds_dq_status", "issues", "", spark=None, precision=0),
@@ -1625,41 +1657,31 @@ def data_quality_agent() -> dict:
             "viz_selected": suggestion_table,
             "viz_implement": {
                 "type": "splunk.singlevalue",
-                "title": "3. Save your decision (opens Search; press Run)",
+                "title": "3. Save decision — click SAVE",
                 "dataSources": {"primary": "ds_dq_ready"},
-                "showLastUpdated": True,
+                "showLastUpdated": False,
                 "showProgressBar": False,
                 "options": {
                     "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
                     "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
                     "backgroundColor": "transparent",
-                    "majorFontSize": 18,
+                    "majorFontSize": 36,
+                    "underLabel": "Type APPLY first. Search does not open.",
+                    "underLabelFontSize": 14,
                 },
                 "context": {"statusColors": STATUS_COLORS},
                 "eventHandlers": [
                     {
-                        "type": "drilldown.linkToSearch",
+                        "type": "drilldown.setToken",
                         "options": {
-                            "type": "custom",
-                            "newTab": True,
-                            "query": (
-                                "| inputlookup dq_agent_approvals "
-                                "| append [ "
-                                "| makeresults "
-                                "| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\", "
-                                "confirm=\"$tok_confirm$\", entity=\"$tok_entity$\", "
-                                "actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), "
-                                "note=\"human_in_the_loop\" "
-                                "| where confirm=\"APPLY\" AND finding_id!=\"none\" AND finding_id!=\"\" "
-                                "AND (decision=\"approve\" OR decision=\"dismiss\") "
-                                "| table finding_id, decision, actor, decided_at, note, entity "
-                                "] "
-                                "| outputlookup dq_agent_approvals"
-                            ),
+                            "tokens": [
+                                {"token": "tok_commit", "key": "row.click_action.value"},
+                            ]
                         },
                     }
                 ],
             },
+            "viz_recorded": recorded_table,
             "viz_brief": table("Optional — briefing to paste into Splunk AI Assistant", "ds_dq_brief", count=1),
             "viz_ai_ask": {
                 "type": "splunk.singlevalue",
@@ -1713,23 +1735,25 @@ def data_quality_agent() -> dict:
         },
         "layout": grid(
             [
-                block("viz_header", 0, 0, 1200, 100),
-                block("viz_status", 0, 100, 400, 140),
-                block("viz_count", 400, 100, 400, 140),
-                block("viz_ai_status", 800, 100, 400, 140),
-                block("viz_findings", 0, 240, 1200, 320),
-                block("viz_selected", 0, 560, 800, 260),
-                block("viz_implement", 800, 560, 400, 260),
-                block("viz_brief", 0, 820, 800, 160),
-                block("viz_ai_ask", 800, 820, 400, 160),
-                block("viz_ai_replies", 0, 980, 1200, 160),
-                block("viz_footer", 0, 1140, 1200, 80),
+                block("viz_header", 0, 0, 1200, 90),
+                block("viz_status", 0, 90, 400, 130),
+                block("viz_count", 400, 90, 400, 130),
+                block("viz_ai_status", 800, 90, 400, 130),
+                block("viz_findings", 0, 220, 1200, 300),
+                block("viz_selected", 0, 520, 1200, 240),
+                block("viz_implement", 0, 760, 600, 170),
+                block("viz_recorded", 600, 760, 600, 170),
+                block("viz_brief", 0, 930, 800, 150),
+                block("viz_ai_ask", 800, 930, 400, 150),
+                block("viz_ai_replies", 0, 1080, 1200, 150),
+                block("viz_footer", 0, 1230, 1200, 80),
             ],
             extra_inputs=[
                 "input_ask",
                 "input_finding",
                 "input_decision",
                 "input_confirm",
+                "input_commit",
                 "input_ai_confirm",
             ],
         ),
@@ -1906,7 +1930,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.1"
+APP_VERSION = "1.7.3"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -1954,7 +1978,7 @@ def about() -> dict:
                 "- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n"
                 "- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n"
                 "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n"
-                "- The Data Quality Agent records a decision only after a human types APPLY and presses Run in Search (no Python LLM client, no API keys)\n\n"
+                "- The Data Quality Agent records a decision only after a human types APPLY and clicks SAVE (no Python LLM client, no API keys)\n\n"
                 "Self-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** "
                 "(`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via "
                 "**Apps → Manage apps → Install app from file**."
@@ -2265,7 +2289,7 @@ def main() -> None:
         ),
         "data_quality_agent.xml": (
             "Derek+ Data Quality Agent",
-            "Pick a suggestion, review the fix, approve or dismiss. Nothing changes until you press Run.",
+            "Click Select, review the fix, then click SAVE. Search does not open.",
             data_quality_agent(),
         ),
         "ai_provider_setup.xml": (
