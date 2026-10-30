@@ -1,10 +1,10 @@
 <dashboard version="2" theme="dark">
   <label>Data Topology</label>
-  <description>Network topology of data sources, ingest paths, and Splunk receivers.</description>
+  <description>Click a data source for latest event, volume, trend, and drop/burst outliers.</description>
   <definition><![CDATA[
 {
   "title": "Data Topology",
-  "description": "Network topology of data sources, ingest paths, and Splunk receivers.",
+  "description": "Click a data source for latest event, volume, trend, and drop/burst outliers.",
   "defaults": {
     "dataSources": {
       "ds.search": {
@@ -24,6 +24,14 @@
       "options": {
         "token": "global_time",
         "defaultValue": "-4h@h,now"
+      }
+    },
+    "input_source": {
+      "type": "input.text",
+      "title": "Selected data source (set by clicking data_source)",
+      "options": {
+        "token": "tok_data_source",
+        "defaultValue": "none"
       }
     }
   },
@@ -59,6 +67,49 @@
       "options": {
         "extend": "ds_topo_paths",
         "query": "| stats sum(events) as events by ingest_path | sort 0 -events"
+      }
+    },
+    "ds_topo_src_stats": {
+      "type": "ds.search",
+      "name": "Selected source latest and totals",
+      "options": {
+        "query": "| tstats count as events, latest(_time) as last_event, earliest(_time) as first_event, dc(sourcetype) as sourcetypes where index=`exec_health_idx` host=\"$tok_data_source$\"\n| eval data_source=replace(\"$tok_data_source$\", \"[^A-Za-z0-9._:-]\", \"\")\n| where data_source!=\"none\" AND data_source!=\"\" AND data_source!=\"*\"\n| eval age_min=round((now()-last_event)/60, 0)\n| eval age=tostring(now()-last_event, \"duration\")\n| eval last_event=strftime(last_event, \"%Y-%m-%d %H:%M:%S\")\n| eval first_event=strftime(first_event, \"%Y-%m-%d %H:%M:%S\")\n| eval _color_rank=if(age_min>(`exec_health_silence_sec`/60), 1, 3)\n| table data_source, last_event, first_event, age, age_min, events, sourcetypes, _color_rank",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_topo_src_trend": {
+      "type": "ds.search",
+      "name": "Selected source 24h trend",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` host=\"$tok_data_source$\" earliest=-25h@m latest=@m by _time span=15m\n| eval data_source=replace(\"$tok_data_source$\", \"[^A-Za-z0-9._:-]\", \"\")\n| where data_source!=\"none\" AND data_source!=\"\" AND data_source!=\"*\"\n| timechart span=15m sum(events) as events\n| fillnull value=0 events\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples\n| eval sigma=`exec_health_sigma`\n| eval mean=if(samples>=8, round(mean_vol, 1), null())\n| eval drop_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol-(sigma*stdev_vol), 1), null())\n| eval burst_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol+(sigma*stdev_vol), 1), null())\n| eval drop_bound=if(drop_bound<0, 0, drop_bound)\n| table _time, events, mean, drop_bound, burst_bound",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-25h@m",
+          "latest": "@m"
+        }
+      }
+    },
+    "ds_topo_src_outliers": {
+      "type": "ds.search",
+      "name": "Selected source drop/burst outliers",
+      "options": {
+        "query": "| tstats count as events where index=`exec_health_idx` host=\"$tok_data_source$\" earliest=-25h@m latest=@m by _time span=15m\n| eval data_source=replace(\"$tok_data_source$\", \"[^A-Za-z0-9._:-]\", \"\")\n| where data_source!=\"none\" AND data_source!=\"\" AND data_source!=\"*\"\n| timechart span=15m sum(events) as events\n| fillnull value=0 events\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples\n| where _time+900+300 <= now()\n| eval sigma=`exec_health_sigma`\n| eval mean_vol=round(mean_vol, 1), stdev_vol=round(stdev_vol, 1)\n| eval drop_bound=round(mean_vol-(sigma*stdev_vol), 1), burst_bound=round(mean_vol+(sigma*stdev_vol), 1)\n| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)\n| eval outlier=case(\n    samples<8, \"WARMUP\",\n    stdev_vol>0 AND events < drop_bound AND mean_vol>10, \"DROP\",\n    stdev_vol>0 AND events > burst_bound AND events>10, \"BURST\",\n    1=1, \"OK\")\n| where outlier=\"DROP\" OR outlier=\"BURST\"\n| eval _color_rank=if(outlier=\"DROP\", 1, 2)\n| eval bucket=strftime(_time, \"%Y-%m-%d %H:%M\")\n| eval data_source=replace(\"$tok_data_source$\", \"[^A-Za-z0-9._:-]\", \"\")\n| sort -_time\n| table bucket, data_source, events, mean_vol, stdev_vol, z_score, outlier, _color_rank",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-25h@m",
+          "latest": "@m"
+        }
+      }
+    },
+    "ds_topo_src_out_n": {
+      "type": "ds.chain",
+      "name": "Selected source outlier count",
+      "options": {
+        "extend": "ds_topo_src_outliers",
+        "query": "| stats count as outliers"
       }
     },
     "ds_tcpin": {
@@ -102,21 +153,13 @@
         "extend": "ds_topo_paths",
         "query": "| table data_source, ingest_path, splunk_index"
       }
-    },
-    "ds_tcpin_link": {
-      "type": "ds.chain",
-      "name": "Forwarder topology nodes only",
-      "options": {
-        "extend": "ds_tcpin",
-        "query": "| table data_source, connection, receiver"
-      }
     }
   },
   "visualizations": {
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Data topology\nHow servers and data sources reach Splunk: **data source \u2192 ingest path \u2192 index**, plus **forwarder \u2192 indexer** from `_internal` `tcpin_connections`. Click a node to highlight its links.",
+        "markdown": "# Data topology\nHow servers and data sources reach Splunk: **data source \u2192 ingest path \u2192 index**, plus **forwarder \u2192 indexer** from `_internal` `tcpin_connections`. **Click a data_source** in the graph or table for latest event, totals, 24-hour trend, and sudden drops or bursts. Search does not open.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -127,7 +170,7 @@
       "dataSources": {
         "primary": "ds_topo_counts"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"sources\") | lastPoint()",
@@ -145,7 +188,7 @@
       "dataSources": {
         "primary": "ds_topo_counts"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"ingest_paths\") | lastPoint()",
@@ -163,7 +206,7 @@
       "dataSources": {
         "primary": "ds_topo_counts"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"indexes\") | lastPoint()",
@@ -181,7 +224,7 @@
       "dataSources": {
         "primary": "ds_tcpin_counts"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"forwarders\") | lastPoint()",
@@ -199,7 +242,7 @@
       "dataSources": {
         "primary": "ds_topo_link"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "fieldOrder": [
@@ -215,8 +258,22 @@
         "nodeSpacingY": 12,
         "resultLimit": 40,
         "showNodeCounts": true,
-        "showValueCounts": true
-      }
+        "showValueCounts": true,
+        "backgroundColor": "transparent"
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.setToken",
+          "options": {
+            "tokens": [
+              {
+                "token": "tok_data_source",
+                "key": "row.data_source.value"
+              }
+            ]
+          }
+        }
+      ]
     },
     "viz_sankey": {
       "type": "splunk.sankey",
@@ -224,7 +281,7 @@
       "dataSources": {
         "primary": "ds_topo_sankey"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "colorMode": "categorical",
@@ -235,7 +292,8 @@
           "#00CDAF",
           "#DD9900",
           "#FF677B"
-        ]
+        ],
+        "backgroundColor": "transparent"
       }
     },
     "viz_methods": {
@@ -244,7 +302,7 @@
       "dataSources": {
         "primary": "ds_topo_methods"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "seriesColors": [
@@ -256,16 +314,17 @@
         ],
         "legendDisplay": "right",
         "yAxisTitleText": "events",
-        "dataValuesDisplay": "off"
+        "dataValuesDisplay": "off",
+        "backgroundColor": "transparent"
       }
     },
     "viz_table": {
       "type": "splunk.table",
-      "title": "Top source \u2192 path \u2192 index flows",
+      "title": "Top source \u2192 path \u2192 index flows \u2014 click data_source",
       "dataSources": {
         "primary": "ds_topo_paths"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 20,
@@ -273,7 +332,140 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.setToken",
+          "options": {
+            "tokens": [
+              {
+                "token": "tok_data_source",
+                "key": "row.data_source.value"
+              }
+            ]
+          }
         }
+      ]
+    },
+    "viz_src_header": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "## Selected data source\nClick a **data_source** above. Latest event and totals follow the time picker. Trend and outliers use the last **24 hours** at 15-minute buckets vs that source's `streamstats` mean \u00b1 `exec_health_sigma` (default 2). **DROP** = sudden traffic loss. **BURST** = sudden spike. Empty panels mean nothing is selected yet.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_src_total": {
+      "type": "splunk.singlevalue",
+      "title": "Total events",
+      "dataSources": {
+        "primary": "ds_topo_src_stats"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"events\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_src_age": {
+      "type": "splunk.singlevalue",
+      "title": "Minutes since latest event",
+      "dataSources": {
+        "primary": "ds_topo_src_stats"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"age_min\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off",
+        "underLabel": "in selected time range"
+      }
+    },
+    "viz_src_types": {
+      "type": "splunk.singlevalue",
+      "title": "Sourcetypes",
+      "dataSources": {
+        "primary": "ds_topo_src_stats"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"sourcetypes\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off"
+      }
+    },
+    "viz_src_out_n": {
+      "type": "splunk.singlevalue",
+      "title": "Drop / burst buckets",
+      "dataSources": {
+        "primary": "ds_topo_src_out_n"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"outliers\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "shouldUseThousandSeparators": true,
+        "numberPrecision": 0,
+        "majorFontSize": 32,
+        "sparklineDisplay": "off",
+        "trendDisplay": "off",
+        "underLabel": "2\u03c3 vs prior 24h"
+      }
+    },
+    "viz_src_stats": {
+      "type": "splunk.table",
+      "title": "Latest event, first event, and totals",
+      "dataSources": {
+        "primary": "ds_topo_src_stats"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -304,30 +496,75 @@
         }
       ]
     },
-    "viz_tcpin_link": {
-      "type": "splunk.linkgraph",
-      "title": "Servers: forwarder \u2192 connection type \u2192 indexer",
+    "viz_src_trend": {
+      "type": "splunk.line",
+      "title": "Event trend vs 24-hour mean and 2\u03c3 bounds",
       "dataSources": {
-        "primary": "ds_tcpin_link"
+        "primary": "ds_topo_src_trend"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
-        "fieldOrder": [
-          "data_source",
-          "connection",
-          "receiver"
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
         ],
-        "linkColor": "#009CEB",
-        "nodeHighlightColor": "#7B56DB",
-        "nodeWidth": 170,
-        "nodeHeight": 22,
-        "nodeSpacingX": 40,
-        "nodeSpacingY": 12,
-        "resultLimit": 40,
-        "showNodeCounts": true,
-        "showValueCounts": true
+        "legendDisplay": "right",
+        "yAxisTitleText": "events / 15m",
+        "nullValueDisplay": "connect",
+        "lineWidth": 2,
+        "markerDisplay": "off",
+        "backgroundColor": "transparent"
       }
+    },
+    "viz_src_outliers": {
+      "type": "splunk.table",
+      "title": "Sudden drops and traffic bursts (2\u03c3)",
+      "dataSources": {
+        "primary": "ds_topo_src_outliers"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 20,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
     },
     "viz_tcpin_sankey": {
       "type": "splunk.sankey",
@@ -335,7 +572,7 @@
       "dataSources": {
         "primary": "ds_tcpin_sankey"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "colorMode": "categorical",
@@ -346,16 +583,17 @@
           "#00CDAF",
           "#DD9900",
           "#FF677B"
-        ]
+        ],
+        "backgroundColor": "transparent"
       }
     },
     "viz_hec": {
       "type": "splunk.table",
-      "title": "HEC tokens as data sources",
+      "title": "HEC tokens as data sources \u2014 click data_source",
       "dataSources": {
         "primary": "ds_hec_paths"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 15,
@@ -363,7 +601,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -386,21 +625,25 @@
       },
       "eventHandlers": [
         {
-          "type": "drilldown.linkToSearch",
+          "type": "drilldown.setToken",
           "options": {
-            "type": "auto",
-            "newTab": true
+            "tokens": [
+              {
+                "token": "tok_data_source",
+                "key": "row.data_source.value"
+              }
+            ]
           }
         }
       ]
     },
     "viz_tcpin_table": {
       "type": "splunk.table",
-      "title": "Forwarder connections (metrics.log tcpin)",
+      "title": "Forwarder connections (metrics.log tcpin) \u2014 click data_source",
       "dataSources": {
         "primary": "ds_tcpin"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 15,
@@ -408,7 +651,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -431,10 +675,14 @@
       },
       "eventHandlers": [
         {
-          "type": "drilldown.linkToSearch",
+          "type": "drilldown.setToken",
           "options": {
-            "type": "auto",
-            "newTab": true
+            "tokens": [
+              {
+                "token": "tok_data_source",
+                "key": "row.data_source.value"
+              }
+            ]
           }
         }
       ]
@@ -442,153 +690,951 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. **Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. HEC, SC4S, and Edge stay as their own paths. Narrow `exec_health_idx` if the source list is too large.",
+        "markdown": "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. **Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. HEC, SC4S, and Edge stay as their own paths. Source drill-down is `tstats` by `host`. Narrow `exec_health_idx` if the source list is too large.",
         "fontSize": "default",
         "backgroundColor": "transparent"
+      }
+    },
+    "card_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#1B2342",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 3
+      }
+    },
+    "card_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#DD9900",
+        "rx": 2
+      }
+    },
+    "card_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#DD9900",
+        "rx": 2
+      }
+    },
+    "card_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#009CEB",
+        "rx": 2
+      }
+    },
+    "card_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_10": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "card_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_12": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_12": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_13": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_13": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_14": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_14": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_15": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_15": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_16": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_16": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#009CEB",
+        "rx": 2
+      }
+    },
+    "card_17": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_17": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_18": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_18": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#DD9900",
+        "rx": 2
+      }
+    },
+    "card_19": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_19": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_20": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_20": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_21": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
       }
     }
   },
   "layout": {
-    "type": "grid",
+    "type": "absolute",
+    "options": {
+      "width": 1200,
+      "height": 2832,
+      "display": "auto-scale",
+      "backgroundColor": "#0B0F19"
+    },
     "structure": [
+      {
+        "item": "card_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 1188,
+          "h": 78
+        }
+      },
+      {
+        "item": "bar_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 6,
+          "h": 78
+        }
+      },
       {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 0,
-          "w": 1200,
-          "h": 90
+          "x": 22,
+          "y": 14,
+          "w": 1164,
+          "h": 64
+        }
+      },
+      {
+        "item": "card_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 96,
+          "w": 288,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_sources",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 90,
-          "w": 300,
-          "h": 140
+          "x": 14,
+          "y": 104,
+          "w": 272,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_3",
+        "type": "block",
+        "position": {
+          "x": 306,
+          "y": 96,
+          "w": 288,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_3",
+        "type": "block",
+        "position": {
+          "x": 306,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_paths",
         "type": "block",
         "position": {
-          "x": 300,
-          "y": 90,
-          "w": 300,
-          "h": 140
+          "x": 314,
+          "y": 104,
+          "w": 272,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_4",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 96,
+          "w": 288,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_4",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_indexes",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 90,
-          "w": 300,
-          "h": 140
+          "x": 614,
+          "y": 104,
+          "w": 272,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_5",
+        "type": "block",
+        "position": {
+          "x": 906,
+          "y": 96,
+          "w": 288,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_5",
+        "type": "block",
+        "position": {
+          "x": 906,
+          "y": 96,
+          "w": 288,
+          "h": 4
         }
       },
       {
         "item": "viz_fwds",
         "type": "block",
         "position": {
-          "x": 900,
-          "y": 90,
-          "w": 300,
-          "h": 140
+          "x": 914,
+          "y": 104,
+          "w": 272,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 236,
+          "w": 1188,
+          "h": 368
+        }
+      },
+      {
+        "item": "bar_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 236,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_link",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 230,
-          "w": 1200,
-          "h": 380
+          "x": 14,
+          "y": 244,
+          "w": 1172,
+          "h": 354
+        }
+      },
+      {
+        "item": "card_7",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 616,
+          "w": 688,
+          "h": 308
+        }
+      },
+      {
+        "item": "bar_7",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 616,
+          "w": 688,
+          "h": 4
         }
       },
       {
         "item": "viz_sankey",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 610,
-          "w": 700,
-          "h": 320
+          "x": 14,
+          "y": 624,
+          "w": 672,
+          "h": 294
+        }
+      },
+      {
+        "item": "card_8",
+        "type": "block",
+        "position": {
+          "x": 706,
+          "y": 616,
+          "w": 488,
+          "h": 308
+        }
+      },
+      {
+        "item": "bar_8",
+        "type": "block",
+        "position": {
+          "x": 706,
+          "y": 616,
+          "w": 488,
+          "h": 4
         }
       },
       {
         "item": "viz_methods",
         "type": "block",
         "position": {
-          "x": 700,
-          "y": 610,
-          "w": 500,
-          "h": 320
+          "x": 714,
+          "y": 624,
+          "w": 472,
+          "h": 294
+        }
+      },
+      {
+        "item": "card_9",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 936,
+          "w": 1188,
+          "h": 268
+        }
+      },
+      {
+        "item": "bar_9",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 936,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_table",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 930,
-          "w": 1200,
-          "h": 280
+          "x": 14,
+          "y": 944,
+          "w": 1172,
+          "h": 254
         }
       },
       {
-        "item": "viz_tcpin_link",
+        "item": "card_10",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1210,
-          "w": 1200,
-          "h": 360
+          "x": 6,
+          "y": 1216,
+          "w": 1188,
+          "h": 78
+        }
+      },
+      {
+        "item": "viz_src_header",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 1224,
+          "w": 1172,
+          "h": 64
+        }
+      },
+      {
+        "item": "card_11",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1306,
+          "w": 288,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_11",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1306,
+          "w": 288,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_src_total",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 1314,
+          "w": 272,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_12",
+        "type": "block",
+        "position": {
+          "x": 306,
+          "y": 1306,
+          "w": 288,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_12",
+        "type": "block",
+        "position": {
+          "x": 306,
+          "y": 1306,
+          "w": 288,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_src_age",
+        "type": "block",
+        "position": {
+          "x": 314,
+          "y": 1314,
+          "w": 272,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_13",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 1306,
+          "w": 288,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_13",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 1306,
+          "w": 288,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_src_types",
+        "type": "block",
+        "position": {
+          "x": 614,
+          "y": 1314,
+          "w": 272,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_14",
+        "type": "block",
+        "position": {
+          "x": 906,
+          "y": 1306,
+          "w": 288,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_14",
+        "type": "block",
+        "position": {
+          "x": 906,
+          "y": 1306,
+          "w": 288,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_src_out_n",
+        "type": "block",
+        "position": {
+          "x": 914,
+          "y": 1314,
+          "w": 272,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_15",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1446,
+          "w": 1188,
+          "h": 138
+        }
+      },
+      {
+        "item": "bar_15",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1446,
+          "w": 1188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_src_stats",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 1454,
+          "w": 1172,
+          "h": 124
+        }
+      },
+      {
+        "item": "card_16",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1596,
+          "w": 1188,
+          "h": 268
+        }
+      },
+      {
+        "item": "bar_16",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1596,
+          "w": 1188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_src_trend",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 1604,
+          "w": 1172,
+          "h": 254
+        }
+      },
+      {
+        "item": "card_17",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1876,
+          "w": 1188,
+          "h": 248
+        }
+      },
+      {
+        "item": "bar_17",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1876,
+          "w": 1188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_src_outliers",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 1884,
+          "w": 1172,
+          "h": 234
+        }
+      },
+      {
+        "item": "card_18",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 2136,
+          "w": 588,
+          "h": 288
+        }
+      },
+      {
+        "item": "bar_18",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 2136,
+          "w": 588,
+          "h": 4
         }
       },
       {
         "item": "viz_tcpin_sankey",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1570,
-          "w": 600,
-          "h": 300
+          "x": 14,
+          "y": 2144,
+          "w": 572,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_19",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 2136,
+          "w": 588,
+          "h": 288
+        }
+      },
+      {
+        "item": "bar_19",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 2136,
+          "w": 588,
+          "h": 4
         }
       },
       {
         "item": "viz_hec",
         "type": "block",
         "position": {
-          "x": 600,
-          "y": 1570,
-          "w": 600,
-          "h": 300
+          "x": 614,
+          "y": 2144,
+          "w": 572,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_20",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 2436,
+          "w": 1188,
+          "h": 268
+        }
+      },
+      {
+        "item": "bar_20",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 2436,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_tcpin_table",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1870,
-          "w": 1200,
-          "h": 280
+          "x": 14,
+          "y": 2444,
+          "w": 1172,
+          "h": 254
+        }
+      },
+      {
+        "item": "card_21",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 2716,
+          "w": 1188,
+          "h": 98
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 2150,
-          "w": 1200,
-          "h": 100
+          "x": 14,
+          "y": 2724,
+          "w": 1172,
+          "h": 84
         }
       }
     ],

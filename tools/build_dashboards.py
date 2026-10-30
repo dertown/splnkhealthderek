@@ -2,6 +2,7 @@
 """Generate Dashboard Studio XML views. Run from the repo root."""
 from __future__ import annotations
 
+import csv
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -28,9 +29,19 @@ STATUS_COLORS = [
     {"match": "RED", "value": RED},
     {"match": "N/A", "value": YELLOW},
     {"match": "LOCAL", "value": GREEN},
-    {"match": "PROVIDER", "value": YELLOW},
+    {"match": "READY", "value": GREEN},
+    {"match": "PROVIDER", "value": GREEN},
+    {"match": "FAILED", "value": RED},
     {"match": "MISCONFIG", "value": RED},
+    {"match": "WAITING", "value": YELLOW},
+    {"match": "STALLED", "value": RED},
+    {"match": "REPLIED", "value": GREEN},
+    {"match": "IDLE", "value": "#6B6B6B"},
     {"match": "WAIT", "value": "#6B6B6B"},
+    {"match": "PASS", "value": GREEN},
+    {"match": "TESTING", "value": YELLOW},
+    {"match": "SKIP", "value": "#6B6B6B"},
+    {"match": "FAIL", "value": RED},
 ]
 
 # Row colors: 1=red/alert, 2=yellow, 3=green/ok
@@ -39,6 +50,33 @@ ROW_COLORS = [
     {"from": 1.5, "to": 2.5, "value": "#5C4A12"},
     {"from": 2.5, "to": 4, "value": "#14301A"},
 ]
+
+
+def model_dropdown_items() -> list[dict]:
+    """Static Model dropdown entries so Studio always renders a list of names."""
+    prov_labels: dict[str, str] = {}
+    with (ROOT / "lookups" / "dq_agent_ai_providers.csv").open(newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            prov_labels[(row.get("provider") or "").strip()] = (row.get("provider_label") or row.get("provider") or "").strip()
+    items: list[dict] = []
+    seen: set[str] = set()
+    with (ROOT / "lookups" / "dq_agent_ai_models.csv").open(newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            provider = (row.get("provider") or "none").strip()
+            model = (row.get("model") or "none").strip()
+            name = (row.get("model_label") or model).strip()
+            if provider == "none" or model == "none":
+                if "none" not in seen:
+                    seen.add("none")
+                    items.append({"label": "None — local briefing only", "value": "none"})
+                continue
+            key = f"{provider}|{model}"
+            if key in seen:
+                continue
+            seen.add(key)
+            pl = prov_labels.get(provider, provider)
+            items.append({"label": f"{name} ({pl})", "value": model})
+    return items
 
 
 def wrap(label: str, description: str, definition: dict) -> str:
@@ -52,12 +90,11 @@ def wrap(label: str, description: str, definition: dict) -> str:
     )
 
 
-def ds(name: str, query: str, earliest: str | None = None, latest: str | None = None, refresh: str = "5m") -> dict:
-    options: dict = {
-        "query": query.strip(),
-        "refresh": refresh,
-        "refreshType": "delay",
-    }
+def ds(name: str, query: str, earliest: str | None = None, latest: str | None = None, refresh: str | None = "5m") -> dict:
+    options: dict = {"query": query.strip()}
+    if refresh:
+        options["refresh"] = refresh
+        options["refreshType"] = "delay"
     if earliest is not None or latest is not None:
         options["queryParameters"] = {
             "earliest": earliest if earliest is not None else "$global_time.earliest$",
@@ -104,29 +141,36 @@ def md(text: str, font: str = "default") -> dict:
     }
 
 
-def click_tile(title: str, ds_id: str, token: str, font: int = 28) -> dict:
-    return {
-        "type": "splunk.singlevalue",
-        "title": title,
-        "dataSources": {"primary": ds_id},
-        "showLastUpdated": False,
-        "showProgressBar": False,
-        "options": {
-            "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-            "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
-            "backgroundColor": "transparent",
-            "majorFontSize": font,
-        },
-        "context": {"statusColors": STATUS_COLORS},
-        "eventHandlers": [
-            {
-                "type": "drilldown.setToken",
-                "options": {
-                    "tokens": [{"token": token, "key": "row.click_action.value"}],
-                },
-            }
-        ],
+def decision_button(title: str, ds_id: str, token: str = "tok_decision", fill: str | None = None) -> dict:
+    """One-row table so row.click_action.value is a real table drilldown."""
+    viz = table(title, ds_id, count=1)
+    viz["showLastUpdated"] = False
+    viz["showProgressBar"] = False
+    viz["eventHandlers"] = [
+        {
+            "type": "drilldown.setToken",
+            "options": {
+                "tokens": [{"token": token, "key": "row.click_action.value"}],
+            },
+        }
+    ]
+    viz["options"]["headerVisibility"] = "none"
+    viz["options"]["fontSize"] = "large"
+    viz["options"]["columnFormat"] = {
+        "button_label": {"width": 380, "align": "center"},
+        "click_action": {"width": 1},
     }
+    if fill:
+        viz["options"]["backgroundColor"] = fill
+        viz["options"]["tableFormat"] = {
+            "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+            "headerBackgroundColor": fill,
+            "headerColor": "#FFFFFF",
+            "cellTextColor": "#FFFFFF",
+            "align": "center",
+        }
+        viz["context"] = {"btnColors": [{"from": 0, "to": 10, "value": fill}]}
+    return viz
 
 
 def single_status(title: str, ds_id: str, value_field: str, score_field: str) -> dict:
@@ -204,6 +248,20 @@ def table(title: str, ds_id: str, rank_field: str = "_color_rank", count: int = 
     }
 
 
+def drill_source(viz: dict, field: str = "data_source") -> dict:
+    """Click a topology row or node to set tok_data_source (does not open Search)."""
+    viz = dict(viz)
+    viz["eventHandlers"] = [
+        {
+            "type": "drilldown.setToken",
+            "options": {
+                "tokens": [{"token": "tok_data_source", "key": f"row.{field}.value"}],
+            },
+        }
+    ]
+    return viz
+
+
 def line(title: str, ds_id: str, y_title: str) -> dict:
     return {
         "type": "splunk.line",
@@ -259,6 +317,10 @@ def block(item: str, x: int, y: int, w: int, h: int) -> dict:
     return {"item": item, "type": "block", "position": {"x": x, "y": y, "w": w, "h": h}}
 
 
+def input_block(item: str, x: int, y: int, w: int, h: int) -> dict:
+    return {"item": item, "type": "input", "position": {"x": x, "y": y, "w": w, "h": h}}
+
+
 def linkgraph(title: str, ds_id: str, field_order: list[str]) -> dict:
     return {
         "type": "splunk.linkgraph",
@@ -304,6 +366,107 @@ def grid(structure: list, extra_inputs: list | None = None, include_time: bool =
     if inputs:
         layout["globalInputs"] = inputs
     return layout
+
+
+# ---------------------------------------------------------------------------
+# Dashboard Studio card styling
+#
+# Every view is written as a grid of blocks. studio_cards() turns that grid into a
+# Dashboard Studio absolute layout: a dark canvas, a rounded card behind each panel,
+# and a thin colored accent bar per panel type. Panels keep their ids and data.
+# ---------------------------------------------------------------------------
+
+CANVAS = "#0B0F19"
+CARD_FILL = "#151B2B"
+CARD_LINE = "#26304A"
+HEADER_FILL = "#1B2342"
+ACCENT_KPI = "#00CDAF"
+ACCENT_TABLE = "#7B56DB"
+ACCENT_CHART = "#009CEB"
+ACCENT_GRAPH = "#DD9900"
+GUTTER = 6
+BAR_H = 4
+HIDDEN_PREFIXES = ("viz_write", "viz_ai_write", "viz_conn_write")
+TRANSPARENT_TYPES = (
+    "splunk.table", "splunk.line", "splunk.area", "splunk.column", "splunk.linkgraph", "splunk.sankey",
+    "splunk.singlevalue", "splunk.markdown",
+)
+
+
+def _rect(fill: str, stroke: str | None = None, rx: int = 10) -> dict:
+    options: dict = {"fillColor": fill, "rx": rx}
+    if stroke:
+        options["strokeColor"] = stroke
+        options["strokeWidth"] = 1
+    return {"type": "splunk.rectangle", "options": options}
+
+
+def _accent_for(viz: dict) -> str | None:
+    vtype = viz.get("type", "")
+    if vtype == "splunk.singlevalue":
+        return ACCENT_KPI
+    if vtype == "splunk.table":
+        return ACCENT_TABLE
+    if vtype in ("splunk.linkgraph", "splunk.sankey"):
+        return ACCENT_GRAPH
+    if vtype in ("splunk.line", "splunk.area", "splunk.column"):
+        return ACCENT_CHART
+    return None
+
+
+def studio_cards(definition: dict) -> dict:
+    layout = definition.get("layout", {})
+    if layout.get("type") != "grid":
+        return definition
+    vizzes = definition.setdefault("visualizations", {})
+    for viz in vizzes.values():
+        if viz.get("type") in TRANSPARENT_TYPES:
+            viz.setdefault("options", {}).setdefault("backgroundColor", "transparent")
+        if "showLastUpdated" in viz:
+            viz["showLastUpdated"] = False
+
+    structure: list = []
+    bottom = 0
+    n = 0
+    for block_def in layout.get("structure", []):
+        item = block_def["item"]
+        pos = block_def["position"]
+        x, y, w, h = pos["x"], pos["y"], pos["w"], pos["h"]
+        bottom = max(bottom, y + h)
+        if block_def.get("type") == "input":
+            structure.append(block(item, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - GUTTER) | {"type": "input"})
+            continue
+        viz = vizzes[item]
+        is_button = viz.get("type") == "splunk.table" and viz.get("options", {}).get("headerVisibility") == "none"
+        if is_button or item.startswith(HIDDEN_PREFIXES):
+            structure.append(block(item, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - 2 * GUTTER))
+            continue
+        n += 1
+        header = item == "viz_header"
+        card_id, bar_id = f"card_{n}", f"bar_{n}"
+        vizzes[card_id] = _rect(HEADER_FILL if header else CARD_FILL, CARD_LINE)
+        structure.append(block(card_id, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - 2 * GUTTER))
+        accent = ACCENT_TABLE if header else _accent_for(viz)
+        inset_left, inset_top = 14, 14
+        if header:
+            vizzes[bar_id] = _rect(accent, None, rx=3)
+            structure.append(block(bar_id, x + GUTTER, y + GUTTER, 6, h - 2 * GUTTER))
+            inset_left = 22
+        elif accent:
+            vizzes[bar_id] = _rect(accent, None, rx=2)
+            structure.append(block(bar_id, x + GUTTER, y + GUTTER, w - 2 * GUTTER, BAR_H))
+            inset_top = 14
+        structure.append(block(item, x + inset_left, y + inset_top, w - inset_left - 14, h - inset_top - 12))
+
+    new_layout: dict = {
+        "type": "absolute",
+        "options": {"width": 1200, "height": bottom + GUTTER * 2, "display": "auto-scale", "backgroundColor": CANVAS},
+        "structure": structure,
+    }
+    if layout.get("globalInputs"):
+        new_layout["globalInputs"] = layout["globalInputs"]
+    definition["layout"] = new_layout
+    return definition
 
 
 # ---------------------------------------------------------------------------
@@ -570,13 +733,69 @@ search `exec_health_hec_metrics`
 | table data_source, ingest_path, splunk_index, events, kb, _color_rank
 """.strip()
 
+# Per-source drill-down. tok_data_source is set by clicking data_source in the
+# topology table or graph (hidden token latch, no dropdown). tstats cannot
+# aggregate index / splunk_server / splunk_server_group, so do not dc(index).
+# Main topology searches must not reference this token.
+Q_TOPO_SRC_STATS = r"""
+| tstats count as events, latest(_time) as last_event, earliest(_time) as first_event, dc(sourcetype) as sourcetypes where index=`exec_health_idx` host="$tok_data_source$"
+| eval data_source=replace("$tok_data_source$", "[^A-Za-z0-9._:-]", "")
+| where data_source!="none" AND data_source!="" AND data_source!="*"
+| eval age_min=round((now()-last_event)/60, 0)
+| eval age=tostring(now()-last_event, "duration")
+| eval last_event=strftime(last_event, "%Y-%m-%d %H:%M:%S")
+| eval first_event=strftime(first_event, "%Y-%m-%d %H:%M:%S")
+| eval _color_rank=if(age_min>(`exec_health_silence_sec`/60), 1, 3)
+| table data_source, last_event, first_event, age, age_min, events, sourcetypes, _color_rank
+""".strip()
+
+Q_TOPO_SRC_TREND = r"""
+| tstats count as events where index=`exec_health_idx` host="$tok_data_source$" earliest=-25h@m latest=@m by _time span=15m
+| eval data_source=replace("$tok_data_source$", "[^A-Za-z0-9._:-]", "")
+| where data_source!="none" AND data_source!="" AND data_source!="*"
+| timechart span=15m sum(events) as events
+| fillnull value=0 events
+| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples
+| eval sigma=`exec_health_sigma`
+| eval mean=if(samples>=8, round(mean_vol, 1), null())
+| eval drop_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol-(sigma*stdev_vol), 1), null())
+| eval burst_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol+(sigma*stdev_vol), 1), null())
+| eval drop_bound=if(drop_bound<0, 0, drop_bound)
+| table _time, events, mean, drop_bound, burst_bound
+""".strip()
+
+Q_TOPO_SRC_OUTLIERS = r"""
+| tstats count as events where index=`exec_health_idx` host="$tok_data_source$" earliest=-25h@m latest=@m by _time span=15m
+| eval data_source=replace("$tok_data_source$", "[^A-Za-z0-9._:-]", "")
+| where data_source!="none" AND data_source!="" AND data_source!="*"
+| timechart span=15m sum(events) as events
+| fillnull value=0 events
+| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples
+| where _time+900+300 <= now()
+| eval sigma=`exec_health_sigma`
+| eval mean_vol=round(mean_vol, 1), stdev_vol=round(stdev_vol, 1)
+| eval drop_bound=round(mean_vol-(sigma*stdev_vol), 1), burst_bound=round(mean_vol+(sigma*stdev_vol), 1)
+| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)
+| eval outlier=case(
+    samples<8, "WARMUP",
+    stdev_vol>0 AND events < drop_bound AND mean_vol>10, "DROP",
+    stdev_vol>0 AND events > burst_bound AND events>10, "BURST",
+    1=1, "OK")
+| where outlier="DROP" OR outlier="BURST"
+| eval _color_rank=if(outlier="DROP", 1, 2)
+| eval bucket=strftime(_time, "%Y-%m-%d %H:%M")
+| eval data_source=replace("$tok_data_source$", "[^A-Za-z0-9._:-]", "")
+| sort -_time
+| table bucket, data_source, events, mean_vol, stdev_vol, z_score, outlier, _color_rank
+""".strip()
+
 
 def dq_agent_findings_core() -> str:
     """Diagnose Splunk Health traffic lights vs learned baselines.
 
     Emits one row per issue with a suggested fix. Covers ingestion, hosts, HEC,
     instance health, search CPU, SC4S, and Edge. The agent never writes Splunk
-    configuration; humans click APPROVE or DISMISS, then SAVE,
+    configuration; humans click APPROVE or DISMISS
     before a decision is recorded in dq_agent_approvals.
     """
     host_findings = host_baseline_core() + r"""
@@ -1063,7 +1282,7 @@ Q_DQ_AGENT_FINDINGS = dq_agent_findings_core() + r"""
 | lookup dq_agent_approvals finding_id OUTPUT decision, decided_at, actor
 | eval status=case(decision="approve", "approved", decision="dismiss", "dismissed", 1=1, "open")
 | eval action=if(status="open", "Review", "Resolved")
-| eval agent_thought="OBSERVE: "+issue+" on "+entity+". INVESTIGATE: "+coalesce(tool_plan, "learned baselines")+". TOOLS: fwdType="+coalesce(tool_fwdType, "n/a")+" conn="+coalesce(tool_conn, "n/a")+" err_component="+coalesce(tool_err_component, "none")+" err_count="+coalesce(tostring(tool_err_count), "0")+". HYPOTHESIZE: "+coalesce(likely_cause, "needs human review")+" (confidence "+coalesce(confidence, "n/a")+"). PROPOSE: "+suggested_fix+". ACT: wait for human APPROVE or DISMISS then SAVE — never change Splunk unattended."
+| eval agent_thought="OBSERVE: "+issue+" on "+entity+". INVESTIGATE: "+coalesce(tool_plan, "learned baselines")+". TOOLS: fwdType="+coalesce(tool_fwdType, "n/a")+" conn="+coalesce(tool_conn, "n/a")+" err_component="+coalesce(tool_err_component, "none")+" err_count="+coalesce(tostring(tool_err_count), "0")+". HYPOTHESIZE: "+coalesce(likely_cause, "needs human review")+" (confidence "+coalesce(confidence, "n/a")+"). PROPOSE: "+suggested_fix+". ACT: wait for human APPROVE or DISMISS — never change Splunk unattended."
 | eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Reply with root cause, confidence, and step-by-step admin actions. Do not request secrets or HEC token values."
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank
@@ -1300,11 +1519,22 @@ def sc4s_edge() -> dict:
 
 
 def data_topology() -> dict:
+    src_age = single_number("Minutes since latest event", "ds_topo_src_stats", "age_min", "", None, 0)
+    src_age["options"]["underLabel"] = "in selected time range"
+    src_out_n = single_number("Drop / burst buckets", "ds_topo_src_out_n", "outliers", "", None, 0)
+    src_out_n["options"]["underLabel"] = "2σ vs prior 24h"
     return {
         "title": "Data Topology",
-        "description": "Network topology of data sources, ingest paths, and Splunk receivers.",
+        "description": "Click a data source for latest event, volume, trend, and drop/burst outliers.",
         "defaults": defaults(),
-        "inputs": {"input_global_trp": timerange("-4h@h,now")},
+        "inputs": {
+            "input_global_trp": timerange("-4h@h,now"),
+            "input_source": {
+                "type": "input.text",
+                "title": "Selected data source (set by clicking data_source)",
+                "options": {"token": "tok_data_source", "defaultValue": "none"},
+            },
+        },
         "dataSources": {
             "ds_topo_paths": ds("Indexed source → ingest → index", Q_TOPO_PATHS),
             "ds_topo_sankey": chain(
@@ -1332,6 +1562,14 @@ def data_topology() -> dict:
                 "ds_topo_paths",
                 "| stats sum(events) as events by ingest_path | sort 0 -events",
             ),
+            "ds_topo_src_stats": ds("Selected source latest and totals", Q_TOPO_SRC_STATS),
+            "ds_topo_src_trend": ds("Selected source 24h trend", Q_TOPO_SRC_TREND, "-25h@m", "@m"),
+            "ds_topo_src_outliers": ds("Selected source drop/burst outliers", Q_TOPO_SRC_OUTLIERS, "-25h@m", "@m"),
+            "ds_topo_src_out_n": chain(
+                "Selected source outlier count",
+                "ds_topo_src_outliers",
+                "| stats count as outliers",
+            ),
             "ds_tcpin": ds("Forwarder → indexer connections", Q_TCPIN_PATHS),
             "ds_tcpin_sankey": chain(
                 "Forwarder flow sankey",
@@ -1354,43 +1592,51 @@ def data_topology() -> dict:
                 "ds_topo_paths",
                 "| table data_source, ingest_path, splunk_index",
             ),
-            "ds_tcpin_link": chain(
-                "Forwarder topology nodes only",
-                "ds_tcpin",
-                "| table data_source, connection, receiver",
-            ),
         },
         "visualizations": {
             "viz_header": md(
                 "# Data topology\n"
                 "How servers and data sources reach Splunk: **data source → ingest path → index**, "
                 "plus **forwarder → indexer** from `_internal` `tcpin_connections`. "
-                "Click a node to highlight its links."
+                "**Click a data_source** in the graph or table for latest event, totals, "
+                "24-hour trend, and sudden drops or bursts. Search does not open."
             ),
             "viz_sources": single_number("Data sources", "ds_topo_counts", "sources", "", None, 0),
             "viz_paths": single_number("Ingest paths", "ds_topo_counts", "ingest_paths", "", None, 0),
             "viz_indexes": single_number("Destination indexes", "ds_topo_counts", "indexes", "", None, 0),
             "viz_fwds": single_number("Forwarders (tcpin)", "ds_tcpin_counts", "forwarders", "", None, 0),
-            "viz_link": linkgraph(
-                "Sources → ingest path → Splunk index",
-                "ds_topo_link",
-                ["data_source", "ingest_path", "splunk_index"],
+            "viz_link": drill_source(
+                linkgraph(
+                    "Sources → ingest path → Splunk index",
+                    "ds_topo_link",
+                    ["data_source", "ingest_path", "splunk_index"],
+                )
             ),
             "viz_sankey": sankey("Volume flow (events) through ingest paths", "ds_topo_sankey"),
             "viz_methods": column("Indexed events by ingest path", "ds_topo_methods", "events"),
-            "viz_table": table("Top source → path → index flows", "ds_topo_paths", count=20),
-            "viz_tcpin_link": linkgraph(
-                "Servers: forwarder → connection type → indexer",
-                "ds_tcpin_link",
-                ["data_source", "connection", "receiver"],
+            "viz_table": drill_source(table("Top source → path → index flows — click data_source", "ds_topo_paths", count=20)),
+            "viz_src_header": md(
+                "## Selected data source\n"
+                "Click a **data_source** above. Latest event and totals follow the time picker. "
+                "Trend and outliers use the last **24 hours** at 15-minute buckets vs that source's "
+                "`streamstats` mean ± `exec_health_sigma` (default 2). "
+                "**DROP** = sudden traffic loss. **BURST** = sudden spike. Empty panels mean nothing is selected yet."
             ),
+            "viz_src_total": single_number("Total events", "ds_topo_src_stats", "events", "", None, 0),
+            "viz_src_age": src_age,
+            "viz_src_types": single_number("Sourcetypes", "ds_topo_src_stats", "sourcetypes", "", None, 0),
+            "viz_src_out_n": src_out_n,
+            "viz_src_stats": table("Latest event, first event, and totals", "ds_topo_src_stats", count=1),
+            "viz_src_trend": line("Event trend vs 24-hour mean and 2σ bounds", "ds_topo_src_trend", "events / 15m"),
+            "viz_src_outliers": table("Sudden drops and traffic bursts (2σ)", "ds_topo_src_outliers", count=20),
             "viz_tcpin_sankey": sankey("Forwarder → indexer volume (KB)", "ds_tcpin_sankey"),
-            "viz_hec": table("HEC tokens as data sources", "ds_hec_paths", count=15),
-            "viz_tcpin_table": table("Forwarder connections (metrics.log tcpin)", "ds_tcpin", count=15),
+            "viz_hec": drill_source(table("HEC tokens as data sources — click data_source", "ds_hec_paths", count=15)),
+            "viz_tcpin_table": drill_source(table("Forwarder connections (metrics.log tcpin) — click data_source", "ds_tcpin", count=15)),
             "viz_footer": md(
                 "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. "
                 "**Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. "
-                "HEC, SC4S, and Edge stay as their own paths. Narrow `exec_health_idx` if the source list is too large."
+                "HEC, SC4S, and Edge stay as their own paths. Source drill-down is `tstats` by `host`. "
+                "Narrow `exec_health_idx` if the source list is too large."
             ),
         },
         "layout": grid(
@@ -1404,17 +1650,27 @@ def data_topology() -> dict:
                 block("viz_sankey", 0, 610, 700, 320),
                 block("viz_methods", 700, 610, 500, 320),
                 block("viz_table", 0, 930, 1200, 280),
-                block("viz_tcpin_link", 0, 1210, 1200, 360),
-                block("viz_tcpin_sankey", 0, 1570, 600, 300),
-                block("viz_hec", 600, 1570, 600, 300),
-                block("viz_tcpin_table", 0, 1870, 1200, 280),
-                block("viz_footer", 0, 2150, 1200, 100),
-            ]
+                block("viz_src_header", 0, 1210, 1200, 90),
+                block("viz_src_total", 0, 1300, 300, 140),
+                block("viz_src_age", 300, 1300, 300, 140),
+                block("viz_src_types", 600, 1300, 300, 140),
+                block("viz_src_out_n", 900, 1300, 300, 140),
+                block("viz_src_stats", 0, 1440, 1200, 150),
+                block("viz_src_trend", 0, 1590, 1200, 280),
+                block("viz_src_outliers", 0, 1870, 1200, 260),
+                block("viz_tcpin_sankey", 0, 2130, 600, 300),
+                block("viz_hec", 600, 2130, 600, 300),
+                block("viz_tcpin_table", 0, 2430, 1200, 280),
+                block("viz_footer", 0, 2710, 1200, 110),
+            ],
         ),
     }
 
 
 Q_DQ_AGENT_STATUS = r"""
+| eval _gate="$tok_decision$"
+| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
+| eval status=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
 | where status="open"
 | stats count as issues
 | eval agent_status=if(issues>0, "RED", "GREEN")
@@ -1423,46 +1679,45 @@ Q_DQ_AGENT_STATUS = r"""
 
 Q_DQ_CHOOSE_APPROVE = r"""
 | makeresults
-| eval selected="$tok_decision$", finding_id="$tok_finding_id$"
+| eval finding_id="$tok_finding_id$"
 | eval picked=if(finding_id!="none" AND finding_id!="", 1, 0)
-| eval button_label=case(selected="approve", "APPROVED", picked=1, "APPROVE", 1=1, "PICK A ROW")
-| eval button_color=case(selected="approve", "GREEN", picked=1, "YELLOW", 1=1, "WAIT")
-| eval click_action=if(picked=1, "approve", "review")
-| table button_label, button_color, click_action
+| eval button_label=if(picked=1, "APPROVE", "PICK A ROW FIRST")
+| eval click_action="approve"
+| eval _color_rank=if(picked=1, 2, 1)
+| table button_label, click_action, _color_rank
 """
 
 Q_DQ_CHOOSE_DISMISS = r"""
 | makeresults
-| eval selected="$tok_decision$", finding_id="$tok_finding_id$"
+| eval finding_id="$tok_finding_id$"
 | eval picked=if(finding_id!="none" AND finding_id!="", 1, 0)
-| eval button_label=case(selected="dismiss", "DISMISSED", picked=1, "DISMISS", 1=1, "PICK A ROW")
-| eval button_color=case(selected="dismiss", "GREEN", picked=1, "YELLOW", 1=1, "WAIT")
-| eval click_action=if(picked=1, "dismiss", "review")
-| table button_label, button_color, click_action
+| eval button_label=if(picked=1, "DISMISS", "PICK A ROW FIRST")
+| eval click_action="dismiss"
+| eval _color_rank=if(picked=1, 2, 1)
+| table button_label, click_action, _color_rank
 """
 
-Q_DQ_IMPLEMENT_READY = r"""
-| makeresults
-| eval finding_id="$tok_finding_id$", decision="$tok_decision$", commit="$tok_commit$"
-| eval ready=if(finding_id!="none" AND finding_id!="" AND (decision="approve" OR decision="dismiss"), 1, 0)
-| eval button_label=case(commit="SAVE" AND ready=1, "SAVED", ready=1, "SAVE", 1=1, "WAIT")
-| eval button_color=case(commit="SAVE" AND ready=1, "GREEN", ready=1, "YELLOW", 1=1, "WAIT")
-| eval click_action=if(ready=1, "SAVE", "WAIT")
-| table button_label, button_color, ready, click_action
-"""
-
+# Only writes when APPROVE/DISMISS is chosen. Empty results skip appendpipe, so
+# page load does not rewrite the lookup (that long job was getting cancelled).
 Q_DQ_SAVE_DECISION = r"""
-| inputlookup dq_agent_approvals
-| append [
-    | makeresults
-    | eval commit="$tok_commit$", decision="$tok_decision$", finding_id="$tok_finding_id$"
-    | where commit="SAVE" AND finding_id!="none" AND finding_id!="" AND (decision="approve" OR decision="dismiss")
-    | eval actor="human_dashboard", decided_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="human_in_the_loop", entity="none"
-    | table finding_id, decision, actor, decided_at, note, entity
+| makeresults
+| eval finding_id="$tok_finding_id$", decision="$tok_decision$"
+| where (decision="approve" OR decision="dismiss") AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder"
+| eval actor="human_dashboard", decided_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="human_in_the_loop", entity="none"
+| eval _key=finding_id
+| table _key, finding_id, decision, actor, decided_at, note, entity
+| appendpipe [
+    | outputlookup append=true dq_agent_approvals
 ]
-| stats latest(decision) as decision, latest(actor) as actor, latest(decided_at) as decided_at, latest(note) as note, latest(entity) as entity by finding_id
-| outputlookup dq_agent_approvals
-| where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none"
+| where finding_id="$tok_finding_id$"
+| eval _color_rank=if(decision="approve" OR decision="dismiss", 3, 2)
+| table decided_at, finding_id, decision, actor, _color_rank
+"""
+
+Q_DQ_RECORDED_READ = r"""
+| inputlookup dq_agent_approvals
+| eval _gate="$tok_decision$"
+| where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none" AND finding_id!="placeholder"
 | eval _color_rank=if(decision="approve" OR decision="dismiss", 3, 2)
 | table decided_at, finding_id, decision, actor, _color_rank
 """
@@ -1474,11 +1729,15 @@ Q_DQ_AGENT_ASK = r"""
 """
 
 Q_DQ_QUEUE_VIEW = r"""
+| eval _gate="$tok_decision$"
+| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
+| eval status=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+| eval action=if(status="open", "Select", "Done")
+| eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval fix=coalesce(suggested_fix, "")
 | eval fix=if(len(fix)>80, substr(fix,1,80)."...", fix)
-| eval action=if(action="Resolved", "Done", "Select")
-| eval _ai_brief=ai_brief, _reset="WAIT", _reset_decision="review"
-| table finding_id, severity, issue, entity, fix, confidence, action, _ai_brief, _reset, _reset_decision, _color_rank
+| eval _ai_brief=ai_brief, _reset_decision="review", _ai_auto="ask"
+| table finding_id, severity, issue, entity, fix, confidence, action, status, _ai_brief, _reset_decision, _ai_auto, _color_rank
 """
 
 Q_DQ_PICKER = r"""
@@ -1489,15 +1748,28 @@ Q_DQ_PICKER = r"""
 
 Q_DQ_SUGGESTION = r"""
 | where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none" AND finding_id!=""
+| eval _gate="$tok_decision$"
+| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
+| eval status=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+| eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval where_to_act=coalesce(splunk_web_path, "Open the matching dashboard in this app")
 | table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank
 """
 
 Q_DQ_AI_CFG_ROW = r"""
-| inputlookup dq_agent_ai_config
+| makeresults
+| eval stanza="default", mode="off", provider="none", model="none", endpoint="none", api_key="none", inbox_index="_internal", inbox_sourcetype="derek_health_ai_unconfigured", updated_by="system", updated_at="0", note="seed", _seed=1
+| inputlookup append=true dq_agent_ai_config
+| eval stanza=coalesce(stanza, "default")
+| eval _seed=coalesce(_seed, 0)
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
+| eval rank=case(key_ok=1, 3, _seed=0, 2, 1=1, 1)
+| sort 0 -rank
+| dedup stanza
 | where stanza="default"
 | head 1
-| eval used_ui=if(updated_at="0" OR isnull(updated_at), 0, 1)
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
 | eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
 | eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
 | eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
@@ -1509,32 +1781,225 @@ Q_DQ_AI_CFG_ROW = r"""
 Q_DQ_AI_STATUS = Q_DQ_AI_CFG_ROW + r"""
 | lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes
 | eval endpoint=if(endpoint="none" OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
-| eval ai_status=case(mode="provider" AND provider!="none" AND provider!="", "PROVIDER", mode="provider", "MISCONFIG", 1=1, "LOCAL")
-| eval status_color=case(ai_status="PROVIDER", "YELLOW", ai_status="MISCONFIG", "RED", 1=1, "GREEN")
-| eval _color_rank=case(ai_status="MISCONFIG", 1, ai_status="PROVIDER", 2, 1=1, 3)
-| table ai_status, status_color, mode, provider, provider_label, model, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank
+| eval key_state=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", "SET", "MISSING")
+| eval model_ok=if(isnotnull(model) AND model!="" AND model!="none", 1, 0)
+| eval endpoint_ok=if(isnotnull(endpoint) AND endpoint!="" AND endpoint!="none", 1, 0)
+| eval setup_reason=case(
+    mode!="provider" OR provider="none" OR provider="", "Local only. No provider is saved.",
+    key_state!="SET", "Setup incomplete: API key is missing. Enter a key and click SAVE.",
+    model_ok=0, "Setup incomplete: model is missing. Enter a model id and click SAVE.",
+    endpoint_ok=0, "Setup incomplete: ".coalesce(provider_label, provider)." has no endpoint. Set default_endpoint in the provider catalog, then SAVE again.",
+    1=1, "Ready. Provider ".coalesce(provider_label, provider).", model ".model.", key SET.")
+| eval ai_status=case(
+    mode!="provider" OR provider="none" OR provider="", "LOCAL",
+    key_state="SET" AND model_ok=1 AND endpoint_ok=1, "READY",
+    1=1, "FAILED")
+| eval status_color=ai_status
+| eval _color_rank=case(ai_status="FAILED", 1, ai_status="READY", 3, 1=1, 3)
+| table setup_reason, ai_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank
 """
 
-Q_DQ_AI_ASK_READY = r"""
+Q_DQ_AI_ASK_BUTTON = r"""
 | makeresults
-| eval finding_id="$tok_finding_id$", confirm="$tok_ai_confirm$", stanza="default"
-| lookup dq_agent_ai_config stanza OUTPUT mode, provider, updated_at
-| eval used_ui=if(updated_at="0" OR isnull(updated_at), 0, 1)
+| eval finding_id="$tok_finding_id$", stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT mode, provider, api_key, updated_at
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
 | eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
 | eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
-| eval ready=if(confirm="ASK" AND finding_id!="none" AND finding_id!="" AND mode="provider" AND provider!="none" AND provider!="", 1, 0)
-| eval button_label=case(mode!="provider", "OPEN AI SETUP FIRST", ready=1, "CLICK TO ASK AI", 1=1, "TYPE ASK AFTER A REVIEW")
-| eval button_color=if(ready=1, "YELLOW", "N/A")
-| table button_label, button_color, ready
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
+| eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
+| eval configured=if(mode="provider" AND provider!="none" AND provider!="" AND key_ok=1, 1, 0)
+| eval button_label=case(picked=0, "PICK A ROW FIRST", configured=0, "OPEN AI SETUP FIRST", 1=1, "ASK AGAIN")
+| eval click_action="retry".tostring(now())
+| eval _color_rank=if(picked=1 AND configured=1, 3, 1)
+| table button_label, click_action, _color_rank
 """
 
-Q_DQ_AI_SAVE_READY = r"""
+# Writes a pending ASK row only after the ASK tile is clicked. Page load is a no-op.
+Q_DQ_AI_ASK_WRITE = r"""
 | makeresults
-| eval confirm="$tok_cfg_save$", mode="$tok_cfg_mode$", provider="$tok_cfg_provider$"
-| eval ready=if(confirm="SAVE" AND (mode="off" OR (mode="provider" AND provider!="none" AND provider!="")), 1, 0)
-| eval button_label=if(ready=1, "CLICK TO SAVE CONFIG", "TYPE SAVE TO WRITE SETTINGS")
-| eval button_color=if(ready=1, "YELLOW", "N/A")
-| table button_label, button_color, ready
+| eval ask="$tok_ai_ask$", finding_id="$tok_finding_id$", entity="$tok_entity$", issue="$tok_issue$", ai_brief="$tok_ai_brief$", stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
+| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
+| eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
+| eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
+| eval endpoint=if(used_ui=0, "`exec_health_ai_endpoint`", coalesce(endpoint, "none"))
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
+| where match(ask, "^(ask|retry)") AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder" AND mode="provider" AND provider!="none" AND provider!="" AND key_ok=1
+| lookup dq_agent_ai_requests finding_id OUTPUT status AS prev_status, requested_at AS prev_at
+| eval prev_age=coalesce(now()-strptime(coalesce(tostring(prev_at), ""), "%Y-%m-%d %H:%M:%S"), 99999)
+| where NOT (prev_status="replied" AND prev_age<3600 AND ask="ask")
+| lookup dq_agent_ai_providers provider OUTPUT default_endpoint
+| eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
+| eval actor="human_dashboard", requested_at=strftime(now(), "%Y-%m-%d %H:%M:%S")
+| eval entity=if(entity="" OR isnull(entity), "none", entity)
+| eval issue=if(issue="" OR isnull(issue), "none", issue)
+| eval ai_brief=if(ai_brief="" OR isnull(ai_brief), "none", ai_brief)
+| eval is_ping=0
+| derekaiping
+| eval status=if(ai_result="replied", "replied", "failed")
+| eval note=if(ai_result="replied", "ask_ai_provider", "ask failed: ".coalesce(ai_error, "no reply"))
+| eval reply=if(ai_result="replied", ai_reply, "none")
+| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply
+| appendpipe [
+    | inputlookup append=true dq_agent_ai_requests
+    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id
+    | outputlookup dq_agent_ai_requests
+]
+| where finding_id="$tok_finding_id$"
+| eval _color_rank=if(status="replied", 3, 1)
+| table requested_at, finding_id, provider, status, _color_rank
+"""
+
+Q_DQ_AI_SAVE_BUTTON = r"""
+| makeresults
+| eval p=replace(lower("$tok_cfg_provider$"), "[^a-z]", ""), m=replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", ""), k=len(replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", ""))
+| eval button_label="SAVE"
+| eval click_action="save|".p."|".m."|".tostring(k)
+| eval _color_rank=3
+| table button_label, click_action, _color_rank
+"""
+
+Q_DQ_AI_MODELS = r"""
+| inputlookup dq_agent_ai_models
+| eval p=replace(lower("$tok_cfg_provider$"), "[^a-z]", "")
+| eval p=if(p="" OR isnull(p), "none", p)
+| where provider=p
+| eval label=coalesce(model_label, model), value=model
+| table label, value
+| sort label
+"""
+
+# Writes only after SAVE is clicked. Empty page-load skips outputlookup.
+# api_key is stored in KV Store (dq_agent_ai_config), not in a packaged CSV, so app
+# updates do not wipe it. Leave the key field blank to keep the stored value.
+Q_DQ_AI_SAVE_CONFIG = r"""
+| makeresults
+| eval save="$tok_cfg_save$"
+| eval want="save|".replace(lower("$tok_cfg_provider$"), "[^a-z]", "")."|".replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")."|".tostring(len(replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")))
+| eval stanza="default", _key="default"
+| lookup dq_agent_ai_config stanza OUTPUT inbox_index AS prev_inbox, inbox_sourcetype AS prev_st, endpoint AS prev_endpoint, api_key AS prev_key
+| eval provider=replace(lower("$tok_cfg_provider$"), "[^a-z]", "")
+| eval provider=if(provider="openai" OR provider="cisco" OR provider="azure" OR provider="anthropic" OR provider="custom", provider, "none")
+| eval model=replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")
+| eval model=if(model="" OR isnull(model), "none", model)
+| eval api_key=replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")
+| eval api_key=if(api_key="" OR isnull(api_key) OR api_key="none", coalesce(prev_key, "none"), api_key)
+| eval api_key=if(provider="none", "none", api_key)
+| where save=want
+| eval mode=if(provider="none", "off", "provider")
+| lookup dq_agent_ai_providers provider OUTPUT default_endpoint
+| eval endpoint=coalesce(default_endpoint, prev_endpoint, "none")
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
+| eval inbox_index=coalesce(prev_inbox, "main")
+| eval inbox_sourcetype=coalesce(prev_st, "derek_health_ai")
+| eval updated_by="human_dashboard", updated_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="ui_config"
+| table _key, stanza, mode, provider, model, endpoint, api_key, inbox_index, inbox_sourcetype, updated_by, updated_at, note
+| appendpipe [
+    | inputlookup append=true dq_agent_ai_config
+    | stats latest(mode) as mode, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(api_key) as api_key, latest(inbox_index) as inbox_index, latest(inbox_sourcetype) as inbox_sourcetype, latest(updated_by) as updated_by, latest(updated_at) as updated_at, latest(note) as note by stanza
+    | eval _key=stanza
+    | outputlookup dq_agent_ai_config
+]
+| where stanza="default"
+| eval key_state=if(api_key!="none" AND api_key!="", "SET", "MISSING")
+| eval _color_rank=3
+| table updated_at, provider, model, key_state, mode, _color_rank
+"""
+
+# After SAVE, sends one short ping straight to the provider with the derekaiping
+# command (Python, runs on the search head) and records PASS/FAIL in dq_agent_ai_requests.
+Q_DQ_AI_CONN_WRITE = r"""
+| makeresults
+| eval save="$tok_cfg_save$"
+| eval want="save|".replace(lower("$tok_cfg_provider$"), "[^a-z]", "")."|".replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")."|".tostring(len(replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")))
+| eval stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT api_key AS prev_key, endpoint AS prev_endpoint
+| eval provider=replace(lower("$tok_cfg_provider$"), "[^a-z]", "")
+| eval provider=if(provider="openai" OR provider="cisco" OR provider="azure" OR provider="anthropic" OR provider="custom", provider, "none")
+| eval model=replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")
+| eval model=if(model="" OR isnull(model), "none", model)
+| eval api_key=replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")
+| eval api_key=if(api_key="" OR isnull(api_key) OR api_key="none", coalesce(prev_key, "none"), api_key)
+| eval api_key=if(provider="none", "none", api_key)
+| lookup dq_agent_ai_providers provider OUTPUT default_endpoint
+| eval endpoint=coalesce(default_endpoint, prev_endpoint, "none")
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none" AND len(api_key)>=8, 1, 0)
+| eval model_ok=if(model!="none" AND model!="", 1, 0)
+| eval endpoint_ok=if(match(lower(coalesce(endpoint, "")), "^https://[a-z0-9]"), 1, 0)
+| where save=want AND provider!="none" AND key_ok=1 AND model_ok=1 AND endpoint_ok=1
+| eval finding_id="connection_test", entity="ai_setup", issue="connection_test", actor="human_dashboard"
+| eval requested_at=strftime(now(), "%Y-%m-%d %H:%M:%S")
+| eval ai_brief="Connection test. Reply with the single word PONG."
+| eval is_ping=1
+| derekaiping
+| eval status=if(ai_result="replied", "replied", "failed")
+| eval note=if(ai_result="replied", "connection_test ok", "connection_test failed: ".coalesce(ai_error, "no reply"))
+| eval reply=if(ai_result="replied", ai_reply, "none")
+| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply
+| appendpipe [
+    | inputlookup append=true dq_agent_ai_requests
+    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id
+    | outputlookup dq_agent_ai_requests
+]
+| where finding_id="connection_test"
+| eval _color_rank=if(status="replied", 3, 1)
+| table requested_at, finding_id, provider, status, _color_rank
+"""
+
+Q_DQ_AI_CONN_TEST = Q_DQ_AI_CFG_ROW + r"""
+| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes
+| eval endpoint=if(endpoint="none" OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
+| eval key_state=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", "SET", "MISSING")
+| eval model_ok=if(isnotnull(model) AND model!="" AND model!="none", 1, 0)
+| eval endpoint_ok=if(isnotnull(endpoint) AND endpoint!="" AND endpoint!="none", 1, 0)
+| eval endpoint_https=if(match(lower(coalesce(endpoint, "")), "^https://[a-z0-9]"), 1, 0)
+| eval key_shape=if(key_state="SET" AND len(api_key)>=8, "ok", "bad")
+| eval setup_reason=case(
+    mode!="provider" OR provider="none" OR provider="", "Local only. No provider is saved.",
+    key_state!="SET", "Setup incomplete: API key is missing. Enter a key and click SAVE.",
+    model_ok=0, "Setup incomplete: model is missing. Enter a model id and click SAVE.",
+    endpoint_ok=0, "Setup incomplete: ".coalesce(provider_label, provider)." has no endpoint. Set default_endpoint in the provider catalog, then SAVE again.",
+    1=1, "Ready. Provider ".coalesce(provider_label, provider).", model ".model.", key SET.")
+| eval ai_status=case(
+    mode!="provider" OR provider="none" OR provider="", "LOCAL",
+    key_state="SET" AND model_ok=1 AND endpoint_ok=1, "READY",
+    1=1, "FAILED")
+| fields - api_key
+| eval finding_id="connection_test"
+| lookup dq_agent_ai_requests finding_id OUTPUT status AS ping_status, requested_at AS ping_at, note AS ping_note, provider AS ping_provider
+| eval ping_match=if(coalesce(ping_provider, "") = provider, 1, 0)
+| eval conn_status=case(
+    ai_status="LOCAL", "SKIP",
+    ai_status="FAILED", "FAIL",
+    key_shape!="ok", "FAIL",
+    endpoint_https!=1, "FAIL",
+    ping_match=1 AND ping_status="replied", "PASS",
+    ping_match=1 AND (ping_status="failed" OR ping_status="error"), "FAIL",
+    1=1, "TESTING")
+| eval conn_reason=case(
+    conn_status="SKIP", "No provider is set. Connection test was not run.",
+    ai_status="FAILED", setup_reason,
+    key_shape!="ok", "Connection test failed: API key is missing or too short. Enter a key and click SAVE.",
+    endpoint_https!=1, "Connection test failed: endpoint is not HTTPS. Set default_endpoint to an https URL in the provider catalog, then SAVE.",
+    conn_status="PASS" AND provider="anthropic", "Connection test passed at ".ping_at.". Anthropic Messages API (https://api.anthropic.com/v1/messages) replied from this search head.",
+    conn_status="PASS", "Connection test passed at ".ping_at.". ".coalesce(provider_label, provider)." replied from this search head.",
+    conn_status="FAIL", coalesce(ping_note, "Connection test failed.")." Fix it, then click SAVE to test again.",
+    1=1, "No connection test has run for this provider yet. Click SAVE to test.")
+| eval tile_status=case(conn_status="SKIP", "LOCAL", conn_status="FAIL", "FAILED", 1=1, conn_status)
+| eval status_color=ai_status
+| eval _color_rank=case(conn_status="FAIL" OR ai_status="FAILED", 1, conn_status="TESTING", 2, 1=1, 3)
+| table setup_reason, ai_status, conn_status, conn_reason, tile_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank
 """
 
 Q_DQ_AI_QUEUE = r"""
@@ -1545,27 +2010,58 @@ Q_DQ_AI_QUEUE = r"""
 | sort 0 -requested_at
 """
 
-Q_DQ_AI_REPLIES = r"""
-search [| inputlookup dq_agent_ai_config | where stanza="default" | head 1 | eval inbox_index=replace(coalesce(inbox_index, "_internal"), "[^A-Za-z0-9_]", "") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, "derek_health_ai_unconfigured"), "[^A-Za-z0-9_]", "") | eval search="index=".inbox_index." sourcetype=".inbox_sourcetype | return $search]
-| eval fid="$tok_finding_id$"
-| where fid!="none" AND fid!="" AND (finding_id=fid OR match(coalesce(_raw, ""), fid))
-| eval reply=coalesce(reply, ai_reply, _raw)
-| sort 0 -_time
-| head 10
-| table _time, provider, model, finding_id, reply
+Q_DQ_AI_ASK_STATUS = r"""
+| makeresults
+| eval finding_id="$tok_finding_id$", ask="$tok_ai_ask$", stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, api_key, endpoint, updated_at
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
+| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
+| eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
+| eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
+| eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
+| eval configured=if(mode="provider" AND provider!="none" AND provider!="" AND key_ok=1 AND isnotnull(model) AND model!="none" AND model!="", 1, 0)
+| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider AS req_provider, note AS req_note
+| eval wait_sec=now()-strptime(coalesce(tostring(requested_at), ""), "%Y-%m-%d %H:%M:%S")
+| eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())
+| eval ask_state=case(
+    picked=0, "IDLE",
+    mode!="provider", "IDLE",
+    match(ask, "^(ask|retry)") AND configured=0, "FAILED",
+    req_status="failed" OR req_status="error", "FAILED",
+    req_status="done" OR req_status="replied", "REPLIED",
+    req_status="pending" AND wait_min>=15, "STALLED",
+    req_status="pending", "WAITING",
+    match(ask, "^(ask|retry)") AND configured=1 AND (isnull(req_status) OR req_status="" OR req_status="none"), "WAITING",
+    1=1, "IDLE")
+| eval ask_message=case(
+    ask_state="IDLE" AND picked=0, "Select a row in the work queue. The AI suggested fix fills in automatically.",
+    ask_state="IDLE" AND mode!="provider", "AI provider is off, so the playbook fix above is the suggestion. Open AI provider setup and SAVE a provider to get an AI suggested fix automatically.",
+    ask_state="IDLE", "No AI request yet for this suggestion.",
+    ask_state="FAILED" AND configured=0, "ASK failed: AI provider is not ready. Open AI provider setup and SAVE provider, model, and key.",
+    ask_state="FAILED", "ASK failed: ".coalesce(req_note, "the provider returned an error."),
+    ask_state="WAITING", "Asking ".coalesce(req_provider, provider, "the provider")+" for a suggested fix...",
+    ask_state="STALLED", "Still waiting after ".tostring(wait_min)." minutes. Click ASK AGAIN.",
+    ask_state="REPLIED", "Provider replied. See the replies table below.",
+    1=1, "ASK status unknown.")
+| eval _color_rank=case(ask_state="FAILED" OR ask_state="STALLED", 1, ask_state="WAITING", 2, ask_state="REPLIED", 3, 1=1, 3)
+| table ask_state, ask_message, _color_rank
 """
 
-Q_DQ_AI_DISPATCH = r"""
-| inputlookup dq_agent_ai_requests
-| where status="pending" AND provider!="none" AND provider!=""
-| eval stanza="default"
-| lookup dq_agent_ai_config stanza OUTPUT mode AS cfg_mode, updated_at AS cfg_updated
-| eval used_ui=if(cfg_updated="0" OR isnull(cfg_updated), 0, 1)
-| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(cfg_mode, "off"))
-| where mode="provider"
-| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint
-| eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
-| table requested_at, finding_id, entity, issue, provider, provider_label, model, endpoint, ai_brief, status, actor, note
+Q_DQ_AI_REPLIES = r"""
+| makeresults
+| eval _gate="$tok_ai_ask$", finding_id="$tok_finding_id$"
+| eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
+| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider, model, reply, note AS req_note
+| eval ai_suggested_fix=case(
+    picked=0, "Select a row in the work queue. The AI suggested fix fills in here automatically.",
+    req_status="replied", reply,
+    req_status="failed", "The AI could not answer: ".coalesce(req_note, "provider error").". Use the playbook fix above or click ASK AGAIN.",
+    1=1, "Asking the AI provider for a suggested fix... If no provider is set, use the playbook fix above.")
+| eval from_ai=if(req_status="replied", provider." / ".model, "none")
+| eval _color_rank=case(req_status="replied", 3, req_status="failed", 1, 1=1, 2)
+| table ai_suggested_fix, from_ai, requested_at, _color_rank
 """
 
 
@@ -1585,8 +2081,8 @@ def data_quality_agent() -> dict:
                     {"token": "tok_entity", "key": "row.entity.value"},
                     {"token": "tok_issue", "key": "row.issue.value"},
                     {"token": "tok_ai_brief", "key": "row._ai_brief.value"},
-                    {"token": "tok_commit", "key": "row._reset.value"},
                     {"token": "tok_decision", "key": "row._reset_decision.value"},
+                    {"token": "tok_ai_ask", "key": "row._ai_auto.value"},
                 ]
             },
         }
@@ -1594,11 +2090,12 @@ def data_quality_agent() -> dict:
     findings_table["options"]["headerVisibility"] = "fixed"
     findings_table["options"]["columnFormat"] = {
         "severity": {"width": 90, "align": "center"},
-        "issue": {"width": 250},
-        "entity": {"width": 150},
-        "fix": {"width": 380},
-        "confidence": {"width": 90, "align": "center"},
-        "action": {"width": 120, "align": "center"},
+        "issue": {"width": 220},
+        "entity": {"width": 140},
+        "fix": {"width": 320},
+        "confidence": {"width": 80, "align": "center"},
+        "action": {"width": 90, "align": "center"},
+        "status": {"width": 90, "align": "center"},
         "finding_id": {"width": 80},
     }
     suggestion_table = table(
@@ -1608,12 +2105,25 @@ def data_quality_agent() -> dict:
     )
     suggestion_table.pop("eventHandlers", None)
     suggestion_table["showLastUpdated"] = False
-    recorded_table = table("Recorded decision", "ds_dq_save", count=3)
+    recorded_table = table("Recorded decision", "ds_dq_recorded", count=3)
     recorded_table.pop("eventHandlers", None)
     recorded_table["showLastUpdated"] = False
+    brief_table = table("Optional — briefing to paste into Splunk AI Assistant", "ds_dq_brief", count=1)
+    brief_table.pop("eventHandlers", None)
+    replies_table = table("3. AI suggested fix — fills in when you select a row", "ds_dq_ai_replies", count=1)
+    replies_table.pop("eventHandlers", None)
+    replies_table["showLastUpdated"] = False
+    replies_table["options"]["columnFormat"] = {
+        "ai_suggested_fix": {"width": 800},
+        "from_ai": {"width": 160},
+        "requested_at": {"width": 140},
+    }
+    ask_msg_table = table("ASK result — waiting or failed", "ds_dq_ai_ask_status", count=1)
+    ask_msg_table.pop("eventHandlers", None)
+    ask_msg_table["showLastUpdated"] = False
     return {
         "title": "Derek+ Data Quality Agent",
-        "description": "Click Select, then APPROVE or DISMISS, then SAVE. Search does not open.",
+        "description": "Click Select, then click APPROVE or DISMISS. That records the decision. Search does not open.",
         "defaults": defaults(),
         "inputs": {
             "input_global_trp": timerange("-24h@h,now"),
@@ -1632,22 +2142,32 @@ def data_quality_agent() -> dict:
                 "title": "Decision latch (set by APPROVE or DISMISS)",
                 "options": {"token": "tok_decision", "defaultValue": "review"},
             },
-            "input_commit": {
+            "input_ai_ask": {
                 "type": "input.text",
-                "title": "Save latch (set by the SAVE tile)",
-                "options": {"token": "tok_commit", "defaultValue": "WAIT"},
+                "title": "Ask latch (set by ASK)",
+                "options": {"token": "tok_ai_ask", "defaultValue": "review"},
             },
-            "input_ai_confirm": {
+            "input_entity": {
                 "type": "input.text",
-                "title": "Optional: type ASK for a second opinion",
-                "options": {"token": "tok_ai_confirm", "defaultValue": "NO"},
+                "title": "Selected entity",
+                "options": {"token": "tok_entity", "defaultValue": "none"},
+            },
+            "input_issue": {
+                "type": "input.text",
+                "title": "Selected issue",
+                "options": {"token": "tok_issue", "defaultValue": "none"},
+            },
+            "input_ai_brief": {
+                "type": "input.text",
+                "title": "Selected briefing",
+                "options": {"token": "tok_ai_brief", "defaultValue": "none"},
             },
         },
         "dataSources": {
-            "ds_dq_findings": ds("Agent cycle findings", Q_DQ_AGENT_FINDINGS, "-24h", "now"),
+            "ds_dq_findings": ds("Agent cycle findings", Q_DQ_AGENT_FINDINGS, "-24h", "now", refresh=None),
             "ds_dq_asked": chain("Asked findings", "ds_dq_findings", Q_DQ_AGENT_ASK),
             "ds_dq_queue": chain("Work queue", "ds_dq_asked", Q_DQ_QUEUE_VIEW),
-            "ds_dq_status": chain("Agent status", "ds_dq_findings", Q_DQ_AGENT_STATUS),
+            "ds_dq_status": chain("Agent status", "ds_dq_asked", Q_DQ_AGENT_STATUS),
             "ds_dq_selected": chain("Selected suggestion", "ds_dq_asked", Q_DQ_SUGGESTION),
             "ds_dq_brief": chain(
                 "AI briefing",
@@ -1657,26 +2177,28 @@ def data_quality_agent() -> dict:
 | table ai_brief
 """.strip(),
             ),
-            "ds_dq_approve": ds("Approve control", Q_DQ_CHOOSE_APPROVE, "0", "now", refresh="30s"),
-            "ds_dq_dismiss": ds("Dismiss control", Q_DQ_CHOOSE_DISMISS, "0", "now", refresh="30s"),
-            "ds_dq_ready": ds("Implement control", Q_DQ_IMPLEMENT_READY, "0", "now", refresh="30s"),
-            "ds_dq_save": ds("Save decision", Q_DQ_SAVE_DECISION, "0", "now", refresh="5m"),
-            "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_STATUS, "0", "now", refresh="30s"),
-            "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_READY, "0", "now", refresh="30s"),
-            "ds_dq_ai_replies": ds("AI provider replies", Q_DQ_AI_REPLIES, "-24h", "now", refresh="30s"),
+            "ds_dq_approve": ds("Approve control", Q_DQ_CHOOSE_APPROVE, "0", "now", refresh=None),
+            "ds_dq_dismiss": ds("Dismiss control", Q_DQ_CHOOSE_DISMISS, "0", "now", refresh=None),
+            "ds_dq_save": ds("Write agent decision", Q_DQ_SAVE_DECISION, "0", "now", refresh=None),
+            "ds_dq_recorded": chain("Recorded decision", "ds_dq_save", "| where 1=0\n| append [\n" + Q_DQ_RECORDED_READ.strip() + "\n]"),
+            "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_CONN_TEST, "0", "now", refresh=None),
+            "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_BUTTON, "0", "now", refresh=None),
+            "ds_dq_ai_write": ds("Write ASK request", Q_DQ_AI_ASK_WRITE, "0", "now", refresh=None),
+            "ds_dq_ai_ask_status": chain("ASK wait or fail", "ds_dq_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_ASK_STATUS.strip() + "\n]"),
+            "ds_dq_ai_replies": chain("AI suggested fix", "ds_dq_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_REPLIES.strip() + "\n]"),
         },
         "visualizations": {
             "viz_header": md(
                 "# Derek+ Data Quality Agent\n"
-                "**1. Click Select** on a row. "
-                "**2. Read** the suggested fix. "
-                "**3. Click APPROVE or DISMISS**, then click **SAVE**. "
+                "**1. Click Select** on a row. The AI asks your saved provider for a suggested fix automatically. "
+                "**2. Read** the playbook fix and the AI suggested fix. "
+                "**3. Click APPROVE or DISMISS** to record the decision. "
                 "Search does not open. The agent never changes Splunk by itself."
             ),
             "viz_status": single_status("Queue health", "ds_dq_status", "agent_status", "issues"),
             "viz_count": single_number("Open suggestions", "ds_dq_status", "issues", "", spark=None, precision=0),
             "viz_ai_status": {
-                **single_status("AI provider (click to set up)", "ds_dq_ai_status", "ai_status", "status_color"),
+                **single_status("AI setup (click to open)", "ds_dq_ai_status", "tile_status", "tile_status"),
                 "eventHandlers": [
                     {
                         "type": "drilldown.linkToDashboard",
@@ -1690,84 +2212,44 @@ def data_quality_agent() -> dict:
             },
             "viz_findings": findings_table,
             "viz_selected": suggestion_table,
-            "viz_approve": click_tile("3. Approve this suggestion", "ds_dq_approve", "tok_decision"),
-            "viz_dismiss": click_tile("Or dismiss — not a real issue", "ds_dq_dismiss", "tok_decision"),
-            "viz_implement": {
+            "viz_approve": decision_button("", "ds_dq_approve", fill=GREEN),
+            "viz_dismiss": decision_button("", "ds_dq_dismiss", fill=RED),
+            "viz_recorded": recorded_table,
+            "viz_write": {
                 "type": "splunk.singlevalue",
-                "title": "3. Save decision — click SAVE",
-                "dataSources": {"primary": "ds_dq_ready"},
+                "title": "",
+                "dataSources": {"primary": "ds_dq_save"},
+                "hideWhenNoData": True,
                 "showLastUpdated": False,
                 "showProgressBar": False,
                 "options": {
-                    "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-                    "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+                    "majorValue": "> primary | seriesByName(\"decision\") | lastPoint()",
                     "backgroundColor": "transparent",
-                    "majorFontSize": 36,
-                    "underLabel": "Click APPROVE or DISMISS first. Search does not open.",
-                    "underLabelFontSize": 14,
+                    "majorFontSize": 14,
                 },
-                "context": {"statusColors": STATUS_COLORS},
-                "eventHandlers": [
-                    {
-                        "type": "drilldown.setToken",
-                        "options": {
-                            "tokens": [
-                                {"token": "tok_commit", "key": "row.click_action.value"},
-                            ]
-                        },
-                    }
-                ],
             },
-            "viz_recorded": recorded_table,
-            "viz_brief": table("Optional — briefing to paste into Splunk AI Assistant", "ds_dq_brief", count=1),
-            "viz_ai_ask": {
+            "viz_brief": brief_table,
+            "viz_ai_ask": decision_button("", "ds_dq_ai_ready", token="tok_ai_ask", fill="#7B56DB"),
+            "viz_ai_ask_state": single_status("ASK status", "ds_dq_ai_ask_status", "ask_state", "ask_state"),
+            "viz_ai_ask_msg": ask_msg_table,
+            "viz_ai_write": {
                 "type": "splunk.singlevalue",
-                "title": "Optional — send briefing to your configured provider",
-                "dataSources": {"primary": "ds_dq_ai_ready"},
-                "showLastUpdated": True,
+                "title": "",
+                "dataSources": {"primary": "ds_dq_ai_write"},
+                "hideWhenNoData": True,
+                "showLastUpdated": False,
                 "showProgressBar": False,
                 "options": {
-                    "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-                    "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+                    "majorValue": "> primary | seriesByName(\"status\") | lastPoint()",
                     "backgroundColor": "transparent",
-                    "majorFontSize": 16,
+                    "majorFontSize": 14,
                 },
-                "context": {"statusColors": STATUS_COLORS},
-                "eventHandlers": [
-                    {
-                        "type": "drilldown.linkToSearch",
-                        "options": {
-                            "type": "custom",
-                            "newTab": True,
-                            "query": (
-                                "| inputlookup dq_agent_ai_requests "
-                                "| append [ "
-                                "| makeresults "
-                                "| eval finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", "
-                                "issue=\"$tok_issue$\", confirm=\"$tok_ai_confirm$\", "
-                                "ai_brief=\"$tok_ai_brief$\", stanza=\"default\" "
-                                "| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, updated_at "
-                                "| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1) "
-                                "| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\")) "
-                                "| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\")) "
-                                "| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\")) "
-                                "| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\")) "
-                                "| where confirm=\"ASK\" AND finding_id!=\"none\" AND finding_id!=\"\" "
-                                "AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" "
-                                "| eval status=\"pending\", actor=\"human_dashboard\", "
-                                "requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ask_ai_provider\" "
-                                "| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief "
-                                "] "
-                                "| outputlookup dq_agent_ai_requests"
-                            ),
-                        },
-                    }
-                ],
             },
-            "viz_ai_replies": table("Provider replies for this suggestion", "ds_dq_ai_replies", count=5),
+            "viz_ai_replies": replies_table,
             "viz_footer": md(
-                "Approve/Dismiss only records a decision. UF, HEC, and index repairs stay runbooks. "
-                "API keys stay on **Configure → AI provider** / your gateway — never in this queue."
+                "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. "
+                "Selecting a row asks the saved provider automatically; **ASK AGAIN** retries. Search does not open. "
+                "The API key stays in the AI provider lookup — never in this queue table."
             ),
         },
         "layout": grid(
@@ -1778,49 +2260,62 @@ def data_quality_agent() -> dict:
                 block("viz_ai_status", 800, 90, 400, 130),
                 block("viz_findings", 0, 220, 1200, 300),
                 block("viz_selected", 0, 520, 1200, 220),
-                block("viz_approve", 0, 740, 400, 150),
-                block("viz_dismiss", 400, 740, 400, 150),
-                block("viz_implement", 800, 740, 400, 150),
-                block("viz_recorded", 0, 890, 1200, 120),
-                block("viz_brief", 0, 1010, 800, 150),
-                block("viz_ai_ask", 800, 1010, 400, 150),
-                block("viz_ai_replies", 0, 1160, 1200, 150),
-                block("viz_footer", 0, 1310, 1200, 80),
+                block("viz_ai_replies", 0, 740, 1200, 170),
+                block("viz_ai_ask_state", 0, 910, 280, 130),
+                block("viz_ai_ask_msg", 280, 910, 920, 130),
+                block("viz_approve", 0, 1040, 400, 90),
+                block("viz_dismiss", 400, 1040, 400, 90),
+                block("viz_ai_ask", 800, 1040, 400, 90),
+                block("viz_recorded", 0, 1130, 1200, 130),
+                block("viz_brief", 0, 1260, 1200, 130),
+                block("viz_footer", 0, 1390, 1200, 80),
+                block("viz_write", 0, 1470, 1200, 40),
+                block("viz_ai_write", 0, 1510, 1200, 40),
             ],
             extra_inputs=[
                 "input_ask",
-                "input_ai_confirm",
             ],
         ),
     }
 
 
 def ai_provider_setup() -> dict:
+    saved_table = table("Saved settings (key is stored, not displayed)", "ds_ai_saved", count=5)
+    saved_table.pop("eventHandlers", None)
+    reason_table = table("Why this status", "ds_ai_reason", count=1)
+    reason_table.pop("eventHandlers", None)
+    reason_table["showLastUpdated"] = False
+    conn_reason_table = table("Connection test", "ds_ai_conn_reason", count=1)
+    conn_reason_table.pop("eventHandlers", None)
+    conn_reason_table["showLastUpdated"] = False
+    providers_table = table("Supported providers", "ds_ai_providers", count=10)
+    providers_table.pop("eventHandlers", None)
+    write_viz = {
+        "type": "splunk.singlevalue",
+        "title": "",
+        "dataSources": {"primary": "ds_ai_write"},
+        "hideWhenNoData": True,
+        "showLastUpdated": False,
+        "showProgressBar": False,
+        "options": {
+            "majorValue": "> primary | seriesByName(\"key_state\") | lastPoint()",
+            "backgroundColor": "transparent",
+            "majorFontSize": 14,
+        },
+    }
     return {
         "title": "AI provider setup",
-        "description": "Configure optional OpenAI, Cisco, Azure, or custom model integration. No API keys on this page.",
+        "description": "Set provider, model, and key, then click SAVE. Search does not open.",
         "defaults": {},
         "inputs": {
-            "input_cfg_mode": {
-                "type": "input.dropdown",
-                "title": "AI mode",
-                "options": {
-                    "token": "tok_cfg_mode",
-                    "defaultValue": "off",
-                    "items": [
-                        {"label": "Off — local briefing only", "value": "off"},
-                        {"label": "Provider — queue ASK to your gateway", "value": "provider"},
-                    ],
-                },
-            },
             "input_cfg_provider": {
                 "type": "input.dropdown",
-                "title": "Provider",
+                "title": "AI provider",
                 "options": {
                     "token": "tok_cfg_provider",
                     "defaultValue": "none",
                     "items": [
-                        {"label": "None", "value": "none"},
+                        {"label": "None — local briefing only", "value": "none"},
                         {"label": "OpenAI", "value": "openai"},
                         {"label": "Cisco AI Defense", "value": "cisco"},
                         {"label": "Azure OpenAI", "value": "azure"},
@@ -1830,142 +2325,129 @@ def ai_provider_setup() -> dict:
                 },
             },
             "input_cfg_model": {
-                "type": "input.text",
-                "title": "Model id (example gpt-4o-mini)",
-                "options": {"token": "tok_cfg_model", "defaultValue": "none"},
+                "type": "input.dropdown",
+                "title": "Model",
+                "options": {
+                    "token": "tok_cfg_model",
+                    "defaultValue": "none",
+                    "selectFirstSearchResult": True,
+                    "items": model_dropdown_items(),
+                },
+                "dataSources": {"primary": "ds_ai_models"},
             },
-            "input_cfg_endpoint": {
+            "input_cfg_key": {
                 "type": "input.text",
-                "title": "Chat endpoint URL (none = provider default)",
-                "options": {"token": "tok_cfg_endpoint", "defaultValue": "none"},
-            },
-            "input_cfg_inbox_index": {
-                "type": "input.text",
-                "title": "HEC reply index",
-                "options": {"token": "tok_cfg_inbox_index", "defaultValue": "main"},
-            },
-            "input_cfg_inbox_sourcetype": {
-                "type": "input.text",
-                "title": "HEC reply sourcetype",
-                "options": {"token": "tok_cfg_inbox_sourcetype", "defaultValue": "derek_health_ai"},
+                "title": "API key",
+                "options": {"token": "tok_cfg_key", "defaultValue": ""},
             },
             "input_cfg_save": {
                 "type": "input.text",
-                "title": "Type SAVE to write these settings",
-                "options": {"token": "tok_cfg_save", "defaultValue": "NO"},
+                "title": "Save latch (set by SAVE)",
+                "options": {"token": "tok_cfg_save", "defaultValue": "review"},
             },
         },
         "dataSources": {
-            "ds_ai_current": ds("Saved AI config", Q_DQ_AI_STATUS, "0", "now", refresh="30s"),
+            "ds_ai_current": chain(
+                "Saved AI config",
+                "ds_ai_conn_write",
+                "| where 1=0\n| append [\n" + Q_DQ_AI_CONN_TEST.strip() + '\n| eval _gate="$tok_cfg_save$"\n]',
+            ),
+            "ds_ai_reason": chain(
+                "Setup reason",
+                "ds_ai_current",
+                "| table setup_reason, ai_status, _color_rank",
+            ),
+            "ds_ai_conn_reason": chain(
+                "Connection test reason",
+                "ds_ai_current",
+                "| table conn_reason, conn_status, _color_rank",
+            ),
+            "ds_ai_saved": chain(
+                "Saved settings view",
+                "ds_ai_current",
+                "| table mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
+            ),
             "ds_ai_providers": ds(
                 "Provider catalog",
                 "| inputlookup dq_agent_ai_providers | eval _color_rank=3 | table provider, provider_label, default_endpoint, notes, _color_rank",
                 "0",
                 "now",
-                refresh="5m",
+                refresh=None,
             ),
-            "ds_ai_save": ds("Save control", Q_DQ_AI_SAVE_READY, "0", "now", refresh="30s"),
+            "ds_ai_models": ds("Models for selected provider", Q_DQ_AI_MODELS, "0", "now", refresh=None),
+            "ds_ai_save": ds("Save control", Q_DQ_AI_SAVE_BUTTON, "0", "now", refresh=None),
+            "ds_ai_write": ds("Write AI config", Q_DQ_AI_SAVE_CONFIG, "0", "now", refresh=None),
+            "ds_ai_conn_write": chain("Connection test", "ds_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_CONN_WRITE.strip() + "\n]"),
         },
         "visualizations": {
             "viz_header": md(
                 "# AI provider setup\n"
-                "Choose how Derek+ talks to a model. This page stores **mode, provider, model, endpoint, and HEC inbox** only. "
-                "**Never type API keys, HEC tokens, or webhook URLs here** — they are searchable. "
-                "Put secrets in your gateway environment or Splunk **storage/passwords**."
+                "Pick an **AI provider**, then a **model** from the dropdown, enter the **API key**, and click **SAVE**. "
+                "That writes provider config to KV Store on this search head (`dq_agent_ai_config`) and runs a **connection test**. Search does not open. "
+                "The key is never shown after save and **survives app updates**. Leave key blank to keep the value already stored."
             ),
-            "viz_status": single_status("Current mode", "ds_ai_current", "ai_status", "status_color"),
+            "viz_status": single_status("Setup status", "ds_ai_current", "ai_status", "status_color"),
+            "viz_conn": single_status("Connection test", "ds_ai_current", "conn_status", "conn_status"),
+            "viz_reason": reason_table,
+            "viz_conn_reason": conn_reason_table,
             "viz_steps": md(
-                "## After you save\n"
-                "1. Enable **Exec Health - AI provider dispatch**.\n"
-                "2. On that search, add a **webhook** in Splunk Web to your gateway (OpenAI, Cisco AI Defense, Azure, or `tools/ai_gateway_example.py`).\n"
-                "3. Point the gateway at this HEC index/sourcetype.\n"
-                "4. Open **Derek+ Data Quality Agent**, review a finding, type **ASK**, press **Run**.\n"
-                "Cisco endpoint looks like `https://gateway.aidefense.security.cisco.com/<tenant>/connections/<conn>/v1/chat/completions`."
+                "## After a READY save\n"
+                "SAVE sends one short ping **straight from this search head** to the provider with the `derekaiping` command. "
+                "**Anthropic** goes to `https://api.anthropic.com/v1/messages` with a Claude model. No gateway or webhook. "
+                "**PASS** means the provider replied. **FAIL** has the provider's reason in **Connection test** (for example HTTP 401 means the key was rejected).\n"
+                "1. Pick the provider and model, enter the key, click **SAVE**.\n"
+                "2. Splunk Cloud must allow outbound HTTPS from the search head to the provider host. If the reason says it cannot reach the provider, ask Splunk Support to allow it.\n"
+                "3. Open **Derek+ Data Quality Agent**, review a finding, click **ASK**.\n"
+                "**FAILED** setup means provider, model, key, or endpoint is missing. "
+                "Pick **None** and SAVE to turn the provider off."
             ),
-            "viz_current": table("Saved integration settings (no secrets)", "ds_ai_current", count=5),
-            "viz_providers": table("Supported providers", "ds_ai_providers", count=10),
-            "viz_save": {
+            "viz_current": saved_table,
+            "viz_providers": providers_table,
+            "viz_save": decision_button("", "ds_ai_save", token="tok_cfg_save", fill=GREEN),
+            "viz_write": write_viz,
+            "viz_conn_write": {
                 "type": "splunk.singlevalue",
-                "title": "Save (opens Search; you must press Run)",
-                "dataSources": {"primary": "ds_ai_save"},
-                "showLastUpdated": True,
+                "title": "",
+                "dataSources": {"primary": "ds_ai_conn_write"},
+                "hideWhenNoData": True,
+                "showLastUpdated": False,
                 "showProgressBar": False,
                 "options": {
-                    "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-                    "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+                    "majorValue": "> primary | seriesByName(\"status\") | lastPoint()",
                     "backgroundColor": "transparent",
-                    "majorFontSize": 22,
+                    "majorFontSize": 14,
                 },
-                "context": {"statusColors": STATUS_COLORS},
-                "eventHandlers": [
-                    {
-                        "type": "drilldown.linkToSearch",
-                        "options": {
-                            "type": "custom",
-                            "newTab": True,
-                            "query": (
-                                "| inputlookup dq_agent_ai_config "
-                                "| eval src=1 "
-                                "| append [ "
-                                "| makeresults "
-                                "| eval confirm=\"$tok_cfg_save$\" "
-                                "| eval mode=lower(\"$tok_cfg_mode$\") "
-                                "| eval mode=if(mode=\"provider\", \"provider\", \"off\") "
-                                "| eval provider=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\") "
-                                "| eval provider=if(provider=\"openai\" OR provider=\"cisco\" OR provider=\"azure\" OR provider=\"anthropic\" OR provider=\"custom\", provider, \"none\") "
-                                "| eval model=replace(lower(\"$tok_cfg_model$\"), \"[^a-z0-9._-]\", \"\") "
-                                "| eval model=if(model=\"\" OR isnull(model), \"none\", model) "
-                                "| eval endpoint=replace(\"$tok_cfg_endpoint$\", \"[^-A-Za-z0-9:/.?&=]\", \"\") "
-                                "| eval endpoint=if(endpoint=\"\" OR isnull(endpoint), \"none\", endpoint) "
-                                "| eval inbox_index=replace(\"$tok_cfg_inbox_index$\", \"[^A-Za-z0-9_]\", \"\") "
-                                "| eval inbox_index=if(inbox_index=\"\" OR isnull(inbox_index), \"_internal\", inbox_index) "
-                                "| eval inbox_sourcetype=replace(\"$tok_cfg_inbox_sourcetype$\", \"[^A-Za-z0-9_]\", \"\") "
-                                "| eval inbox_sourcetype=if(inbox_sourcetype=\"\" OR isnull(inbox_sourcetype), \"derek_health_ai_unconfigured\", inbox_sourcetype) "
-                                "| where confirm=\"SAVE\" AND (mode=\"off\" OR (mode=\"provider\" AND provider!=\"none\")) "
-                                "| eval stanza=\"default\", src=2, updated_by=\"human_dashboard\", "
-                                "updated_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ui_config\" "
-                                "| table stanza, mode, provider, model, endpoint, inbox_index, inbox_sourcetype, updated_by, updated_at, note, src "
-                                "] "
-                                "| sort stanza, -src "
-                                "| dedup stanza "
-                                "| fields - src "
-                                "| outputlookup dq_agent_ai_config"
-                            ),
-                        },
-                    }
-                ],
             },
             "viz_footer": md(
-                "Saving writes `lookups/dq_agent_ai_config.csv` on this search head. "
-                "It does not call a model and does not change `inputs.conf`. "
-                "Webhook URLs and API keys never belong in this lookup."
+                "SAVE stores the key in KV Store collection `dq_agent_ai_config` on this search head. "
+                "App updates do not overwrite it. The install package does not ship a live API key. "
+                "HEC token secrets and webhook URLs still do not belong in this app. The key is read only by the search that calls the provider."
             ),
         },
         "layout": grid(
             [
-                block("viz_header", 0, 0, 1200, 140),
-                block("viz_status", 0, 140, 300, 180),
-                block("viz_steps", 300, 140, 900, 180),
-                block("viz_current", 0, 320, 1200, 200),
-                block("viz_providers", 0, 520, 1200, 240),
-                block("viz_save", 0, 760, 400, 200),
-                block("viz_footer", 400, 760, 800, 200),
-            ],
-            extra_inputs=[
-                "input_cfg_mode",
-                "input_cfg_provider",
-                "input_cfg_model",
-                "input_cfg_endpoint",
-                "input_cfg_inbox_index",
-                "input_cfg_inbox_sourcetype",
-                "input_cfg_save",
+                block("viz_header", 0, 0, 1200, 90),
+                input_block("input_cfg_provider", 0, 90, 250, 95),
+                input_block("input_cfg_model", 250, 90, 250, 95),
+                input_block("input_cfg_key", 500, 90, 400, 95),
+                block("viz_save", 900, 90, 300, 95),
+                block("viz_status", 0, 185, 200, 140),
+                block("viz_conn", 200, 185, 200, 140),
+                block("viz_reason", 400, 185, 400, 140),
+                block("viz_conn_reason", 800, 185, 400, 140),
+                block("viz_steps", 0, 325, 1200, 150),
+                block("viz_current", 0, 475, 1200, 180),
+                block("viz_providers", 0, 655, 1200, 220),
+                block("viz_footer", 0, 875, 1200, 80),
+                block("viz_write", 0, 955, 1200, 40),
+                block("viz_conn_write", 0, 995, 1200, 40),
             ],
             include_time=False,
         ),
     }
 
 
-APP_VERSION = "1.7.5"
+APP_VERSION = "1.7.28"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2010,10 +2492,11 @@ def about() -> dict:
                 "- Search-head app only (`targetWorkloads: _search_heads` in `app.manifest`)\n"
                 "- No cluster-manager or search-head-cluster REST (those endpoints 403 on Cloud)\n"
                 "- Instance health from the `_internal` health report (PeriodicHealthReporter); search-head load from `_introspection`\n"
-                "- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n"
+                "- One Python search command, `bin/derekaiping.py` (standard library only), calls the AI provider directly from the search head. No modular inputs or indexes.conf. Splunk Cloud vetting may ask for review of the command\n"
                 "- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n"
                 "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n"
-                "- The Data Quality Agent records a decision only after a human clicks APPROVE or DISMISS, then SAVE (no Python LLM client, no API keys)\n\n"
+                "- The Data Quality Agent records a decision only after a human clicks APPROVE or DISMISS AI provider, model, and key are saved from the setup page to KV Store so the key survives app updates; SAVE also runs a direct connection test against the provider\n"
+                "- `commands.conf` marks `outputlookup` not-risky in this app so the approvals lookup can be written from the dashboard\n\n"
                 "Self-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** "
                 "(`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via "
                 "**Apps → Manage apps → Install app from file**."
@@ -2023,7 +2506,7 @@ def about() -> dict:
                 "This app does **not** store SMTP passwords, Slack webhooks, API tokens, LLM keys, HEC token secrets, "
                 "certificates, or other credentials. Map HEC token **names** only in `lookups/hec_token_map.csv`. "
                 "Playbooks, approvals, and AI request lookups hold runbook text only. "
-                "Optional AI providers are configured on **Configure → AI provider**. Keys and webhook URLs belong in Splunk Web or your gateway, never in this app."
+                "Optional AI providers are configured on **Configure → AI provider**. The API key is entered once on the setup page and stored in KV Store; it is never in the package."
             ),
         },
         "layout": grid(
@@ -2058,9 +2541,9 @@ def readme() -> dict:
                 "- **Host Heartbeat & Ingestion Latency** — last indexed data vs last `_internal` heartbeat; 24-hour 2σ volume baseline\n"
                 "- **HEC Token Performance** — events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n"
                 "- **SC4S Syslog & Edge/Ingest Processors** — syslog sources, Edge in vs out, filter efficiency\n"
-                "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index, and forwarder → indexer\n"
-                "- **Derek+ Data Quality Agent** — agentic loop over health tiles and learned ingest bounds; a human must APPROVE or DISMISS, then SAVE\n"
-                "- **AI provider setup** — Configure → AI provider: mode, model, endpoint, HEC inbox (no API keys)\n\n"
+                "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index; click a source for latest event, totals, 24h trend, and 2σ drop/burst outliers\n"
+                "- **Derek+ Data Quality Agent** — agentic loop over health tiles and learned ingest bounds; a human must APPROVE or DISMISS\n"
+                "- **AI provider setup** — Configure → AI provider: provider, model dropdown, and key, then SAVE (runs a connection test; key persists in KV Store across app updates)\n\n"
                 "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
             ),
             "viz_heartbeat": md(
@@ -2100,17 +2583,17 @@ def readme() -> dict:
             ),
             "viz_alerts": md(
                 "## Alerts\n"
-                "Saved searches ship **disabled** (`enableSched = 0`) with **no email action**.\n\n"
+                "Health alerts ship **disabled** (`enableSched = 0`) with **no email action**. "
+                "AI calls do not use an alert or a webhook. SAVE and ASK call the provider directly with the `derekaiping` command.\n\n"
                 "1. Confirm the searches return expected rows on your stack\n"
-                "2. **Settings → Searches, reports, and alerts** (this app) → enable\n"
+                "2. **Settings → Searches, reports, and alerts** (this app) → enable the health alerts you want\n"
                 "3. Attach email or Slack **in Splunk Web** — do not put webhook URLs or passwords in this app\n\n"
                 "Searches:\n"
                 "- Ingestion below `predict()` 95% lower bound (hourly, last complete hour)\n"
                 "- Host volume 2σ drop\n"
                 "- HEC token silence\n"
                 "- Host data silent with heartbeat\n"
-                "- Data quality agent report (open findings + proposed fixes; enable email yourself — the agent never auto-fixes)\n"
-                "- AI provider dispatch (pending ASK requests; attach a webhook in Splunk Web — never put the URL or API key in this app)"
+                "- Data quality agent report (open findings + proposed fixes; enable email yourself — the agent never auto-fixes)"
             ),
             "viz_hec": md(
                 "## HEC token names\n"
@@ -2263,19 +2746,6 @@ SAVED_SEARCHES = [
             ("alert.suppress.period", "1h"),
         ],
     ),
-    (
-        "Exec Health - AI provider dispatch",
-        Q_DQ_AI_DISPATCH,
-        "Lists pending human-approved ASK requests for the configured AI provider. Enable this search only after you set exec_health_ai_mode=provider, then attach a webhook action in Splunk Web to your gateway. Do not put webhook URLs, API keys, or HEC tokens in this app. The search never calls a provider itself and never changes Splunk configuration.",
-        [
-            ("cron_schedule", "*/5 * * * *"),
-            ("dispatch.earliest_time", "-15m"),
-            ("dispatch.latest_time", "now"),
-            ("alert.digest_mode", "1"),
-            ("alert.severity", "3"),
-            ("alert.suppress.period", "5m"),
-        ],
-    ),
 ]
 
 
@@ -2287,7 +2757,9 @@ def render_savedsearches() -> str:
         out.append(f"\n[{name}]")
         out.append(f"search = {body}")
         out.append(f"description = {description}")
-        for key, value in sorted(specific + SS_COMMON):
+        merged = dict(SS_COMMON)
+        merged.update(dict(specific))
+        for key, value in sorted(merged.items()):
             out.append(f"{key} = {value}")
     return "\n".join(out) + "\n"
 
@@ -2319,17 +2791,17 @@ def main() -> None:
         ),
         "data_topology.xml": (
             "Data Topology",
-            "Network topology of data sources, ingest paths, and Splunk receivers.",
+            "Click a data source for latest event, volume, trend, and drop/burst outliers.",
             data_topology(),
         ),
         "data_quality_agent.xml": (
             "Derek+ Data Quality Agent",
-            "Click Select, then APPROVE or DISMISS, then SAVE. Search does not open.",
+            "Click Select, then APPROVE or DISMISS to record the decision. Search does not open.",
             data_quality_agent(),
         ),
         "ai_provider_setup.xml": (
             "AI provider setup",
-            "Configure optional OpenAI, Cisco, Azure, or custom model integration. No API keys on this page.",
+            "Set provider, model, and key, then click SAVE. Search does not open.",
             ai_provider_setup(),
         ),
         "readme.xml": (
@@ -2345,6 +2817,7 @@ def main() -> None:
     }
     for filename, (label, desc, definition) in dashboards.items():
         path = VIEWS / filename
+        definition = studio_cards(definition)
         xml_text = wrap(label, desc, definition)
         path.write_text(xml_text, encoding="utf-8")
         json.loads(json.dumps(definition))

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a Splunk Cloud self-service .spl (no Python, no local/, search-head only).
+# Build a Splunk Cloud .spl (bin/derekaiping.py only, no local/, search-head only).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -46,14 +46,19 @@ rsync -a \
   --exclude 'metadata/local.meta' --exclude '.DS_Store' --exclude '__pycache__' \
   --exclude '*.pyc' --exclude '*.tgz' --exclude '*.spl' --exclude 'tools' \
   --exclude '.idea' --exclude '.vscode' --exclude '.venv' \
+  --exclude 'lookups/dq_agent_ai_config.csv' --exclude 'lookups/dq_agent_approvals.csv' \
   "$ROOT/" "$STAGING/$APP_ID/"
 
 find "$STAGING/$APP_ID" \( -name '.DS_Store' -o -name '._*' -o -name '*.pyc' \) -delete
 find "$STAGING/$APP_ID" -type f -exec chmod 644 {} \;
 find "$STAGING/$APP_ID" -type d -exec chmod 755 {} \;
 
-if find "$STAGING/$APP_ID" -type f \( -name '*.py' -o -name '*.pyc' \) | grep -q .; then
-  echo "Cloud package must not contain Python files" >&2
+if find "$STAGING/$APP_ID" -type f \( -name '*.py' -o -name '*.pyc' \) ! -path "$STAGING/$APP_ID/bin/derekaiping.py" | grep -q .; then
+  echo "Package may contain only bin/derekaiping.py as Python" >&2
+  exit 1
+fi
+if [[ ! -f "$STAGING/$APP_ID/bin/derekaiping.py" ]]; then
+  echo "bin/derekaiping.py is missing from the package" >&2
   exit 1
 fi
 if [[ -d "$STAGING/$APP_ID/local" || -d "$STAGING/$APP_ID/tools" ]]; then
@@ -77,7 +82,7 @@ with tarfile.open(path, "r:gz") as tar:
     names = tar.getnames()
     for member in tar.getmembers():
         name = member.name
-        if name.endswith(".py") or "/tools/" in name + "/" or "/local/" in name + "/" or "/._" in name or name.endswith(".git"):
+        if (name.endswith(".py") and name != "splunk_exec_health/bin/derekaiping.py") or "/tools/" in name + "/" or "/local/" in name + "/" or "/._" in name or name.endswith(".git"):
             disallowed.append(name)
         if member.isfile() and (member.mode & 0o111):
             disallowed.append(f"{name} (executable)")
@@ -91,9 +96,13 @@ required = [
     "splunk_exec_health/README.md",
     "splunk_exec_health/default/app.conf",
     "splunk_exec_health/metadata/default.meta",
+    "splunk_exec_health/bin/derekaiping.py",
 ]
 missing = [item for item in required if item not in names]
 if missing:
     raise SystemExit("Missing required Cloud files: " + ", ".join(missing))
+for runtime_csv in ("dq_agent_ai_config.csv", "dq_agent_approvals.csv"):
+    if "splunk_exec_health/lookups/" + runtime_csv in names:
+        raise SystemExit(runtime_csv + " must not ship in the package; runtime data lives in KV Store and an upgrade would wipe it")
 print(f"packaged {path} ({path.stat().st_size} bytes, {len(names)} entries)")
 PY

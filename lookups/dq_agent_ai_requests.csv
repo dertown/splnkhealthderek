@@ -1,2 +1,2 @@
-finding_id,entity,issue,provider,model,endpoint,status,actor,requested_at,note,ai_brief
-placeholder,none,none,none,none,none,none,system,0,seed row — do not delete,none
+finding_id,entity,issue,provider,model,endpoint,status,actor,requested_at,note,ai_brief,reply
+placeholder,none,none,none,none,none,none,system,0,seed row — do not delete,none,none

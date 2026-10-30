@@ -133,6 +133,7 @@ SAVEDSEARCH_KEYS = {
     "display.statistics.drilldown", "display.events.type", "display.visualizations.show",
     "display.visualizations.type", "display.visualizations.charting.chart",
     "auto_summarize", "embed.enabled",
+    "check_risky_command",
 }
 
 SAVEDSEARCH_ENUMS = {
@@ -146,6 +147,7 @@ SAVEDSEARCH_ENUMS = {
 SAVEDSEARCH_BOOLS = {
     "enableSched", "realtime_schedule", "alert.digest_mode", "alert.suppress", "alert.track",
     "action.email", "action.email.sendcsv", "disabled", "is_visible", "run_on_startup",
+    "check_risky_command",
 }
 
 META_KEYS = {"access", "export", "owner", "version", "modtime", "import"}
@@ -202,9 +204,78 @@ def check_transforms() -> dict:
         for key in ("max_matches", "min_matches"):
             if key in keys and not keys[key].isdigit():
                 err("transforms.conf", f"[{stanza}] {key} must be an integer")
-        if "filename" in keys and not (ROOT / "lookups" / keys["filename"]).is_file():
+        ext = keys.get("external_type", "")
+        if ext == "kvstore":
+            if "collection" not in keys:
+                err("transforms.conf", f"[{stanza}] kvstore lookup needs collection")
+            if "fields_list" not in keys:
+                err("transforms.conf", f"[{stanza}] kvstore lookup needs fields_list")
+        elif "filename" in keys and not (ROOT / "lookups" / keys["filename"]).is_file():
             err("transforms.conf", f"[{stanza}] lookups/{keys['filename']} does not exist")
+        elif "filename" not in keys:
+            err("transforms.conf", f"[{stanza}] lookup needs filename or external_type = kvstore")
     return conf
+
+
+COLLECTION_KEYS = {"enforceTypes", "replicate", "profilingEnabled", "profilingAllowed"}
+
+
+def check_collections() -> None:
+    path = DEFAULT / "collections.conf"
+    if not path.is_file():
+        err("collections.conf", "missing; AI provider config needs KV Store so the API key survives app updates")
+        return
+    conf = parse_conf(path)
+    for required in ("dq_agent_ai_config", "dq_agent_approvals"):
+        if required not in conf:
+            err("collections.conf", f"missing [{required}] collection")
+    for stanza, keys in conf.items():
+        for key in keys:
+            if key in COLLECTION_KEYS or key.startswith("field.") or key.startswith("accelerated_fields."):
+                continue
+            err("collections.conf", f"[{stanza}] unknown key '{key}'")
+        if "replicate" in keys and keys["replicate"] not in BOOL:
+            err("collections.conf", f"[{stanza}] replicate must be boolean")
+        if "enforceTypes" in keys and keys["enforceTypes"] not in BOOL:
+            err("collections.conf", f"[{stanza}] enforceTypes must be boolean")
+
+
+COMMANDS_CONF_KEYS = {"is_risky", "chunked", "filename", "python.version", "local"}
+COMMANDS_CONF_STANZAS = {"outputlookup", "derekaiping"}
+
+
+def check_commands_conf() -> None:
+    path = DEFAULT / "commands.conf"
+    if not path.is_file():
+        err("commands.conf", "missing; the agent dashboard needs outputlookup is_risky=false")
+        return
+    conf = parse_conf(path)
+    for stanza, keys in conf.items():
+        if stanza not in COMMANDS_CONF_STANZAS:
+            err("commands.conf", f"unknown stanza [{stanza}]")
+            continue
+        check_keys("commands.conf", stanza, keys, COMMANDS_CONF_KEYS)
+        if "is_risky" in keys and keys["is_risky"] not in BOOL:
+            err("commands.conf", f"[{stanza}] is_risky must be boolean")
+    cmd = conf.get("derekaiping", {})
+    if not cmd:
+        err("commands.conf", "missing [derekaiping] stanza")
+    else:
+        if cmd.get("chunked") != "true" or cmd.get("python.version") != "python3":
+            err("commands.conf", "[derekaiping] needs chunked = true and python.version = python3")
+        script = ROOT / "bin" / cmd.get("filename", "")
+        if not script.is_file():
+            err("commands.conf", f"[derekaiping] filename {cmd.get('filename')!r} not found in bin/")
+        else:
+            src = script.read_text()
+            if re.search(r"(sk-ant-|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN)", src):
+                err("bin", f"{script.name} contains something that looks like a hardcoded secret or certificate")
+            if "verify=False" in src or "CERT_NONE" in src or "_create_unverified_context" in src:
+                err("bin", f"{script.name} disables TLS verification")
+    if "outputlookup" not in conf:
+        err("commands.conf", "missing [outputlookup] stanza")
+    elif conf["outputlookup"].get("is_risky") not in ("false", "0", "False"):
+        err("commands.conf", "[outputlookup] is_risky must be false so Cloud dashboards can record APPROVE/DISMISS")
 
 
 def check_savedsearches() -> dict:
@@ -342,6 +413,7 @@ VIZ_OPTIONS = {
     "splunk.line": COMMON_CHART | {"nullValueDisplay", "lineWidth", "markerDisplay", "lineDashStyle"},
     "splunk.area": COMMON_CHART | {"nullValueDisplay", "areaOpacity"},
     "splunk.column": COMMON_CHART | {"columnSpacing", "seriesSpacing"},
+    "splunk.rectangle": {"fillColor", "fillOpacity", "strokeColor", "strokeWidth", "rx"},
     "splunk.markdown": {"markdown", "fontColor", "backgroundColor", "fontSize", "fontFamily"},
     "splunk.linkgraph": {"backgroundColor", "fieldOrder", "linkColor", "linkWidth", "nodeColor",
                          "nodeTextColor", "nodeHeight", "nodeHighlightColor",
@@ -487,7 +559,7 @@ def check_dashboard(path: Path, macros: dict, transforms: dict) -> None:
         for ref in viz.get("dataSources", {}).values():
             if ref not in data_sources:
                 err(loc, f"references missing data source {ref!r}")
-        if vtype != "splunk.markdown" and not viz.get("dataSources"):
+        if vtype not in ("splunk.markdown", "splunk.rectangle") and not viz.get("dataSources"):
             err(loc, "has no data source")
         ctx = set(viz.get("context", {}))
         for name in CONTEXT_FN_RE.findall(json.dumps(opts)):
@@ -570,6 +642,8 @@ def main() -> int:
     macros = check_macros()
     transforms = check_transforms()
     saved = check_savedsearches()
+    check_commands_conf()
+    check_collections()
     check_meta()
     check_manifest(app_conf)
     check_nav()
@@ -586,7 +660,7 @@ def main() -> int:
     for e in errors:
         print(f"ERROR {e}")
     print(f"checked app.conf, macros.conf ({len(macros)} macros), transforms.conf, "
-          f"savedsearches.conf ({len(saved)} searches), default.meta, app.manifest, nav, "
+          f"savedsearches.conf ({len(saved)} searches), commands.conf, collections.conf, default.meta, app.manifest, nav, "
           f"{len(views)} dashboards: {len(errors)} error(s), {len(warnings)} warning(s)")
     return 1 if errors else 0
 

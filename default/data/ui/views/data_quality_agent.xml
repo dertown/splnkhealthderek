@@ -1,10 +1,10 @@
 <dashboard version="2" theme="dark">
   <label>Derek+ Data Quality Agent</label>
-  <description>Click Select, then APPROVE or DISMISS, then SAVE. Search does not open.</description>
+  <description>Click Select, then APPROVE or DISMISS to record the decision. Search does not open.</description>
   <definition><![CDATA[
 {
   "title": "Derek+ Data Quality Agent",
-  "description": "Click Select, then APPROVE or DISMISS, then SAVE. Search does not open.",
+  "description": "Click Select, then click APPROVE or DISMISS. That records the decision. Search does not open.",
   "defaults": {
     "dataSources": {
       "ds.search": {
@@ -50,20 +50,36 @@
         "defaultValue": "review"
       }
     },
-    "input_commit": {
+    "input_ai_ask": {
       "type": "input.text",
-      "title": "Save latch (set by the SAVE tile)",
+      "title": "Ask latch (set by ASK)",
       "options": {
-        "token": "tok_commit",
-        "defaultValue": "WAIT"
+        "token": "tok_ai_ask",
+        "defaultValue": "review"
       }
     },
-    "input_ai_confirm": {
+    "input_entity": {
       "type": "input.text",
-      "title": "Optional: type ASK for a second opinion",
+      "title": "Selected entity",
       "options": {
-        "token": "tok_ai_confirm",
-        "defaultValue": "NO"
+        "token": "tok_entity",
+        "defaultValue": "none"
+      }
+    },
+    "input_issue": {
+      "type": "input.text",
+      "title": "Selected issue",
+      "options": {
+        "token": "tok_issue",
+        "defaultValue": "none"
+      }
+    },
+    "input_ai_brief": {
+      "type": "input.text",
+      "title": "Selected briefing",
+      "options": {
+        "token": "tok_ai_brief",
+        "defaultValue": "none"
       }
     }
   },
@@ -72,9 +88,7 @@
       "type": "ds.search",
       "name": "Agent cycle findings",
       "options": {
-        "query": "| makeresults\n| eval _seed=1\n| append [\n    | tstats count as count where index=`exec_health_idx` earliest=-7d@h latest=@h by _time span=1h\n    | timechart span=1h sum(count) as count\n    | fillnull value=0 count\n    | predict count as prediction future_timespan=0 holdback=0 upper95=upper lower95=lower algorithm=LLP5\n    | tail 1\n    | where isnotnull(lower) AND count < lower\n    | eval issue=\"Ingestion below learned predict() bound\", severity=\"RED\", entity=\"environment\", evidence=\"hour_count=\"+tostring(count)+\", predict=\"+tostring(round(prediction,0))+\", lower=\"+tostring(round(lower,0)), suggested_fix=\"Identify which index dropped vs the 7-day seasonal baseline. Check UF/HF phone-home, HEC tokens, and syslog listeners. Do not raise the learned bound to hide a real drop.\", fix_type=\"investigate\", proposed_config=\"none \u2014 human investigates the dropped source\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-8d@h latest=@h by _time span=1h index\n    | streamstats window=168 current=f avg(events) as ma_7d by index\n    | where _time >= relative_time(now(), \"-1h@h\") AND _time < relative_time(now(), \"@h\")\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-events)/ma_7d)*100, 1), 0)\n    | where drop_pct >= `exec_health_drop_red_pct` AND ma_7d>10\n    | eval issue=\"Index volume below 7-day moving average\", severity=\"RED\", entity=index, evidence=\"last_hour=\"+tostring(events)+\", ma_7d=\"+tostring(round(ma_7d,0))+\", drop_pct=\"+tostring(drop_pct)+\"%\", suggested_fix=\"Confirm whether this index was expected to be quiet (maintenance, source retirement). If not, check the last forwarder or HEC route that writes here. Macro exec_health_idx can be narrowed after review.\", fix_type=\"runbook_index\", proposed_config=\"optional: Settings > Search macros > exec_health_idx\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n| tstats count as events where index=`exec_health_idx` earliest=-25h@m latest=@m by _time span=15m host\n| timechart span=15m limit=0 useother=f sum(events) as events by host\n| fillnull value=0\n| untable _time host events\n| where _time+900+300 <= now()\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples by host\n| eventstats max(_time) as scored_bucket\n| where _time=scored_bucket\n| eval sigma=`exec_health_sigma`, mean_vol=round(mean_vol, 1), stdev_vol=round(stdev_vol, 1), lower_bound=round(mean_vol-(sigma*stdev_vol), 1)\n| eval baseline_state=case(samples<8, \"WARMUP\", stdev_vol>0 AND events < lower_bound AND mean_vol>10, \"ALERT\", 1=1, \"OK\")\n| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)\n| where baseline_state=\"ALERT\"\n| eval issue=\"Host volume below learned 2-sigma bound\", severity=\"RED\", entity=host, evidence=\"events=\"+tostring(events)+\", mean=\"+tostring(mean_vol)+\", lower=\"+tostring(lower_bound)+\", z=\"+tostring(z_score), suggested_fix=\"Compare this host's sourcetypes to the prior 24 hours. Repair the stopped monitor, UF outputs.conf, or an index-time filter. Do not suppress the host without change control.\", fix_type=\"runbook_input\", proposed_config=\"none \u2014 human repairs the forwarder or input\", action=\"Review\"\n| head 25\n| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\nsearch `exec_health_hec_metrics` earliest=-2h@m latest=-1m@m\n| `exec_health_hec_normalize`\n| timechart span=1m limit=0 useother=f sum(hec_events) as events by token\n| fillnull value=0\n| untable _time token events\n| eval minutes_ago=round((relative_time(now(), \"-1m@m\")-_time)/60, 0)\n| eval window=case(minutes_ago>=1 AND minutes_ago<=`exec_health_hec_silence_min`, \"recent\", minutes_ago>`exec_health_hec_silence_min` AND minutes_ago<=`exec_health_hec_silence_min`+60, \"baseline\")\n| stats sum(eval(if(window=\"recent\", events, 0))) as recent_events, sum(eval(if(window=\"baseline\", events, 0))) as baseline_events, count(eval(window=\"recent\" AND events=0)) as silent_minutes by token\n| eval baseline_eps=round(baseline_events/3600, 2), recent_eps=round(recent_events/(60*`exec_health_hec_silence_min`), 2)\n| lookup hec_token_map token OUTPUT token_name, owner\n| eval token_label=coalesce(token_name, token), owner=coalesce(owner, \"unmapped\")\n| eval hec_state=case(\n    baseline_eps >= `exec_health_hec_baseline_eps` AND recent_events=0, \"ALERT\",\n    baseline_eps >= 10 AND recent_events=0, \"YELLOW\",\n    1=1, \"OK\")\n| where hec_state=\"ALERT\"\n| eval issue=\"HEC token silent vs learned baseline\", severity=\"RED\", entity=token_label, evidence=\"baseline_eps=\"+tostring(baseline_eps)+\", recent_events=\"+tostring(recent_events)+\", silent_min=\"+tostring(silent_minutes), suggested_fix=\"In Splunk Web open Settings > Data inputs > HTTP Event Collector and confirm this input is enabled. Then check the sender, network path, and index routing. Never paste the HEC token secret into this app.\", fix_type=\"runbook_hec\", proposed_config=\"none \u2014 human checks the HEC input and sender\", action=\"Review\"\n| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) earliest=-24h latest=now by index host\n    | eval kind=if(index=\"_internal\", \"heartbeat\", \"data\")\n    | stats max(eval(if(kind=\"data\", last_seen, null()))) as last_data, max(eval(if(kind=\"heartbeat\", last_seen, null()))) as last_heartbeat by host\n    | eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat\n    | eval state=case(isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"HEARTBEAT ONLY\", data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"DATA SILENT\", (isnull(last_data) OR data_age_sec > `exec_health_silence_sec`) AND (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_heartbeat_sec`), \"HOST DOWN\", 1=1, \"OK\")\n    | where state=\"DATA SILENT\" OR state=\"HEARTBEAT ONLY\" OR state=\"HOST DOWN\"\n    | eval issue=case(state=\"HOST DOWN\", \"Host down \u2014 no heartbeat and no indexed data\", 1=1, \"Host data silent while heartbeat is fresh\")\n    | eval severity=\"RED\", entity=host, evidence=\"state=\"+state+\", data_age_sec=\"+tostring(data_age_sec)+\", heartbeat_age_sec=\"+tostring(heartbeat_age_sec)\n    | eval suggested_fix=case(state=\"HOST DOWN\", \"The host is not phoning home and not sending data. Check power, network, and splunkd. Do not remove the host from this app.\", 1=1, \"The UF is up but indexed data stopped. Check outputs.conf, blocked queues, sourcetype transforms, and the destination index. Restart the forwarder only after change control.\")\n    | eval fix_type=if(state=\"HOST DOWN\", \"runbook_host_down\", \"runbook_uf\")\n    | eval proposed_config=if(state=\"HOST DOWN\", \"none \u2014 human restores the endpoint\", \"none \u2014 human repairs the UF pipeline\"), action=\"Review\"\n    | head 40\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search `exec_health_health_report` earliest=-15m\n    | eval health_val=lower(coalesce(color, \"unknown\"))\n    | stats latest(health_val) as health_val by host, feature\n    | eval score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n    | where score<2\n    | eval issue=\"Instance health feature not GREEN\", severity=if(score=0, \"RED\", \"YELLOW\"), entity=host.\" / \".feature, evidence=\"host=\"+host+\", feature=\"+feature+\", color=\"+health_val, suggested_fix=\"On that instance inspect the red or yellow feature (disk, buckets, splunkd). Do not clear or suppress the health report from this dashboard.\", fix_type=\"runbook_instance\", proposed_config=\"none \u2014 human inspects the instance feature\", action=\"Review\"\n    | sort score, host, feature\n    | head 25\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-15m latest=now\n    | appendpipe [ stats count | where count=0 | eval events=0 ]\n    | where events=0\n    | eval issue=\"No live indexed events in the last 15 minutes\", severity=\"RED\", entity=\"environment\", evidence=\"events_15m=0\", suggested_fix=\"Check UF/HF phone-home, HEC tokens, syslog listeners, and whether macro exec_health_idx excludes the indexes that should be live.\", fix_type=\"runbook_ingest_live\", proposed_config=\"optional: Settings > Search macros > exec_health_idx\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search `exec_health_license_usage` earliest=-8d@d latest=@d\n    | bin _time span=1d\n    | stats sum(b) as bytes by _time\n    | eval daily_GB=bytes/1024/1024/1024\n    | streamstats window=7 current=f avg(daily_GB) as ma_7d\n    | sort 0 -_time\n    | head 1\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-daily_GB)/ma_7d)*100, 1), 0)\n    | eval health_score=case(isnull(ma_7d), 2, drop_pct>=`exec_health_drop_red_pct`, 0, drop_pct>=`exec_health_drop_yellow_pct`, 1, 1=1, 2)\n    | where health_score<2\n    | eval issue=\"Daily ingestion below 7-day moving average\", severity=if(health_score=0, \"RED\", \"YELLOW\"), entity=\"environment\", evidence=\"daily_GB=\"+tostring(round(daily_GB,2))+\", ma_7d=\"+tostring(round(ma_7d,2))+\", drop_pct=\"+tostring(drop_pct)+\"%\", suggested_fix=\"Compare indexes and sourcetypes for yesterday vs the prior week. Confirm maintenance or a retired source before treating this as an outage.\", fix_type=\"runbook_license_ma\", proposed_config=\"none \u2014 human reviews license usage\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search index=_introspection sourcetype=splunk_resource_usage component=Hostwide earliest=-15m\n    | eval cpu_pct=coalesce('data.cpu_system_pct', 0)+coalesce('data.cpu_user_pct', 0)\n    | stats avg(cpu_pct) as avg_cpu, max(cpu_pct) as max_cpu by host\n    | eval avg_cpu=round(avg_cpu, 1), max_cpu=round(max_cpu, 1)\n    | where max_cpu>=75\n    | eval issue=\"Instance CPU above health bound\", severity=if(max_cpu>=90, \"RED\", \"YELLOW\"), entity=host, evidence=\"avg_cpu=\"+tostring(avg_cpu)+\"%, max_cpu=\"+tostring(max_cpu)+\"%\", suggested_fix=\"List expensive searches on this host and pause non-essential scheduled searches after change control. Do not kill user searches from this dashboard.\", fix_type=\"runbook_sh\", proposed_config=\"none \u2014 human manages search load\", action=\"Review\"\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search index=`exec_health_sc4s_idx` `exec_health_sc4s` (error OR warn OR fail OR \"connection refused\" OR hang OR dropped) earliest=-15m\n    | stats count as sc4s_issues, dc(sourcetype) as sourcetypes by host\n    | where sc4s_issues>0\n    | eval issue=\"SC4S / syslog errors in the last 15 minutes\", severity=\"RED\", entity=host, evidence=\"issues=\"+tostring(sc4s_issues)+\", sourcetypes=\"+tostring(sourcetypes), suggested_fix=\"Check the collector process, destination port, TLS, and that the destination index exists. Use this app's SC4S view for the time series.\", fix_type=\"runbook_sc4s\", proposed_config=\"none \u2014 human repairs the syslog collector\", action=\"Review\"\n    | sort 0 -sc4s_issues\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | mstats max(queue_size_bytes) as queue_size_bytes, max(queue_max_bytes) as queue_max_bytes, rate_sum(export_destination_errors_total) as export_errors_per_sec, rate_sum(processor_events_in_total) as events_in_eps, rate_sum(processor_events_out_total) as events_out_eps where `exec_health_edge_mstats` earliest=-15m latest=now by host\n    | eval queue_fill_pct=if(queue_max_bytes>0, round(queue_size_bytes/queue_max_bytes*100, 1), null())\n    | eval export_errors_per_sec=round(coalesce(export_errors_per_sec, 0), 3)\n    | eval events_in_eps=round(coalesce(events_in_eps, 0), 2), events_out_eps=round(coalesce(events_out_eps, 0), 2)\n    | where export_errors_per_sec>0 OR queue_fill_pct>=80 OR (events_in_eps>0 AND events_out_eps=0)\n    | eval issue=\"Edge / Ingest Processor queue or export unhealthy\", severity=\"RED\", entity=host, evidence=\"queue_fill_pct=\"+tostring(queue_fill_pct)+\", export_errors_per_sec=\"+tostring(export_errors_per_sec)+\", in_eps=\"+tostring(events_in_eps)+\", out_eps=\"+tostring(events_out_eps), suggested_fix=\"Inspect Edge pipelines for a blocked destination or a filter that drops everything. Do not clear the queue from this dashboard.\", fix_type=\"runbook_edge\", proposed_config=\"none \u2014 human repairs the processor pipeline\", action=\"Review\"\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| where isnull(_seed)\n| append [\n    search index=_internal source=*metrics.log group=tcpin_connections earliest=-2h\n    | eval entity=coalesce(sourceHost, hostname)\n    | eval tool_fwdType=lower(trim(coalesce(fwdType, \"\")))\n    | eval tool_conn=lower(trim(coalesce(connectionType, \"\")))\n    | where isnotnull(entity)\n    | stats latest(tool_fwdType) as tool_fwdType, latest(tool_conn) as tool_conn by entity\n]\n| append [\n    search index=_internal sourcetype=splunkd (log_level=ERROR OR log_level=WARN) earliest=-2h\n    | eval entity=host\n    | where isnotnull(entity)\n    | stats count as tool_err_count, latest(component) as tool_err_component by entity\n]\n| eventstats latest(tool_fwdType) as tool_fwdType, latest(tool_conn) as tool_conn, latest(tool_err_component) as tool_err_component, max(tool_err_count) as tool_err_count by entity\n| where isnotnull(issue)\n| eval finding_id=sha256(issue.\"|\".entity)\n| lookup dq_agent_playbooks fix_type OUTPUT playbook_name, likely_cause, confidence, tool_plan, splunk_web_path\n| lookup dq_agent_approvals finding_id OUTPUT decision, decided_at, actor\n| eval status=case(decision=\"approve\", \"approved\", decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval action=if(status=\"open\", \"Review\", \"Resolved\")\n| eval agent_thought=\"OBSERVE: \"+issue+\" on \"+entity+\". INVESTIGATE: \"+coalesce(tool_plan, \"learned baselines\")+\". TOOLS: fwdType=\"+coalesce(tool_fwdType, \"n/a\")+\" conn=\"+coalesce(tool_conn, \"n/a\")+\" err_component=\"+coalesce(tool_err_component, \"none\")+\" err_count=\"+coalesce(tostring(tool_err_count), \"0\")+\". HYPOTHESIZE: \"+coalesce(likely_cause, \"needs human review\")+\" (confidence \"+coalesce(confidence, \"n/a\")+\"). PROPOSE: \"+suggested_fix+\". ACT: wait for human APPROVE or DISMISS then SAVE \u2014 never change Splunk unattended.\"\n| eval ai_brief=\"Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: \"+issue+\". Entity: \"+entity+\". Evidence: \"+evidence+\". Forwarder type: \"+coalesce(tool_fwdType, \"unknown\")+\". Connection: \"+coalesce(tool_conn, \"unknown\")+\". Recent _internal errors: \"+coalesce(tostring(tool_err_count), \"0\")+\" (\"+coalesce(tool_err_component, \"none\")+\"). Playbook: \"+coalesce(playbook_name, \"none\")+\". Likely cause: \"+coalesce(likely_cause, \"unknown\")+\". Suggested fix: \"+suggested_fix+\". Splunk Web: \"+coalesce(splunk_web_path, \"n/a\")+\". Reply with root cause, confidence, and step-by-step admin actions. Do not request secrets or HEC token values.\"\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank\n| sort _color_rank, issue, entity",
-        "refresh": "5m",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval _seed=1\n| append [\n    | tstats count as count where index=`exec_health_idx` earliest=-7d@h latest=@h by _time span=1h\n    | timechart span=1h sum(count) as count\n    | fillnull value=0 count\n    | predict count as prediction future_timespan=0 holdback=0 upper95=upper lower95=lower algorithm=LLP5\n    | tail 1\n    | where isnotnull(lower) AND count < lower\n    | eval issue=\"Ingestion below learned predict() bound\", severity=\"RED\", entity=\"environment\", evidence=\"hour_count=\"+tostring(count)+\", predict=\"+tostring(round(prediction,0))+\", lower=\"+tostring(round(lower,0)), suggested_fix=\"Identify which index dropped vs the 7-day seasonal baseline. Check UF/HF phone-home, HEC tokens, and syslog listeners. Do not raise the learned bound to hide a real drop.\", fix_type=\"investigate\", proposed_config=\"none \u2014 human investigates the dropped source\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-8d@h latest=@h by _time span=1h index\n    | streamstats window=168 current=f avg(events) as ma_7d by index\n    | where _time >= relative_time(now(), \"-1h@h\") AND _time < relative_time(now(), \"@h\")\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-events)/ma_7d)*100, 1), 0)\n    | where drop_pct >= `exec_health_drop_red_pct` AND ma_7d>10\n    | eval issue=\"Index volume below 7-day moving average\", severity=\"RED\", entity=index, evidence=\"last_hour=\"+tostring(events)+\", ma_7d=\"+tostring(round(ma_7d,0))+\", drop_pct=\"+tostring(drop_pct)+\"%\", suggested_fix=\"Confirm whether this index was expected to be quiet (maintenance, source retirement). If not, check the last forwarder or HEC route that writes here. Macro exec_health_idx can be narrowed after review.\", fix_type=\"runbook_index\", proposed_config=\"optional: Settings > Search macros > exec_health_idx\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n| tstats count as events where index=`exec_health_idx` earliest=-25h@m latest=@m by _time span=15m host\n| timechart span=15m limit=0 useother=f sum(events) as events by host\n| fillnull value=0\n| untable _time host events\n| where _time+900+300 <= now()\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples by host\n| eventstats max(_time) as scored_bucket\n| where _time=scored_bucket\n| eval sigma=`exec_health_sigma`, mean_vol=round(mean_vol, 1), stdev_vol=round(stdev_vol, 1), lower_bound=round(mean_vol-(sigma*stdev_vol), 1)\n| eval baseline_state=case(samples<8, \"WARMUP\", stdev_vol>0 AND events < lower_bound AND mean_vol>10, \"ALERT\", 1=1, \"OK\")\n| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)\n| where baseline_state=\"ALERT\"\n| eval issue=\"Host volume below learned 2-sigma bound\", severity=\"RED\", entity=host, evidence=\"events=\"+tostring(events)+\", mean=\"+tostring(mean_vol)+\", lower=\"+tostring(lower_bound)+\", z=\"+tostring(z_score), suggested_fix=\"Compare this host's sourcetypes to the prior 24 hours. Repair the stopped monitor, UF outputs.conf, or an index-time filter. Do not suppress the host without change control.\", fix_type=\"runbook_input\", proposed_config=\"none \u2014 human repairs the forwarder or input\", action=\"Review\"\n| head 25\n| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\nsearch `exec_health_hec_metrics` earliest=-2h@m latest=-1m@m\n| `exec_health_hec_normalize`\n| timechart span=1m limit=0 useother=f sum(hec_events) as events by token\n| fillnull value=0\n| untable _time token events\n| eval minutes_ago=round((relative_time(now(), \"-1m@m\")-_time)/60, 0)\n| eval window=case(minutes_ago>=1 AND minutes_ago<=`exec_health_hec_silence_min`, \"recent\", minutes_ago>`exec_health_hec_silence_min` AND minutes_ago<=`exec_health_hec_silence_min`+60, \"baseline\")\n| stats sum(eval(if(window=\"recent\", events, 0))) as recent_events, sum(eval(if(window=\"baseline\", events, 0))) as baseline_events, count(eval(window=\"recent\" AND events=0)) as silent_minutes by token\n| eval baseline_eps=round(baseline_events/3600, 2), recent_eps=round(recent_events/(60*`exec_health_hec_silence_min`), 2)\n| lookup hec_token_map token OUTPUT token_name, owner\n| eval token_label=coalesce(token_name, token), owner=coalesce(owner, \"unmapped\")\n| eval hec_state=case(\n    baseline_eps >= `exec_health_hec_baseline_eps` AND recent_events=0, \"ALERT\",\n    baseline_eps >= 10 AND recent_events=0, \"YELLOW\",\n    1=1, \"OK\")\n| where hec_state=\"ALERT\"\n| eval issue=\"HEC token silent vs learned baseline\", severity=\"RED\", entity=token_label, evidence=\"baseline_eps=\"+tostring(baseline_eps)+\", recent_events=\"+tostring(recent_events)+\", silent_min=\"+tostring(silent_minutes), suggested_fix=\"In Splunk Web open Settings > Data inputs > HTTP Event Collector and confirm this input is enabled. Then check the sender, network path, and index routing. Never paste the HEC token secret into this app.\", fix_type=\"runbook_hec\", proposed_config=\"none \u2014 human checks the HEC input and sender\", action=\"Review\"\n| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) earliest=-24h latest=now by index host\n    | eval kind=if(index=\"_internal\", \"heartbeat\", \"data\")\n    | stats max(eval(if(kind=\"data\", last_seen, null()))) as last_data, max(eval(if(kind=\"heartbeat\", last_seen, null()))) as last_heartbeat by host\n    | eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat\n    | eval state=case(isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"HEARTBEAT ONLY\", data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, \"DATA SILENT\", (isnull(last_data) OR data_age_sec > `exec_health_silence_sec`) AND (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_heartbeat_sec`), \"HOST DOWN\", 1=1, \"OK\")\n    | where state=\"DATA SILENT\" OR state=\"HEARTBEAT ONLY\" OR state=\"HOST DOWN\"\n    | eval issue=case(state=\"HOST DOWN\", \"Host down \u2014 no heartbeat and no indexed data\", 1=1, \"Host data silent while heartbeat is fresh\")\n    | eval severity=\"RED\", entity=host, evidence=\"state=\"+state+\", data_age_sec=\"+tostring(data_age_sec)+\", heartbeat_age_sec=\"+tostring(heartbeat_age_sec)\n    | eval suggested_fix=case(state=\"HOST DOWN\", \"The host is not phoning home and not sending data. Check power, network, and splunkd. Do not remove the host from this app.\", 1=1, \"The UF is up but indexed data stopped. Check outputs.conf, blocked queues, sourcetype transforms, and the destination index. Restart the forwarder only after change control.\")\n    | eval fix_type=if(state=\"HOST DOWN\", \"runbook_host_down\", \"runbook_uf\")\n    | eval proposed_config=if(state=\"HOST DOWN\", \"none \u2014 human restores the endpoint\", \"none \u2014 human repairs the UF pipeline\"), action=\"Review\"\n    | head 40\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search `exec_health_health_report` earliest=-15m\n    | eval health_val=lower(coalesce(color, \"unknown\"))\n    | stats latest(health_val) as health_val by host, feature\n    | eval score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n    | where score<2\n    | eval issue=\"Instance health feature not GREEN\", severity=if(score=0, \"RED\", \"YELLOW\"), entity=host.\" / \".feature, evidence=\"host=\"+host+\", feature=\"+feature+\", color=\"+health_val, suggested_fix=\"On that instance inspect the red or yellow feature (disk, buckets, splunkd). Do not clear or suppress the health report from this dashboard.\", fix_type=\"runbook_instance\", proposed_config=\"none \u2014 human inspects the instance feature\", action=\"Review\"\n    | sort score, host, feature\n    | head 25\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | tstats count as events where index=`exec_health_idx` earliest=-15m latest=now\n    | appendpipe [ stats count | where count=0 | eval events=0 ]\n    | where events=0\n    | eval issue=\"No live indexed events in the last 15 minutes\", severity=\"RED\", entity=\"environment\", evidence=\"events_15m=0\", suggested_fix=\"Check UF/HF phone-home, HEC tokens, syslog listeners, and whether macro exec_health_idx excludes the indexes that should be live.\", fix_type=\"runbook_ingest_live\", proposed_config=\"optional: Settings > Search macros > exec_health_idx\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search `exec_health_license_usage` earliest=-8d@d latest=@d\n    | bin _time span=1d\n    | stats sum(b) as bytes by _time\n    | eval daily_GB=bytes/1024/1024/1024\n    | streamstats window=7 current=f avg(daily_GB) as ma_7d\n    | sort 0 -_time\n    | head 1\n    | eval drop_pct=if(ma_7d>0, round(((ma_7d-daily_GB)/ma_7d)*100, 1), 0)\n    | eval health_score=case(isnull(ma_7d), 2, drop_pct>=`exec_health_drop_red_pct`, 0, drop_pct>=`exec_health_drop_yellow_pct`, 1, 1=1, 2)\n    | where health_score<2\n    | eval issue=\"Daily ingestion below 7-day moving average\", severity=if(health_score=0, \"RED\", \"YELLOW\"), entity=\"environment\", evidence=\"daily_GB=\"+tostring(round(daily_GB,2))+\", ma_7d=\"+tostring(round(ma_7d,2))+\", drop_pct=\"+tostring(drop_pct)+\"%\", suggested_fix=\"Compare indexes and sourcetypes for yesterday vs the prior week. Confirm maintenance or a retired source before treating this as an outage.\", fix_type=\"runbook_license_ma\", proposed_config=\"none \u2014 human reviews license usage\", action=\"Review\"\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search index=_introspection sourcetype=splunk_resource_usage component=Hostwide earliest=-15m\n    | eval cpu_pct=coalesce('data.cpu_system_pct', 0)+coalesce('data.cpu_user_pct', 0)\n    | stats avg(cpu_pct) as avg_cpu, max(cpu_pct) as max_cpu by host\n    | eval avg_cpu=round(avg_cpu, 1), max_cpu=round(max_cpu, 1)\n    | where max_cpu>=75\n    | eval issue=\"Instance CPU above health bound\", severity=if(max_cpu>=90, \"RED\", \"YELLOW\"), entity=host, evidence=\"avg_cpu=\"+tostring(avg_cpu)+\"%, max_cpu=\"+tostring(max_cpu)+\"%\", suggested_fix=\"List expensive searches on this host and pause non-essential scheduled searches after change control. Do not kill user searches from this dashboard.\", fix_type=\"runbook_sh\", proposed_config=\"none \u2014 human manages search load\", action=\"Review\"\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    search index=`exec_health_sc4s_idx` `exec_health_sc4s` (error OR warn OR fail OR \"connection refused\" OR hang OR dropped) earliest=-15m\n    | stats count as sc4s_issues, dc(sourcetype) as sourcetypes by host\n    | where sc4s_issues>0\n    | eval issue=\"SC4S / syslog errors in the last 15 minutes\", severity=\"RED\", entity=host, evidence=\"issues=\"+tostring(sc4s_issues)+\", sourcetypes=\"+tostring(sourcetypes), suggested_fix=\"Check the collector process, destination port, TLS, and that the destination index exists. Use this app's SC4S view for the time series.\", fix_type=\"runbook_sc4s\", proposed_config=\"none \u2014 human repairs the syslog collector\", action=\"Review\"\n    | sort 0 -sc4s_issues\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| append [\n    | mstats max(queue_size_bytes) as queue_size_bytes, max(queue_max_bytes) as queue_max_bytes, rate_sum(export_destination_errors_total) as export_errors_per_sec, rate_sum(processor_events_in_total) as events_in_eps, rate_sum(processor_events_out_total) as events_out_eps where `exec_health_edge_mstats` earliest=-15m latest=now by host\n    | eval queue_fill_pct=if(queue_max_bytes>0, round(queue_size_bytes/queue_max_bytes*100, 1), null())\n    | eval export_errors_per_sec=round(coalesce(export_errors_per_sec, 0), 3)\n    | eval events_in_eps=round(coalesce(events_in_eps, 0), 2), events_out_eps=round(coalesce(events_out_eps, 0), 2)\n    | where export_errors_per_sec>0 OR queue_fill_pct>=80 OR (events_in_eps>0 AND events_out_eps=0)\n    | eval issue=\"Edge / Ingest Processor queue or export unhealthy\", severity=\"RED\", entity=host, evidence=\"queue_fill_pct=\"+tostring(queue_fill_pct)+\", export_errors_per_sec=\"+tostring(export_errors_per_sec)+\", in_eps=\"+tostring(events_in_eps)+\", out_eps=\"+tostring(events_out_eps), suggested_fix=\"Inspect Edge pipelines for a blocked destination or a filter that drops everything. Do not clear the queue from this dashboard.\", fix_type=\"runbook_edge\", proposed_config=\"none \u2014 human repairs the processor pipeline\", action=\"Review\"\n    | head 15\n    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action\n]\n| where isnull(_seed)\n| append [\n    search index=_internal source=*metrics.log group=tcpin_connections earliest=-2h\n    | eval entity=coalesce(sourceHost, hostname)\n    | eval tool_fwdType=lower(trim(coalesce(fwdType, \"\")))\n    | eval tool_conn=lower(trim(coalesce(connectionType, \"\")))\n    | where isnotnull(entity)\n    | stats latest(tool_fwdType) as tool_fwdType, latest(tool_conn) as tool_conn by entity\n]\n| append [\n    search index=_internal sourcetype=splunkd (log_level=ERROR OR log_level=WARN) earliest=-2h\n    | eval entity=host\n    | where isnotnull(entity)\n    | stats count as tool_err_count, latest(component) as tool_err_component by entity\n]\n| eventstats latest(tool_fwdType) as tool_fwdType, latest(tool_conn) as tool_conn, latest(tool_err_component) as tool_err_component, max(tool_err_count) as tool_err_count by entity\n| where isnotnull(issue)\n| eval finding_id=sha256(issue.\"|\".entity)\n| lookup dq_agent_playbooks fix_type OUTPUT playbook_name, likely_cause, confidence, tool_plan, splunk_web_path\n| lookup dq_agent_approvals finding_id OUTPUT decision, decided_at, actor\n| eval status=case(decision=\"approve\", \"approved\", decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval action=if(status=\"open\", \"Review\", \"Resolved\")\n| eval agent_thought=\"OBSERVE: \"+issue+\" on \"+entity+\". INVESTIGATE: \"+coalesce(tool_plan, \"learned baselines\")+\". TOOLS: fwdType=\"+coalesce(tool_fwdType, \"n/a\")+\" conn=\"+coalesce(tool_conn, \"n/a\")+\" err_component=\"+coalesce(tool_err_component, \"none\")+\" err_count=\"+coalesce(tostring(tool_err_count), \"0\")+\". HYPOTHESIZE: \"+coalesce(likely_cause, \"needs human review\")+\" (confidence \"+coalesce(confidence, \"n/a\")+\"). PROPOSE: \"+suggested_fix+\". ACT: wait for human APPROVE or DISMISS \u2014 never change Splunk unattended.\"\n| eval ai_brief=\"Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: \"+issue+\". Entity: \"+entity+\". Evidence: \"+evidence+\". Forwarder type: \"+coalesce(tool_fwdType, \"unknown\")+\". Connection: \"+coalesce(tool_conn, \"unknown\")+\". Recent _internal errors: \"+coalesce(tostring(tool_err_count), \"0\")+\" (\"+coalesce(tool_err_component, \"none\")+\"). Playbook: \"+coalesce(playbook_name, \"none\")+\". Likely cause: \"+coalesce(likely_cause, \"unknown\")+\". Suggested fix: \"+suggested_fix+\". Splunk Web: \"+coalesce(splunk_web_path, \"n/a\")+\". Reply with root cause, confidence, and step-by-step admin actions. Do not request secrets or HEC token values.\"\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank\n| sort _color_rank, issue, entity",
         "queryParameters": {
           "earliest": "-24h",
           "latest": "now"
@@ -94,15 +108,15 @@
       "name": "Work queue",
       "options": {
         "extend": "ds_dq_asked",
-        "query": "| eval fix=coalesce(suggested_fix, \"\")\n| eval fix=if(len(fix)>80, substr(fix,1,80).\"...\", fix)\n| eval action=if(action=\"Resolved\", \"Done\", \"Select\")\n| eval _ai_brief=ai_brief, _reset=\"WAIT\", _reset_decision=\"review\"\n| table finding_id, severity, issue, entity, fix, confidence, action, _ai_brief, _reset, _reset_decision, _color_rank"
+        "query": "| eval _gate=\"$tok_decision$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision\n| eval status=case(rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval action=if(status=\"open\", \"Select\", \"Done\")\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| eval fix=coalesce(suggested_fix, \"\")\n| eval fix=if(len(fix)>80, substr(fix,1,80).\"...\", fix)\n| eval _ai_brief=ai_brief, _reset_decision=\"review\", _ai_auto=\"ask\"\n| table finding_id, severity, issue, entity, fix, confidence, action, status, _ai_brief, _reset_decision, _ai_auto, _color_rank"
       }
     },
     "ds_dq_status": {
       "type": "ds.chain",
       "name": "Agent status",
       "options": {
-        "extend": "ds_dq_findings",
-        "query": "| where status=\"open\"\n| stats count as issues\n| eval agent_status=if(issues>0, \"RED\", \"GREEN\")\n| appendpipe [ stats count | where count=0 | eval issues=0, agent_status=\"GREEN\" ]"
+        "extend": "ds_dq_asked",
+        "query": "| eval _gate=\"$tok_decision$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision\n| eval status=case(rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| where status=\"open\"\n| stats count as issues\n| eval agent_status=if(issues>0, \"RED\", \"GREEN\")\n| appendpipe [ stats count | where count=0 | eval issues=0, agent_status=\"GREEN\" ]"
       }
     },
     "ds_dq_selected": {
@@ -110,7 +124,7 @@
       "name": "Selected suggestion",
       "options": {
         "extend": "ds_dq_asked",
-        "query": "| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\" AND finding_id!=\"\"\n| eval where_to_act=coalesce(splunk_web_path, \"Open the matching dashboard in this app\")\n| table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank"
+        "query": "| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\" AND finding_id!=\"\"\n| eval _gate=\"$tok_decision$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision\n| eval status=case(rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| eval where_to_act=coalesce(splunk_web_path, \"Open the matching dashboard in this app\")\n| table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank"
       }
     },
     "ds_dq_brief": {
@@ -125,9 +139,7 @@
       "type": "ds.search",
       "name": "Approve control",
       "options": {
-        "query": "| makeresults\n| eval selected=\"$tok_decision$\", finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval button_label=case(selected=\"approve\", \"APPROVED\", picked=1, \"APPROVE\", 1=1, \"PICK A ROW\")\n| eval button_color=case(selected=\"approve\", \"GREEN\", picked=1, \"YELLOW\", 1=1, \"WAIT\")\n| eval click_action=if(picked=1, \"approve\", \"review\")\n| table button_label, button_color, click_action",
-        "refresh": "30s",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval button_label=if(picked=1, \"APPROVE\", \"PICK A ROW FIRST\")\n| eval click_action=\"approve\"\n| eval _color_rank=if(picked=1, 2, 1)\n| table button_label, click_action, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -138,22 +150,7 @@
       "type": "ds.search",
       "name": "Dismiss control",
       "options": {
-        "query": "| makeresults\n| eval selected=\"$tok_decision$\", finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval button_label=case(selected=\"dismiss\", \"DISMISSED\", picked=1, \"DISMISS\", 1=1, \"PICK A ROW\")\n| eval button_color=case(selected=\"dismiss\", \"GREEN\", picked=1, \"YELLOW\", 1=1, \"WAIT\")\n| eval click_action=if(picked=1, \"dismiss\", \"review\")\n| table button_label, button_color, click_action",
-        "refresh": "30s",
-        "refreshType": "delay",
-        "queryParameters": {
-          "earliest": "0",
-          "latest": "now"
-        }
-      }
-    },
-    "ds_dq_ready": {
-      "type": "ds.search",
-      "name": "Implement control",
-      "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\", commit=\"$tok_commit$\"\n| eval ready=if(finding_id!=\"none\" AND finding_id!=\"\" AND (decision=\"approve\" OR decision=\"dismiss\"), 1, 0)\n| eval button_label=case(commit=\"SAVE\" AND ready=1, \"SAVED\", ready=1, \"SAVE\", 1=1, \"WAIT\")\n| eval button_color=case(commit=\"SAVE\" AND ready=1, \"GREEN\", ready=1, \"YELLOW\", 1=1, \"WAIT\")\n| eval click_action=if(ready=1, \"SAVE\", \"WAIT\")\n| table button_label, button_color, ready, click_action",
-        "refresh": "30s",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval button_label=if(picked=1, \"DISMISS\", \"PICK A ROW FIRST\")\n| eval click_action=\"dismiss\"\n| eval _color_rank=if(picked=1, 2, 1)\n| table button_label, click_action, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -162,24 +159,28 @@
     },
     "ds_dq_save": {
       "type": "ds.search",
-      "name": "Save decision",
+      "name": "Write agent decision",
       "options": {
-        "query": "| inputlookup dq_agent_approvals\n| append [\n    | makeresults\n    | eval commit=\"$tok_commit$\", decision=\"$tok_decision$\", finding_id=\"$tok_finding_id$\"\n    | where commit=\"SAVE\" AND finding_id!=\"none\" AND finding_id!=\"\" AND (decision=\"approve\" OR decision=\"dismiss\")\n    | eval actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\", entity=\"none\"\n    | table finding_id, decision, actor, decided_at, note, entity\n]\n| stats latest(decision) as decision, latest(actor) as actor, latest(decided_at) as decided_at, latest(note) as note, latest(entity) as entity by finding_id\n| outputlookup dq_agent_approvals\n| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank",
-        "refresh": "5m",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\"\n| where (decision=\"approve\" OR decision=\"dismiss\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\"\n| eval actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\", entity=\"none\"\n| eval _key=finding_id\n| table _key, finding_id, decision, actor, decided_at, note, entity\n| appendpipe [\n    | outputlookup append=true dq_agent_approvals\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
         }
       }
     },
+    "ds_dq_recorded": {
+      "type": "ds.chain",
+      "name": "Recorded decision",
+      "options": {
+        "extend": "ds_dq_save",
+        "query": "| where 1=0\n| append [\n| inputlookup dq_agent_approvals\n| eval _gate=\"$tok_decision$\"\n| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\" AND finding_id!=\"placeholder\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank\n]"
+      }
+    },
     "ds_dq_ai_status": {
       "type": "ds.search",
       "name": "AI provider status",
       "options": {
-        "query": "| inputlookup dq_agent_ai_config\n| where stanza=\"default\"\n| head 1\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval ai_status=case(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\", \"PROVIDER\", mode=\"provider\", \"MISCONFIG\", 1=1, \"LOCAL\")\n| eval status_color=case(ai_status=\"PROVIDER\", \"YELLOW\", ai_status=\"MISCONFIG\", \"RED\", 1=1, \"GREEN\")\n| eval _color_rank=case(ai_status=\"MISCONFIG\", 1, ai_status=\"PROVIDER\", 2, 1=1, 3)\n| table ai_status, status_color, mode, provider, provider_label, model, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
-        "refresh": "30s",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval stanza=\"default\", mode=\"off\", provider=\"none\", model=\"none\", endpoint=\"none\", api_key=\"none\", inbox_index=\"_internal\", inbox_sourcetype=\"derek_health_ai_unconfigured\", updated_by=\"system\", updated_at=\"0\", note=\"seed\", _seed=1\n| inputlookup append=true dq_agent_ai_config\n| eval stanza=coalesce(stanza, \"default\")\n| eval _seed=coalesce(_seed, 0)\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval rank=case(key_ok=1, 3, _seed=0, 2, 1=1, 1)\n| sort 0 -rank\n| dedup stanza\n| where stanza=\"default\"\n| head 1\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval key_state=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", \"SET\", \"MISSING\")\n| eval model_ok=if(isnotnull(model) AND model!=\"\" AND model!=\"none\", 1, 0)\n| eval endpoint_ok=if(isnotnull(endpoint) AND endpoint!=\"\" AND endpoint!=\"none\", 1, 0)\n| eval endpoint_https=if(match(lower(coalesce(endpoint, \"\")), \"^https://[a-z0-9]\"), 1, 0)\n| eval key_shape=if(key_state=\"SET\" AND len(api_key)>=8, \"ok\", \"bad\")\n| eval setup_reason=case(\n    mode!=\"provider\" OR provider=\"none\" OR provider=\"\", \"Local only. No provider is saved.\",\n    key_state!=\"SET\", \"Setup incomplete: API key is missing. Enter a key and click SAVE.\",\n    model_ok=0, \"Setup incomplete: model is missing. Enter a model id and click SAVE.\",\n    endpoint_ok=0, \"Setup incomplete: \".coalesce(provider_label, provider).\" has no endpoint. Set default_endpoint in the provider catalog, then SAVE again.\",\n    1=1, \"Ready. Provider \".coalesce(provider_label, provider).\", model \".model.\", key SET.\")\n| eval ai_status=case(\n    mode!=\"provider\" OR provider=\"none\" OR provider=\"\", \"LOCAL\",\n    key_state=\"SET\" AND model_ok=1 AND endpoint_ok=1, \"READY\",\n    1=1, \"FAILED\")\n| fields - api_key\n| eval finding_id=\"connection_test\"\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS ping_status, requested_at AS ping_at, note AS ping_note, provider AS ping_provider\n| eval ping_match=if(coalesce(ping_provider, \"\") = provider, 1, 0)\n| eval conn_status=case(\n    ai_status=\"LOCAL\", \"SKIP\",\n    ai_status=\"FAILED\", \"FAIL\",\n    key_shape!=\"ok\", \"FAIL\",\n    endpoint_https!=1, \"FAIL\",\n    ping_match=1 AND ping_status=\"replied\", \"PASS\",\n    ping_match=1 AND (ping_status=\"failed\" OR ping_status=\"error\"), \"FAIL\",\n    1=1, \"TESTING\")\n| eval conn_reason=case(\n    conn_status=\"SKIP\", \"No provider is set. Connection test was not run.\",\n    ai_status=\"FAILED\", setup_reason,\n    key_shape!=\"ok\", \"Connection test failed: API key is missing or too short. Enter a key and click SAVE.\",\n    endpoint_https!=1, \"Connection test failed: endpoint is not HTTPS. Set default_endpoint to an https URL in the provider catalog, then SAVE.\",\n    conn_status=\"PASS\" AND provider=\"anthropic\", \"Connection test passed at \".ping_at.\". Anthropic Messages API (https://api.anthropic.com/v1/messages) replied from this search head.\",\n    conn_status=\"PASS\", \"Connection test passed at \".ping_at.\". \".coalesce(provider_label, provider).\" replied from this search head.\",\n    conn_status=\"FAIL\", coalesce(ping_note, \"Connection test failed.\").\" Fix it, then click SAVE to test again.\",\n    1=1, \"No connection test has run for this provider yet. Click SAVE to test.\")\n| eval tile_status=case(conn_status=\"SKIP\", \"LOCAL\", conn_status=\"FAIL\", \"FAILED\", 1=1, conn_status)\n| eval status_color=ai_status\n| eval _color_rank=case(conn_status=\"FAIL\" OR ai_status=\"FAILED\", 1, conn_status=\"TESTING\", 2, 1=1, 3)\n| table setup_reason, ai_status, conn_status, conn_reason, tile_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -190,26 +191,38 @@
       "type": "ds.search",
       "name": "Ask AI control",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", confirm=\"$tok_ai_confirm$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, updated_at\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval ready=if(confirm=\"ASK\" AND finding_id!=\"none\" AND finding_id!=\"\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\", 1, 0)\n| eval button_label=case(mode!=\"provider\", \"OPEN AI SETUP FIRST\", ready=1, \"CLICK TO ASK AI\", 1=1, \"TYPE ASK AFTER A REVIEW\")\n| eval button_color=if(ready=1, \"YELLOW\", \"N/A\")\n| table button_label, button_color, ready",
-        "refresh": "30s",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1, 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", configured=0, \"OPEN AI SETUP FIRST\", 1=1, \"ASK AGAIN\")\n| eval click_action=\"retry\".tostring(now())\n| eval _color_rank=if(picked=1 AND configured=1, 3, 1)\n| table button_label, click_action, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
         }
       }
     },
-    "ds_dq_ai_replies": {
+    "ds_dq_ai_write": {
       "type": "ds.search",
-      "name": "AI provider replies",
+      "name": "Write ASK request",
       "options": {
-        "query": "search [| inputlookup dq_agent_ai_config | where stanza=\"default\" | head 1 | eval inbox_index=replace(coalesce(inbox_index, \"_internal\"), \"[^A-Za-z0-9_]\", \"\") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\"), \"[^A-Za-z0-9_]\", \"\") | eval search=\"index=\".inbox_index.\" sourcetype=\".inbox_sourcetype | return $search]\n| eval fid=\"$tok_finding_id$\"\n| where fid!=\"none\" AND fid!=\"\" AND (finding_id=fid OR match(coalesce(_raw, \"\"), fid))\n| eval reply=coalesce(reply, ai_reply, _raw)\n| sort 0 -_time\n| head 10\n| table _time, provider, model, finding_id, reply",
-        "refresh": "30s",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval ask=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| where match(ask, \"^(ask|retry)\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS prev_status, requested_at AS prev_at\n| eval prev_age=coalesce(now()-strptime(coalesce(tostring(prev_at), \"\"), \"%Y-%m-%d %H:%M:%S\"), 99999)\n| where NOT (prev_status=\"replied\" AND prev_age<3600 AND ask=\"ask\")\n| lookup dq_agent_ai_providers provider OUTPUT default_endpoint\n| eval endpoint=if(endpoint=\"none\" OR isnull(endpoint) OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\")\n| eval entity=if(entity=\"\" OR isnull(entity), \"none\", entity)\n| eval issue=if(issue=\"\" OR isnull(issue), \"none\", issue)\n| eval ai_brief=if(ai_brief=\"\" OR isnull(ai_brief), \"none\", ai_brief)\n| eval is_ping=0\n| derekaiping\n| eval status=if(ai_result=\"replied\", \"replied\", \"failed\")\n| eval note=if(ai_result=\"replied\", \"ask_ai_provider\", \"ask failed: \".coalesce(ai_error, \"no reply\"))\n| eval reply=if(ai_result=\"replied\", ai_reply, \"none\")\n| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_requests\n    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id\n    | outputlookup dq_agent_ai_requests\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(status=\"replied\", 3, 1)\n| table requested_at, finding_id, provider, status, _color_rank",
         "queryParameters": {
-          "earliest": "-24h",
+          "earliest": "0",
           "latest": "now"
         }
+      }
+    },
+    "ds_dq_ai_ask_status": {
+      "type": "ds.chain",
+      "name": "ASK wait or fail",
+      "options": {
+        "extend": "ds_dq_ai_write",
+        "query": "| where 1=0\n| append [\n| makeresults\n| eval finding_id=\"$tok_finding_id$\", ask=\"$tok_ai_ask$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, api_key, endpoint, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1 AND isnotnull(model) AND model!=\"none\" AND model!=\"\", 1, 0)\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider AS req_provider, note AS req_note\n| eval wait_sec=now()-strptime(coalesce(tostring(requested_at), \"\"), \"%Y-%m-%d %H:%M:%S\")\n| eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())\n| eval ask_state=case(\n    picked=0, \"IDLE\",\n    mode!=\"provider\", \"IDLE\",\n    match(ask, \"^(ask|retry)\") AND configured=0, \"FAILED\",\n    req_status=\"failed\" OR req_status=\"error\", \"FAILED\",\n    req_status=\"done\" OR req_status=\"replied\", \"REPLIED\",\n    req_status=\"pending\" AND wait_min>=15, \"STALLED\",\n    req_status=\"pending\", \"WAITING\",\n    match(ask, \"^(ask|retry)\") AND configured=1 AND (isnull(req_status) OR req_status=\"\" OR req_status=\"none\"), \"WAITING\",\n    1=1, \"IDLE\")\n| eval ask_message=case(\n    ask_state=\"IDLE\" AND picked=0, \"Select a row in the work queue. The AI suggested fix fills in automatically.\",\n    ask_state=\"IDLE\" AND mode!=\"provider\", \"AI provider is off, so the playbook fix above is the suggestion. Open AI provider setup and SAVE a provider to get an AI suggested fix automatically.\",\n    ask_state=\"IDLE\", \"No AI request yet for this suggestion.\",\n    ask_state=\"FAILED\" AND configured=0, \"ASK failed: AI provider is not ready. Open AI provider setup and SAVE provider, model, and key.\",\n    ask_state=\"FAILED\", \"ASK failed: \".coalesce(req_note, \"the provider returned an error.\"),\n    ask_state=\"WAITING\", \"Asking \".coalesce(req_provider, provider, \"the provider\")+\" for a suggested fix...\",\n    ask_state=\"STALLED\", \"Still waiting after \".tostring(wait_min).\" minutes. Click ASK AGAIN.\",\n    ask_state=\"REPLIED\", \"Provider replied. See the replies table below.\",\n    1=1, \"ASK status unknown.\")\n| eval _color_rank=case(ask_state=\"FAILED\" OR ask_state=\"STALLED\", 1, ask_state=\"WAITING\", 2, ask_state=\"REPLIED\", 3, 1=1, 3)\n| table ask_state, ask_message, _color_rank\n]"
+      }
+    },
+    "ds_dq_ai_replies": {
+      "type": "ds.chain",
+      "name": "AI suggested fix",
+      "options": {
+        "extend": "ds_dq_ai_write",
+        "query": "| where 1=0\n| append [\n| makeresults\n| eval _gate=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider, model, reply, note AS req_note\n| eval ai_suggested_fix=case(\n    picked=0, \"Select a row in the work queue. The AI suggested fix fills in here automatically.\",\n    req_status=\"replied\", reply,\n    req_status=\"failed\", \"The AI could not answer: \".coalesce(req_note, \"provider error\").\". Use the playbook fix above or click ASK AGAIN.\",\n    1=1, \"Asking the AI provider for a suggested fix... If no provider is set, use the playbook fix above.\")\n| eval from_ai=if(req_status=\"replied\", provider.\" / \".model, \"none\")\n| eval _color_rank=case(req_status=\"replied\", 3, req_status=\"failed\", 1, 1=1, 2)\n| table ai_suggested_fix, from_ai, requested_at, _color_rank\n]"
       }
     }
   },
@@ -217,7 +230,7 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Derek+ Data Quality Agent\n**1. Click Select** on a row. **2. Read** the suggested fix. **3. Click APPROVE or DISMISS**, then click **SAVE**. Search does not open. The agent never changes Splunk by itself.",
+        "markdown": "# Derek+ Data Quality Agent\n**1. Click Select** on a row. The AI asks your saved provider for a suggested fix automatically. **2. Read** the playbook fix and the AI suggested fix. **3. Click APPROVE or DISMISS** to record the decision. Search does not open. The agent never changes Splunk by itself.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -228,7 +241,7 @@
       "dataSources": {
         "primary": "ds_dq_status"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"agent_status\") | lastPoint()",
@@ -259,16 +272,56 @@
             "value": "#53A051"
           },
           {
+            "match": "READY",
+            "value": "#53A051"
+          },
+          {
             "match": "PROVIDER",
-            "value": "#F8BE34"
+            "value": "#53A051"
+          },
+          {
+            "match": "FAILED",
+            "value": "#DC4E41"
           },
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
           },
           {
+            "match": "WAITING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "STALLED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "REPLIED",
+            "value": "#53A051"
+          },
+          {
+            "match": "IDLE",
+            "value": "#6B6B6B"
+          },
+          {
             "match": "WAIT",
             "value": "#6B6B6B"
+          },
+          {
+            "match": "PASS",
+            "value": "#53A051"
+          },
+          {
+            "match": "TESTING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "SKIP",
+            "value": "#6B6B6B"
+          },
+          {
+            "match": "FAIL",
+            "value": "#DC4E41"
           }
         ]
       }
@@ -279,7 +332,7 @@
       "dataSources": {
         "primary": "ds_dq_status"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"issues\") | lastPoint()",
@@ -293,15 +346,15 @@
     },
     "viz_ai_status": {
       "type": "splunk.singlevalue",
-      "title": "AI provider (click to set up)",
+      "title": "AI setup (click to open)",
       "dataSources": {
         "primary": "ds_dq_ai_status"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
-        "majorValue": "> primary | seriesByName(\"ai_status\") | lastPoint()",
-        "majorColor": "> primary | seriesByName(\"ai_status\") | lastPoint() | matchValue(statusColors)",
+        "majorValue": "> primary | seriesByName(\"tile_status\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"tile_status\") | lastPoint() | matchValue(statusColors)",
         "backgroundColor": "transparent",
         "majorFontSize": 36
       },
@@ -328,16 +381,56 @@
             "value": "#53A051"
           },
           {
+            "match": "READY",
+            "value": "#53A051"
+          },
+          {
             "match": "PROVIDER",
-            "value": "#F8BE34"
+            "value": "#53A051"
+          },
+          {
+            "match": "FAILED",
+            "value": "#DC4E41"
           },
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
           },
           {
+            "match": "WAITING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "STALLED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "REPLIED",
+            "value": "#53A051"
+          },
+          {
+            "match": "IDLE",
+            "value": "#6B6B6B"
+          },
+          {
             "match": "WAIT",
             "value": "#6B6B6B"
+          },
+          {
+            "match": "PASS",
+            "value": "#53A051"
+          },
+          {
+            "match": "TESTING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "SKIP",
+            "value": "#6B6B6B"
+          },
+          {
+            "match": "FAIL",
+            "value": "#DC4E41"
           }
         ]
       },
@@ -374,26 +467,31 @@
             "align": "center"
           },
           "issue": {
-            "width": 250
+            "width": 220
           },
           "entity": {
-            "width": 150
+            "width": 140
           },
           "fix": {
-            "width": 380
+            "width": 320
           },
           "confidence": {
-            "width": 90,
+            "width": 80,
             "align": "center"
           },
           "action": {
-            "width": 120,
+            "width": 90,
+            "align": "center"
+          },
+          "status": {
+            "width": 90,
             "align": "center"
           },
           "finding_id": {
             "width": 80
           }
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -436,12 +534,12 @@
                 "key": "row._ai_brief.value"
               },
               {
-                "token": "tok_commit",
-                "key": "row._reset.value"
-              },
-              {
                 "token": "tok_decision",
                 "key": "row._reset_decision.value"
+              },
+              {
+                "token": "tok_ai_ask",
+                "key": "row._ai_auto.value"
               }
             ]
           }
@@ -462,7 +560,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -485,52 +584,43 @@
       }
     },
     "viz_approve": {
-      "type": "splunk.singlevalue",
-      "title": "3. Approve this suggestion",
+      "type": "splunk.table",
+      "title": "",
       "dataSources": {
         "primary": "ds_dq_approve"
       },
       "showLastUpdated": false,
       "showProgressBar": false,
       "options": {
-        "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-        "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
-        "backgroundColor": "transparent",
-        "majorFontSize": 28
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+          "headerBackgroundColor": "#53A051",
+          "headerColor": "#FFFFFF",
+          "cellTextColor": "#FFFFFF",
+          "align": "center"
+        },
+        "headerVisibility": "none",
+        "fontSize": "large",
+        "columnFormat": {
+          "button_label": {
+            "width": 380,
+            "align": "center"
+          },
+          "click_action": {
+            "width": 1
+          }
+        },
+        "backgroundColor": "#53A051"
       },
       "context": {
-        "statusColors": [
+        "btnColors": [
           {
-            "match": "GREEN",
+            "from": 0,
+            "to": 10,
             "value": "#53A051"
-          },
-          {
-            "match": "YELLOW",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "RED",
-            "value": "#DC4E41"
-          },
-          {
-            "match": "N/A",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "LOCAL",
-            "value": "#53A051"
-          },
-          {
-            "match": "PROVIDER",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "MISCONFIG",
-            "value": "#DC4E41"
-          },
-          {
-            "match": "WAIT",
-            "value": "#6B6B6B"
           }
         ]
       },
@@ -549,52 +639,43 @@
       ]
     },
     "viz_dismiss": {
-      "type": "splunk.singlevalue",
-      "title": "Or dismiss \u2014 not a real issue",
+      "type": "splunk.table",
+      "title": "",
       "dataSources": {
         "primary": "ds_dq_dismiss"
       },
       "showLastUpdated": false,
       "showProgressBar": false,
       "options": {
-        "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-        "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
-        "backgroundColor": "transparent",
-        "majorFontSize": 28
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+          "headerBackgroundColor": "#DC4E41",
+          "headerColor": "#FFFFFF",
+          "cellTextColor": "#FFFFFF",
+          "align": "center"
+        },
+        "headerVisibility": "none",
+        "fontSize": "large",
+        "columnFormat": {
+          "button_label": {
+            "width": 380,
+            "align": "center"
+          },
+          "click_action": {
+            "width": 1
+          }
+        },
+        "backgroundColor": "#DC4E41"
       },
       "context": {
-        "statusColors": [
+        "btnColors": [
           {
-            "match": "GREEN",
-            "value": "#53A051"
-          },
-          {
-            "match": "YELLOW",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "RED",
+            "from": 0,
+            "to": 10,
             "value": "#DC4E41"
-          },
-          {
-            "match": "N/A",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "LOCAL",
-            "value": "#53A051"
-          },
-          {
-            "match": "PROVIDER",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "MISCONFIG",
-            "value": "#DC4E41"
-          },
-          {
-            "match": "WAIT",
-            "value": "#6B6B6B"
           }
         ]
       },
@@ -612,77 +693,11 @@
         }
       ]
     },
-    "viz_implement": {
-      "type": "splunk.singlevalue",
-      "title": "3. Save decision \u2014 click SAVE",
-      "dataSources": {
-        "primary": "ds_dq_ready"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": false,
-      "options": {
-        "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-        "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
-        "backgroundColor": "transparent",
-        "majorFontSize": 36,
-        "underLabel": "Click APPROVE or DISMISS first. Search does not open.",
-        "underLabelFontSize": 14
-      },
-      "context": {
-        "statusColors": [
-          {
-            "match": "GREEN",
-            "value": "#53A051"
-          },
-          {
-            "match": "YELLOW",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "RED",
-            "value": "#DC4E41"
-          },
-          {
-            "match": "N/A",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "LOCAL",
-            "value": "#53A051"
-          },
-          {
-            "match": "PROVIDER",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "MISCONFIG",
-            "value": "#DC4E41"
-          },
-          {
-            "match": "WAIT",
-            "value": "#6B6B6B"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.setToken",
-          "options": {
-            "tokens": [
-              {
-                "token": "tok_commit",
-                "key": "row.click_action.value"
-              }
-            ]
-          }
-        }
-      ]
-    },
     "viz_recorded": {
       "type": "splunk.table",
       "title": "Recorded decision",
       "dataSources": {
-        "primary": "ds_dq_save"
+        "primary": "ds_dq_recorded"
       },
       "showLastUpdated": false,
       "showProgressBar": true,
@@ -692,7 +707,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -714,13 +730,28 @@
         ]
       }
     },
+    "viz_write": {
+      "type": "splunk.singlevalue",
+      "title": "",
+      "dataSources": {
+        "primary": "ds_dq_save"
+      },
+      "hideWhenNoData": true,
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"decision\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "majorFontSize": 14
+      }
+    },
     "viz_brief": {
       "type": "splunk.table",
       "title": "Optional \u2014 briefing to paste into Splunk AI Assistant",
       "dataSources": {
         "primary": "ds_dq_brief"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "count": 1,
@@ -728,7 +759,8 @@
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -748,30 +780,76 @@
             "value": "#14301A"
           }
         ]
+      }
+    },
+    "viz_ai_ask": {
+      "type": "splunk.table",
+      "title": "",
+      "dataSources": {
+        "primary": "ds_dq_ai_ready"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "options": {
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+          "headerBackgroundColor": "#7B56DB",
+          "headerColor": "#FFFFFF",
+          "cellTextColor": "#FFFFFF",
+          "align": "center"
+        },
+        "headerVisibility": "none",
+        "fontSize": "large",
+        "columnFormat": {
+          "button_label": {
+            "width": 380,
+            "align": "center"
+          },
+          "click_action": {
+            "width": 1
+          }
+        },
+        "backgroundColor": "#7B56DB"
+      },
+      "context": {
+        "btnColors": [
+          {
+            "from": 0,
+            "to": 10,
+            "value": "#7B56DB"
+          }
+        ]
       },
       "eventHandlers": [
         {
-          "type": "drilldown.linkToSearch",
+          "type": "drilldown.setToken",
           "options": {
-            "type": "auto",
-            "newTab": true
+            "tokens": [
+              {
+                "token": "tok_ai_ask",
+                "key": "row.click_action.value"
+              }
+            ]
           }
         }
       ]
     },
-    "viz_ai_ask": {
+    "viz_ai_ask_state": {
       "type": "splunk.singlevalue",
-      "title": "Optional \u2014 send briefing to your configured provider",
+      "title": "ASK status",
       "dataSources": {
-        "primary": "ds_dq_ai_ready"
+        "primary": "ds_dq_ai_ask_status"
       },
-      "showLastUpdated": true,
-      "showProgressBar": false,
+      "showLastUpdated": false,
+      "showProgressBar": true,
       "options": {
-        "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-        "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+        "majorValue": "> primary | seriesByName(\"ask_state\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"ask_state\") | lastPoint() | matchValue(statusColors)",
         "backgroundColor": "transparent",
-        "majorFontSize": 16
+        "majorFontSize": 36
       },
       "context": {
         "statusColors": [
@@ -796,45 +874,76 @@
             "value": "#53A051"
           },
           {
+            "match": "READY",
+            "value": "#53A051"
+          },
+          {
             "match": "PROVIDER",
-            "value": "#F8BE34"
+            "value": "#53A051"
+          },
+          {
+            "match": "FAILED",
+            "value": "#DC4E41"
           },
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
           },
           {
+            "match": "WAITING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "STALLED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "REPLIED",
+            "value": "#53A051"
+          },
+          {
+            "match": "IDLE",
+            "value": "#6B6B6B"
+          },
+          {
             "match": "WAIT",
             "value": "#6B6B6B"
+          },
+          {
+            "match": "PASS",
+            "value": "#53A051"
+          },
+          {
+            "match": "TESTING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "SKIP",
+            "value": "#6B6B6B"
+          },
+          {
+            "match": "FAIL",
+            "value": "#DC4E41"
           }
         ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "custom",
-            "newTab": true,
-            "query": "| inputlookup dq_agent_ai_requests | append [ | makeresults | eval finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", confirm=\"$tok_ai_confirm$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\" | lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, updated_at | eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1) | eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\")) | eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\")) | eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\")) | eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\")) | where confirm=\"ASK\" AND finding_id!=\"none\" AND finding_id!=\"\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" | eval status=\"pending\", actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ask_ai_provider\" | table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief ] | outputlookup dq_agent_ai_requests"
-          }
-        }
-      ]
+      }
     },
-    "viz_ai_replies": {
+    "viz_ai_ask_msg": {
       "type": "splunk.table",
-      "title": "Provider replies for this suggestion",
+      "title": "ASK result \u2014 waiting or failed",
       "dataSources": {
-        "primary": "ds_dq_ai_replies"
+        "primary": "ds_dq_ai_ask_status"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
-        "count": 5,
+        "count": 1,
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
+        },
+        "backgroundColor": "transparent"
       },
       "context": {
         "rowColors": [
@@ -854,174 +963,678 @@
             "value": "#14301A"
           }
         ]
+      }
+    },
+    "viz_ai_write": {
+      "type": "splunk.singlevalue",
+      "title": "",
+      "dataSources": {
+        "primary": "ds_dq_ai_write"
       },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
+      "hideWhenNoData": true,
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"status\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "majorFontSize": 14
+      }
+    },
+    "viz_ai_replies": {
+      "type": "splunk.table",
+      "title": "3. AI suggested fix \u2014 fills in when you select a row",
+      "dataSources": {
+        "primary": "ds_dq_ai_replies"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "columnFormat": {
+          "ai_suggested_fix": {
+            "width": 800
+          },
+          "from_ai": {
+            "width": 160
+          },
+          "requested_at": {
+            "width": 140
           }
-        }
-      ]
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      }
     },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Approve/Dismiss only records a decision. UF, HEC, and index repairs stay runbooks. API keys stay on **Configure \u2192 AI provider** / your gateway \u2014 never in this queue.",
+        "markdown": "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. Selecting a row asks the saved provider automatically; **ASK AGAIN** retries. Search does not open. The API key stays in the AI provider lookup \u2014 never in this queue table.",
         "fontSize": "default",
         "backgroundColor": "transparent"
+      }
+    },
+    "card_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#1B2342",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 3
+      }
+    },
+    "card_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_10": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_10": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_12": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
       }
     }
   },
   "layout": {
-    "type": "grid",
+    "type": "absolute",
+    "options": {
+      "width": 1200,
+      "height": 1562,
+      "display": "auto-scale",
+      "backgroundColor": "#0B0F19"
+    },
     "structure": [
+      {
+        "item": "card_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 1188,
+          "h": 78
+        }
+      },
+      {
+        "item": "bar_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 6,
+          "h": 78
+        }
+      },
       {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 0,
-          "w": 1200,
-          "h": 90
+          "x": 22,
+          "y": 14,
+          "w": 1164,
+          "h": 64
+        }
+      },
+      {
+        "item": "card_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 96,
+          "w": 388,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 96,
+          "w": 388,
+          "h": 4
         }
       },
       {
         "item": "viz_status",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 90,
-          "w": 400,
-          "h": 130
+          "x": 14,
+          "y": 104,
+          "w": 372,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_3",
+        "type": "block",
+        "position": {
+          "x": 406,
+          "y": 96,
+          "w": 388,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_3",
+        "type": "block",
+        "position": {
+          "x": 406,
+          "y": 96,
+          "w": 388,
+          "h": 4
         }
       },
       {
         "item": "viz_count",
         "type": "block",
         "position": {
-          "x": 400,
-          "y": 90,
-          "w": 400,
-          "h": 130
+          "x": 414,
+          "y": 104,
+          "w": 372,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_4",
+        "type": "block",
+        "position": {
+          "x": 806,
+          "y": 96,
+          "w": 388,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_4",
+        "type": "block",
+        "position": {
+          "x": 806,
+          "y": 96,
+          "w": 388,
+          "h": 4
         }
       },
       {
         "item": "viz_ai_status",
         "type": "block",
         "position": {
-          "x": 800,
-          "y": 90,
-          "w": 400,
-          "h": 130
+          "x": 814,
+          "y": 104,
+          "w": 372,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_5",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 226,
+          "w": 1188,
+          "h": 288
+        }
+      },
+      {
+        "item": "bar_5",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 226,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_findings",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 220,
-          "w": 1200,
-          "h": 300
+          "x": 14,
+          "y": 234,
+          "w": 1172,
+          "h": 274
+        }
+      },
+      {
+        "item": "card_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 526,
+          "w": 1188,
+          "h": 208
+        }
+      },
+      {
+        "item": "bar_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 526,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_selected",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 520,
-          "w": 1200,
-          "h": 220
+          "x": 14,
+          "y": 534,
+          "w": 1172,
+          "h": 194
         }
       },
       {
-        "item": "viz_approve",
+        "item": "card_7",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 740,
-          "w": 400,
-          "h": 150
+          "x": 6,
+          "y": 746,
+          "w": 1188,
+          "h": 158
         }
       },
       {
-        "item": "viz_dismiss",
+        "item": "bar_7",
         "type": "block",
         "position": {
-          "x": 400,
-          "y": 740,
-          "w": 400,
-          "h": 150
-        }
-      },
-      {
-        "item": "viz_implement",
-        "type": "block",
-        "position": {
-          "x": 800,
-          "y": 740,
-          "w": 400,
-          "h": 150
-        }
-      },
-      {
-        "item": "viz_recorded",
-        "type": "block",
-        "position": {
-          "x": 0,
-          "y": 890,
-          "w": 1200,
-          "h": 120
-        }
-      },
-      {
-        "item": "viz_brief",
-        "type": "block",
-        "position": {
-          "x": 0,
-          "y": 1010,
-          "w": 800,
-          "h": 150
-        }
-      },
-      {
-        "item": "viz_ai_ask",
-        "type": "block",
-        "position": {
-          "x": 800,
-          "y": 1010,
-          "w": 400,
-          "h": 150
+          "x": 6,
+          "y": 746,
+          "w": 1188,
+          "h": 4
         }
       },
       {
         "item": "viz_ai_replies",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1160,
-          "w": 1200,
-          "h": 150
+          "x": 14,
+          "y": 754,
+          "w": 1172,
+          "h": 144
+        }
+      },
+      {
+        "item": "card_8",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 916,
+          "w": 268,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_8",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 916,
+          "w": 268,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_ai_ask_state",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 924,
+          "w": 252,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_9",
+        "type": "block",
+        "position": {
+          "x": 286,
+          "y": 916,
+          "w": 908,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_9",
+        "type": "block",
+        "position": {
+          "x": 286,
+          "y": 916,
+          "w": 908,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_ai_ask_msg",
+        "type": "block",
+        "position": {
+          "x": 294,
+          "y": 924,
+          "w": 892,
+          "h": 104
+        }
+      },
+      {
+        "item": "viz_approve",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1046,
+          "w": 388,
+          "h": 78
+        }
+      },
+      {
+        "item": "viz_dismiss",
+        "type": "block",
+        "position": {
+          "x": 406,
+          "y": 1046,
+          "w": 388,
+          "h": 78
+        }
+      },
+      {
+        "item": "viz_ai_ask",
+        "type": "block",
+        "position": {
+          "x": 806,
+          "y": 1046,
+          "w": 388,
+          "h": 78
+        }
+      },
+      {
+        "item": "card_10",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1136,
+          "w": 1188,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_10",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1136,
+          "w": 1188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_recorded",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 1144,
+          "w": 1172,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_11",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1266,
+          "w": 1188,
+          "h": 118
+        }
+      },
+      {
+        "item": "bar_11",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1266,
+          "w": 1188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_brief",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 1274,
+          "w": 1172,
+          "h": 104
+        }
+      },
+      {
+        "item": "card_12",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1396,
+          "w": 1188,
+          "h": 68
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 1310,
-          "w": 1200,
-          "h": 80
+          "x": 14,
+          "y": 1404,
+          "w": 1172,
+          "h": 54
+        }
+      },
+      {
+        "item": "viz_write",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1476,
+          "w": 1188,
+          "h": 28
+        }
+      },
+      {
+        "item": "viz_ai_write",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1516,
+          "w": 1188,
+          "h": 28
         }
       }
     ],
     "globalInputs": [
       "input_global_trp",
-      "input_ask",
-      "input_ai_confirm"
+      "input_ask"
     ]
   }
 }

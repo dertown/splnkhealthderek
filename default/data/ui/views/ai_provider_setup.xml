@@ -1,39 +1,21 @@
 <dashboard version="2" theme="dark">
   <label>AI provider setup</label>
-  <description>Configure optional OpenAI, Cisco, Azure, or custom model integration. No API keys on this page.</description>
+  <description>Set provider, model, and key, then click SAVE. Search does not open.</description>
   <definition><![CDATA[
 {
   "title": "AI provider setup",
-  "description": "Configure optional OpenAI, Cisco, Azure, or custom model integration. No API keys on this page.",
+  "description": "Set provider, model, and key, then click SAVE. Search does not open.",
   "defaults": {},
   "inputs": {
-    "input_cfg_mode": {
-      "type": "input.dropdown",
-      "title": "AI mode",
-      "options": {
-        "token": "tok_cfg_mode",
-        "defaultValue": "off",
-        "items": [
-          {
-            "label": "Off \u2014 local briefing only",
-            "value": "off"
-          },
-          {
-            "label": "Provider \u2014 queue ASK to your gateway",
-            "value": "provider"
-          }
-        ]
-      }
-    },
     "input_cfg_provider": {
       "type": "input.dropdown",
-      "title": "Provider",
+      "title": "AI provider",
       "options": {
         "token": "tok_cfg_provider",
         "defaultValue": "none",
         "items": [
           {
-            "label": "None",
+            "label": "None \u2014 local briefing only",
             "value": "none"
           },
           {
@@ -60,58 +42,155 @@
       }
     },
     "input_cfg_model": {
-      "type": "input.text",
-      "title": "Model id (example gpt-4o-mini)",
+      "type": "input.dropdown",
+      "title": "Model",
       "options": {
         "token": "tok_cfg_model",
-        "defaultValue": "none"
+        "defaultValue": "none",
+        "selectFirstSearchResult": true,
+        "items": [
+          {
+            "label": "None \u2014 local briefing only",
+            "value": "none"
+          },
+          {
+            "label": "gpt-4o (OpenAI)",
+            "value": "gpt-4o"
+          },
+          {
+            "label": "gpt-4o-mini (OpenAI)",
+            "value": "gpt-4o-mini"
+          },
+          {
+            "label": "gpt-4.1 (OpenAI)",
+            "value": "gpt-4.1"
+          },
+          {
+            "label": "gpt-4.1-mini (OpenAI)",
+            "value": "gpt-4.1-mini"
+          },
+          {
+            "label": "o4-mini (OpenAI)",
+            "value": "o4-mini"
+          },
+          {
+            "label": "o3 (OpenAI)",
+            "value": "o3"
+          },
+          {
+            "label": "gpt-4o (Cisco AI Defense)",
+            "value": "gpt-4o"
+          },
+          {
+            "label": "gpt-4o-mini (Cisco AI Defense)",
+            "value": "gpt-4o-mini"
+          },
+          {
+            "label": "gpt-4.1 (Cisco AI Defense)",
+            "value": "gpt-4.1"
+          },
+          {
+            "label": "gpt-4o (Azure OpenAI)",
+            "value": "gpt-4o"
+          },
+          {
+            "label": "gpt-4o-mini (Azure OpenAI)",
+            "value": "gpt-4o-mini"
+          },
+          {
+            "label": "gpt-4.1 (Azure OpenAI)",
+            "value": "gpt-4.1"
+          },
+          {
+            "label": "Claude Sonnet 5.5 (Anthropic)",
+            "value": "claude-sonnet-5-5"
+          },
+          {
+            "label": "Claude Opus 5.5 (Anthropic)",
+            "value": "claude-opus-5-5"
+          },
+          {
+            "label": "Claude Haiku 5.5 (Anthropic)",
+            "value": "claude-haiku-5-5"
+          },
+          {
+            "label": "Claude Fable 5.1 (Anthropic)",
+            "value": "claude-fable-5-1"
+          },
+          {
+            "label": "Claude Haiku 4.5 (Anthropic)",
+            "value": "claude-haiku-4-5"
+          },
+          {
+            "label": "gpt-4o (Custom OpenAI-compatible)",
+            "value": "gpt-4o"
+          },
+          {
+            "label": "gpt-4o-mini (Custom OpenAI-compatible)",
+            "value": "gpt-4o-mini"
+          },
+          {
+            "label": "Llama 3.1 70B (Custom OpenAI-compatible)",
+            "value": "llama-3.1-70b"
+          },
+          {
+            "label": "Mixtral 8x7B (Custom OpenAI-compatible)",
+            "value": "mixtral-8x7b"
+          }
+        ]
+      },
+      "dataSources": {
+        "primary": "ds_ai_models"
       }
     },
-    "input_cfg_endpoint": {
+    "input_cfg_key": {
       "type": "input.text",
-      "title": "Chat endpoint URL (none = provider default)",
+      "title": "API key",
       "options": {
-        "token": "tok_cfg_endpoint",
-        "defaultValue": "none"
-      }
-    },
-    "input_cfg_inbox_index": {
-      "type": "input.text",
-      "title": "HEC reply index",
-      "options": {
-        "token": "tok_cfg_inbox_index",
-        "defaultValue": "main"
-      }
-    },
-    "input_cfg_inbox_sourcetype": {
-      "type": "input.text",
-      "title": "HEC reply sourcetype",
-      "options": {
-        "token": "tok_cfg_inbox_sourcetype",
-        "defaultValue": "derek_health_ai"
+        "token": "tok_cfg_key",
+        "defaultValue": ""
       }
     },
     "input_cfg_save": {
       "type": "input.text",
-      "title": "Type SAVE to write these settings",
+      "title": "Save latch (set by SAVE)",
       "options": {
         "token": "tok_cfg_save",
-        "defaultValue": "NO"
+        "defaultValue": "review"
       }
     }
   },
   "dataSources": {
     "ds_ai_current": {
-      "type": "ds.search",
+      "type": "ds.chain",
       "name": "Saved AI config",
       "options": {
-        "query": "| inputlookup dq_agent_ai_config\n| where stanza=\"default\"\n| head 1\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval ai_status=case(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\", \"PROVIDER\", mode=\"provider\", \"MISCONFIG\", 1=1, \"LOCAL\")\n| eval status_color=case(ai_status=\"PROVIDER\", \"YELLOW\", ai_status=\"MISCONFIG\", \"RED\", 1=1, \"GREEN\")\n| eval _color_rank=case(ai_status=\"MISCONFIG\", 1, ai_status=\"PROVIDER\", 2, 1=1, 3)\n| table ai_status, status_color, mode, provider, provider_label, model, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
-        "refresh": "30s",
-        "refreshType": "delay",
-        "queryParameters": {
-          "earliest": "0",
-          "latest": "now"
-        }
+        "extend": "ds_ai_conn_write",
+        "query": "| where 1=0\n| append [\n| makeresults\n| eval stanza=\"default\", mode=\"off\", provider=\"none\", model=\"none\", endpoint=\"none\", api_key=\"none\", inbox_index=\"_internal\", inbox_sourcetype=\"derek_health_ai_unconfigured\", updated_by=\"system\", updated_at=\"0\", note=\"seed\", _seed=1\n| inputlookup append=true dq_agent_ai_config\n| eval stanza=coalesce(stanza, \"default\")\n| eval _seed=coalesce(_seed, 0)\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval rank=case(key_ok=1, 3, _seed=0, 2, 1=1, 1)\n| sort 0 -rank\n| dedup stanza\n| where stanza=\"default\"\n| head 1\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval key_state=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", \"SET\", \"MISSING\")\n| eval model_ok=if(isnotnull(model) AND model!=\"\" AND model!=\"none\", 1, 0)\n| eval endpoint_ok=if(isnotnull(endpoint) AND endpoint!=\"\" AND endpoint!=\"none\", 1, 0)\n| eval endpoint_https=if(match(lower(coalesce(endpoint, \"\")), \"^https://[a-z0-9]\"), 1, 0)\n| eval key_shape=if(key_state=\"SET\" AND len(api_key)>=8, \"ok\", \"bad\")\n| eval setup_reason=case(\n    mode!=\"provider\" OR provider=\"none\" OR provider=\"\", \"Local only. No provider is saved.\",\n    key_state!=\"SET\", \"Setup incomplete: API key is missing. Enter a key and click SAVE.\",\n    model_ok=0, \"Setup incomplete: model is missing. Enter a model id and click SAVE.\",\n    endpoint_ok=0, \"Setup incomplete: \".coalesce(provider_label, provider).\" has no endpoint. Set default_endpoint in the provider catalog, then SAVE again.\",\n    1=1, \"Ready. Provider \".coalesce(provider_label, provider).\", model \".model.\", key SET.\")\n| eval ai_status=case(\n    mode!=\"provider\" OR provider=\"none\" OR provider=\"\", \"LOCAL\",\n    key_state=\"SET\" AND model_ok=1 AND endpoint_ok=1, \"READY\",\n    1=1, \"FAILED\")\n| fields - api_key\n| eval finding_id=\"connection_test\"\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS ping_status, requested_at AS ping_at, note AS ping_note, provider AS ping_provider\n| eval ping_match=if(coalesce(ping_provider, \"\") = provider, 1, 0)\n| eval conn_status=case(\n    ai_status=\"LOCAL\", \"SKIP\",\n    ai_status=\"FAILED\", \"FAIL\",\n    key_shape!=\"ok\", \"FAIL\",\n    endpoint_https!=1, \"FAIL\",\n    ping_match=1 AND ping_status=\"replied\", \"PASS\",\n    ping_match=1 AND (ping_status=\"failed\" OR ping_status=\"error\"), \"FAIL\",\n    1=1, \"TESTING\")\n| eval conn_reason=case(\n    conn_status=\"SKIP\", \"No provider is set. Connection test was not run.\",\n    ai_status=\"FAILED\", setup_reason,\n    key_shape!=\"ok\", \"Connection test failed: API key is missing or too short. Enter a key and click SAVE.\",\n    endpoint_https!=1, \"Connection test failed: endpoint is not HTTPS. Set default_endpoint to an https URL in the provider catalog, then SAVE.\",\n    conn_status=\"PASS\" AND provider=\"anthropic\", \"Connection test passed at \".ping_at.\". Anthropic Messages API (https://api.anthropic.com/v1/messages) replied from this search head.\",\n    conn_status=\"PASS\", \"Connection test passed at \".ping_at.\". \".coalesce(provider_label, provider).\" replied from this search head.\",\n    conn_status=\"FAIL\", coalesce(ping_note, \"Connection test failed.\").\" Fix it, then click SAVE to test again.\",\n    1=1, \"No connection test has run for this provider yet. Click SAVE to test.\")\n| eval tile_status=case(conn_status=\"SKIP\", \"LOCAL\", conn_status=\"FAIL\", \"FAILED\", 1=1, conn_status)\n| eval status_color=ai_status\n| eval _color_rank=case(conn_status=\"FAIL\" OR ai_status=\"FAILED\", 1, conn_status=\"TESTING\", 2, 1=1, 3)\n| table setup_reason, ai_status, conn_status, conn_reason, tile_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank\n| eval _gate=\"$tok_cfg_save$\"\n]"
+      }
+    },
+    "ds_ai_reason": {
+      "type": "ds.chain",
+      "name": "Setup reason",
+      "options": {
+        "extend": "ds_ai_current",
+        "query": "| table setup_reason, ai_status, _color_rank"
+      }
+    },
+    "ds_ai_conn_reason": {
+      "type": "ds.chain",
+      "name": "Connection test reason",
+      "options": {
+        "extend": "ds_ai_current",
+        "query": "| table conn_reason, conn_status, _color_rank"
+      }
+    },
+    "ds_ai_saved": {
+      "type": "ds.chain",
+      "name": "Saved settings view",
+      "options": {
+        "extend": "ds_ai_current",
+        "query": "| table mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank"
       }
     },
     "ds_ai_providers": {
@@ -119,8 +198,17 @@
       "name": "Provider catalog",
       "options": {
         "query": "| inputlookup dq_agent_ai_providers | eval _color_rank=3 | table provider, provider_label, default_endpoint, notes, _color_rank",
-        "refresh": "5m",
-        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "0",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_ai_models": {
+      "type": "ds.search",
+      "name": "Models for selected provider",
+      "options": {
+        "query": "| inputlookup dq_agent_ai_models\n| eval p=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\")\n| eval p=if(p=\"\" OR isnull(p), \"none\", p)\n| where provider=p\n| eval label=coalesce(model_label, model), value=model\n| table label, value\n| sort label",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -131,13 +219,30 @@
       "type": "ds.search",
       "name": "Save control",
       "options": {
-        "query": "| makeresults\n| eval confirm=\"$tok_cfg_save$\", mode=\"$tok_cfg_mode$\", provider=\"$tok_cfg_provider$\"\n| eval ready=if(confirm=\"SAVE\" AND (mode=\"off\" OR (mode=\"provider\" AND provider!=\"none\" AND provider!=\"\")), 1, 0)\n| eval button_label=if(ready=1, \"CLICK TO SAVE CONFIG\", \"TYPE SAVE TO WRITE SETTINGS\")\n| eval button_color=if(ready=1, \"YELLOW\", \"N/A\")\n| table button_label, button_color, ready",
-        "refresh": "30s",
-        "refreshType": "delay",
+        "query": "| makeresults\n| eval p=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\"), m=replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\"), k=len(replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\"))\n| eval button_label=\"SAVE\"\n| eval click_action=\"save|\".p.\"|\".m.\"|\".tostring(k)\n| eval _color_rank=3\n| table button_label, click_action, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
         }
+      }
+    },
+    "ds_ai_write": {
+      "type": "ds.search",
+      "name": "Write AI config",
+      "options": {
+        "query": "| makeresults\n| eval save=\"$tok_cfg_save$\"\n| eval want=\"save|\".replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\").\"|\".replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\").\"|\".tostring(len(replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\")))\n| eval stanza=\"default\", _key=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT inbox_index AS prev_inbox, inbox_sourcetype AS prev_st, endpoint AS prev_endpoint, api_key AS prev_key\n| eval provider=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\")\n| eval provider=if(provider=\"openai\" OR provider=\"cisco\" OR provider=\"azure\" OR provider=\"anthropic\" OR provider=\"custom\", provider, \"none\")\n| eval model=replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\")\n| eval model=if(model=\"\" OR isnull(model), \"none\", model)\n| eval api_key=replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\")\n| eval api_key=if(api_key=\"\" OR isnull(api_key) OR api_key=\"none\", coalesce(prev_key, \"none\"), api_key)\n| eval api_key=if(provider=\"none\", \"none\", api_key)\n| where save=want\n| eval mode=if(provider=\"none\", \"off\", \"provider\")\n| lookup dq_agent_ai_providers provider OUTPUT default_endpoint\n| eval endpoint=coalesce(default_endpoint, prev_endpoint, \"none\")\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval inbox_index=coalesce(prev_inbox, \"main\")\n| eval inbox_sourcetype=coalesce(prev_st, \"derek_health_ai\")\n| eval updated_by=\"human_dashboard\", updated_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ui_config\"\n| table _key, stanza, mode, provider, model, endpoint, api_key, inbox_index, inbox_sourcetype, updated_by, updated_at, note\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_config\n    | stats latest(mode) as mode, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(api_key) as api_key, latest(inbox_index) as inbox_index, latest(inbox_sourcetype) as inbox_sourcetype, latest(updated_by) as updated_by, latest(updated_at) as updated_at, latest(note) as note by stanza\n    | eval _key=stanza\n    | outputlookup dq_agent_ai_config\n]\n| where stanza=\"default\"\n| eval key_state=if(api_key!=\"none\" AND api_key!=\"\", \"SET\", \"MISSING\")\n| eval _color_rank=3\n| table updated_at, provider, model, key_state, mode, _color_rank",
+        "queryParameters": {
+          "earliest": "0",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_ai_conn_write": {
+      "type": "ds.chain",
+      "name": "Connection test",
+      "options": {
+        "extend": "ds_ai_write",
+        "query": "| where 1=0\n| append [\n| makeresults\n| eval save=\"$tok_cfg_save$\"\n| eval want=\"save|\".replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\").\"|\".replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\").\"|\".tostring(len(replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\")))\n| eval stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT api_key AS prev_key, endpoint AS prev_endpoint\n| eval provider=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\")\n| eval provider=if(provider=\"openai\" OR provider=\"cisco\" OR provider=\"azure\" OR provider=\"anthropic\" OR provider=\"custom\", provider, \"none\")\n| eval model=replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\")\n| eval model=if(model=\"\" OR isnull(model), \"none\", model)\n| eval api_key=replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\")\n| eval api_key=if(api_key=\"\" OR isnull(api_key) OR api_key=\"none\", coalesce(prev_key, \"none\"), api_key)\n| eval api_key=if(provider=\"none\", \"none\", api_key)\n| lookup dq_agent_ai_providers provider OUTPUT default_endpoint\n| eval endpoint=coalesce(default_endpoint, prev_endpoint, \"none\")\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\" AND len(api_key)>=8, 1, 0)\n| eval model_ok=if(model!=\"none\" AND model!=\"\", 1, 0)\n| eval endpoint_ok=if(match(lower(coalesce(endpoint, \"\")), \"^https://[a-z0-9]\"), 1, 0)\n| where save=want AND provider!=\"none\" AND key_ok=1 AND model_ok=1 AND endpoint_ok=1\n| eval finding_id=\"connection_test\", entity=\"ai_setup\", issue=\"connection_test\", actor=\"human_dashboard\"\n| eval requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\")\n| eval ai_brief=\"Connection test. Reply with the single word PONG.\"\n| eval is_ping=1\n| derekaiping\n| eval status=if(ai_result=\"replied\", \"replied\", \"failed\")\n| eval note=if(ai_result=\"replied\", \"connection_test ok\", \"connection_test failed: \".coalesce(ai_error, \"no reply\"))\n| eval reply=if(ai_result=\"replied\", ai_reply, \"none\")\n| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_requests\n    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id\n    | outputlookup dq_agent_ai_requests\n]\n| where finding_id=\"connection_test\"\n| eval _color_rank=if(status=\"replied\", 3, 1)\n| table requested_at, finding_id, provider, status, _color_rank\n]"
       }
     }
   },
@@ -145,18 +250,18 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# AI provider setup\nChoose how Derek+ talks to a model. This page stores **mode, provider, model, endpoint, and HEC inbox** only. **Never type API keys, HEC tokens, or webhook URLs here** \u2014 they are searchable. Put secrets in your gateway environment or Splunk **storage/passwords**.",
+        "markdown": "# AI provider setup\nPick an **AI provider**, then a **model** from the dropdown, enter the **API key**, and click **SAVE**. That writes provider config to KV Store on this search head (`dq_agent_ai_config`) and runs a **connection test**. Search does not open. The key is never shown after save and **survives app updates**. Leave key blank to keep the value already stored.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
     },
     "viz_status": {
       "type": "splunk.singlevalue",
-      "title": "Current mode",
+      "title": "Setup status",
       "dataSources": {
         "primary": "ds_ai_current"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
         "majorValue": "> primary | seriesByName(\"ai_status\") | lastPoint()",
@@ -187,131 +292,73 @@
             "value": "#53A051"
           },
           {
+            "match": "READY",
+            "value": "#53A051"
+          },
+          {
             "match": "PROVIDER",
-            "value": "#F8BE34"
+            "value": "#53A051"
+          },
+          {
+            "match": "FAILED",
+            "value": "#DC4E41"
           },
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
           },
           {
+            "match": "WAITING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "STALLED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "REPLIED",
+            "value": "#53A051"
+          },
+          {
+            "match": "IDLE",
+            "value": "#6B6B6B"
+          },
+          {
             "match": "WAIT",
             "value": "#6B6B6B"
+          },
+          {
+            "match": "PASS",
+            "value": "#53A051"
+          },
+          {
+            "match": "TESTING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "SKIP",
+            "value": "#6B6B6B"
+          },
+          {
+            "match": "FAIL",
+            "value": "#DC4E41"
           }
         ]
       }
     },
-    "viz_steps": {
-      "type": "splunk.markdown",
-      "options": {
-        "markdown": "## After you save\n1. Enable **Exec Health - AI provider dispatch**.\n2. On that search, add a **webhook** in Splunk Web to your gateway (OpenAI, Cisco AI Defense, Azure, or `tools/ai_gateway_example.py`).\n3. Point the gateway at this HEC index/sourcetype.\n4. Open **Derek+ Data Quality Agent**, review a finding, type **ASK**, press **Run**.\nCisco endpoint looks like `https://gateway.aidefense.security.cisco.com/<tenant>/connections/<conn>/v1/chat/completions`.",
-        "fontSize": "default",
-        "backgroundColor": "transparent"
-      }
-    },
-    "viz_current": {
-      "type": "splunk.table",
-      "title": "Saved integration settings (no secrets)",
+    "viz_conn": {
+      "type": "splunk.singlevalue",
+      "title": "Connection test",
       "dataSources": {
         "primary": "ds_ai_current"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
-        "count": 5,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#5C1A1A"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#5C4A12"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#14301A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_providers": {
-      "type": "splunk.table",
-      "title": "Supported providers",
-      "dataSources": {
-        "primary": "ds_ai_providers"
-      },
-      "showLastUpdated": true,
-      "showProgressBar": true,
-      "options": {
-        "count": 10,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        }
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#5C1A1A"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#5C4A12"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#14301A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_save": {
-      "type": "splunk.singlevalue",
-      "title": "Save (opens Search; you must press Run)",
-      "dataSources": {
-        "primary": "ds_ai_save"
-      },
-      "showLastUpdated": true,
-      "showProgressBar": false,
-      "options": {
-        "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-        "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
+        "majorValue": "> primary | seriesByName(\"conn_status\") | lastPoint()",
+        "majorColor": "> primary | seriesByName(\"conn_status\") | lastPoint() | matchValue(statusColors)",
         "backgroundColor": "transparent",
-        "majorFontSize": 22
+        "majorFontSize": 36
       },
       "context": {
         "statusColors": [
@@ -336,121 +383,759 @@
             "value": "#53A051"
           },
           {
+            "match": "READY",
+            "value": "#53A051"
+          },
+          {
             "match": "PROVIDER",
-            "value": "#F8BE34"
+            "value": "#53A051"
+          },
+          {
+            "match": "FAILED",
+            "value": "#DC4E41"
           },
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
           },
           {
+            "match": "WAITING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "STALLED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "REPLIED",
+            "value": "#53A051"
+          },
+          {
+            "match": "IDLE",
+            "value": "#6B6B6B"
+          },
+          {
             "match": "WAIT",
             "value": "#6B6B6B"
+          },
+          {
+            "match": "PASS",
+            "value": "#53A051"
+          },
+          {
+            "match": "TESTING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "SKIP",
+            "value": "#6B6B6B"
+          },
+          {
+            "match": "FAIL",
+            "value": "#DC4E41"
+          }
+        ]
+      }
+    },
+    "viz_reason": {
+      "type": "splunk.table",
+      "title": "Why this status",
+      "dataSources": {
+        "primary": "ds_ai_reason"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      }
+    },
+    "viz_conn_reason": {
+      "type": "splunk.table",
+      "title": "Connection test",
+      "dataSources": {
+        "primary": "ds_ai_conn_reason"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      }
+    },
+    "viz_steps": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "## After a READY save\nSAVE sends one short ping **straight from this search head** to the provider with the `derekaiping` command. **Anthropic** goes to `https://api.anthropic.com/v1/messages` with a Claude model. No gateway or webhook. **PASS** means the provider replied. **FAIL** has the provider's reason in **Connection test** (for example HTTP 401 means the key was rejected).\n1. Pick the provider and model, enter the key, click **SAVE**.\n2. Splunk Cloud must allow outbound HTTPS from the search head to the provider host. If the reason says it cannot reach the provider, ask Splunk Support to allow it.\n3. Open **Derek+ Data Quality Agent**, review a finding, click **ASK**.\n**FAILED** setup means provider, model, key, or endpoint is missing. Pick **None** and SAVE to turn the provider off.",
+        "fontSize": "default",
+        "backgroundColor": "transparent"
+      }
+    },
+    "viz_current": {
+      "type": "splunk.table",
+      "title": "Saved settings (key is stored, not displayed)",
+      "dataSources": {
+        "primary": "ds_ai_saved"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 5,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      }
+    },
+    "viz_providers": {
+      "type": "splunk.table",
+      "title": "Supported providers",
+      "dataSources": {
+        "primary": "ds_ai_providers"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 10,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      }
+    },
+    "viz_save": {
+      "type": "splunk.table",
+      "title": "",
+      "dataSources": {
+        "primary": "ds_ai_save"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "options": {
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+          "headerBackgroundColor": "#53A051",
+          "headerColor": "#FFFFFF",
+          "cellTextColor": "#FFFFFF",
+          "align": "center"
+        },
+        "headerVisibility": "none",
+        "fontSize": "large",
+        "columnFormat": {
+          "button_label": {
+            "width": 380,
+            "align": "center"
+          },
+          "click_action": {
+            "width": 1
+          }
+        },
+        "backgroundColor": "#53A051"
+      },
+      "context": {
+        "btnColors": [
+          {
+            "from": 0,
+            "to": 10,
+            "value": "#53A051"
           }
         ]
       },
       "eventHandlers": [
         {
-          "type": "drilldown.linkToSearch",
+          "type": "drilldown.setToken",
           "options": {
-            "type": "custom",
-            "newTab": true,
-            "query": "| inputlookup dq_agent_ai_config | eval src=1 | append [ | makeresults | eval confirm=\"$tok_cfg_save$\" | eval mode=lower(\"$tok_cfg_mode$\") | eval mode=if(mode=\"provider\", \"provider\", \"off\") | eval provider=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\") | eval provider=if(provider=\"openai\" OR provider=\"cisco\" OR provider=\"azure\" OR provider=\"anthropic\" OR provider=\"custom\", provider, \"none\") | eval model=replace(lower(\"$tok_cfg_model$\"), \"[^a-z0-9._-]\", \"\") | eval model=if(model=\"\" OR isnull(model), \"none\", model) | eval endpoint=replace(\"$tok_cfg_endpoint$\", \"[^-A-Za-z0-9:/.?&=]\", \"\") | eval endpoint=if(endpoint=\"\" OR isnull(endpoint), \"none\", endpoint) | eval inbox_index=replace(\"$tok_cfg_inbox_index$\", \"[^A-Za-z0-9_]\", \"\") | eval inbox_index=if(inbox_index=\"\" OR isnull(inbox_index), \"_internal\", inbox_index) | eval inbox_sourcetype=replace(\"$tok_cfg_inbox_sourcetype$\", \"[^A-Za-z0-9_]\", \"\") | eval inbox_sourcetype=if(inbox_sourcetype=\"\" OR isnull(inbox_sourcetype), \"derek_health_ai_unconfigured\", inbox_sourcetype) | where confirm=\"SAVE\" AND (mode=\"off\" OR (mode=\"provider\" AND provider!=\"none\")) | eval stanza=\"default\", src=2, updated_by=\"human_dashboard\", updated_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ui_config\" | table stanza, mode, provider, model, endpoint, inbox_index, inbox_sourcetype, updated_by, updated_at, note, src ] | sort stanza, -src | dedup stanza | fields - src | outputlookup dq_agent_ai_config"
+            "tokens": [
+              {
+                "token": "tok_cfg_save",
+                "key": "row.click_action.value"
+              }
+            ]
           }
         }
       ]
     },
+    "viz_write": {
+      "type": "splunk.singlevalue",
+      "title": "",
+      "dataSources": {
+        "primary": "ds_ai_write"
+      },
+      "hideWhenNoData": true,
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"key_state\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "majorFontSize": 14
+      }
+    },
+    "viz_conn_write": {
+      "type": "splunk.singlevalue",
+      "title": "",
+      "dataSources": {
+        "primary": "ds_ai_conn_write"
+      },
+      "hideWhenNoData": true,
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"status\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "majorFontSize": 14
+      }
+    },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Saving writes `lookups/dq_agent_ai_config.csv` on this search head. It does not call a model and does not change `inputs.conf`. Webhook URLs and API keys never belong in this lookup.",
+        "markdown": "SAVE stores the key in KV Store collection `dq_agent_ai_config` on this search head. App updates do not overwrite it. The install package does not ship a live API key. HEC token secrets and webhook URLs still do not belong in this app. The key is read only by the search that calls the provider.",
         "fontSize": "default",
         "backgroundColor": "transparent"
+      }
+    },
+    "card_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#1B2342",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_1": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 3
+      }
+    },
+    "card_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_2": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_3": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#00CDAF",
+        "rx": 2
+      }
+    },
+    "card_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_4": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_5": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_6": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "card_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_8": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
       }
     }
   },
   "layout": {
-    "type": "grid",
+    "type": "absolute",
+    "options": {
+      "width": 1200,
+      "height": 1047,
+      "display": "auto-scale",
+      "backgroundColor": "#0B0F19"
+    },
     "structure": [
+      {
+        "item": "card_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 1188,
+          "h": 78
+        }
+      },
+      {
+        "item": "bar_1",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 6,
+          "w": 6,
+          "h": 78
+        }
+      },
       {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 0,
-          "w": 1200,
-          "h": 140
+          "x": 22,
+          "y": 14,
+          "w": 1164,
+          "h": 64
         }
       },
       {
-        "item": "viz_status",
-        "type": "block",
+        "item": "input_cfg_provider",
+        "type": "input",
         "position": {
-          "x": 0,
-          "y": 140,
-          "w": 300,
-          "h": 180
+          "x": 6,
+          "y": 96,
+          "w": 238,
+          "h": 89
         }
       },
       {
-        "item": "viz_steps",
-        "type": "block",
+        "item": "input_cfg_model",
+        "type": "input",
         "position": {
-          "x": 300,
-          "y": 140,
-          "w": 900,
-          "h": 180
+          "x": 256,
+          "y": 96,
+          "w": 238,
+          "h": 89
         }
       },
       {
-        "item": "viz_current",
-        "type": "block",
+        "item": "input_cfg_key",
+        "type": "input",
         "position": {
-          "x": 0,
-          "y": 320,
-          "w": 1200,
-          "h": 200
-        }
-      },
-      {
-        "item": "viz_providers",
-        "type": "block",
-        "position": {
-          "x": 0,
-          "y": 520,
-          "w": 1200,
-          "h": 240
+          "x": 506,
+          "y": 96,
+          "w": 388,
+          "h": 89
         }
       },
       {
         "item": "viz_save",
         "type": "block",
         "position": {
-          "x": 0,
-          "y": 760,
-          "w": 400,
-          "h": 200
+          "x": 906,
+          "y": 96,
+          "w": 288,
+          "h": 83
+        }
+      },
+      {
+        "item": "card_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 191,
+          "w": 188,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_2",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 191,
+          "w": 188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_status",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 199,
+          "w": 172,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_3",
+        "type": "block",
+        "position": {
+          "x": 206,
+          "y": 191,
+          "w": 188,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_3",
+        "type": "block",
+        "position": {
+          "x": 206,
+          "y": 191,
+          "w": 188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_conn",
+        "type": "block",
+        "position": {
+          "x": 214,
+          "y": 199,
+          "w": 172,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_4",
+        "type": "block",
+        "position": {
+          "x": 406,
+          "y": 191,
+          "w": 388,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_4",
+        "type": "block",
+        "position": {
+          "x": 406,
+          "y": 191,
+          "w": 388,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_reason",
+        "type": "block",
+        "position": {
+          "x": 414,
+          "y": 199,
+          "w": 372,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_5",
+        "type": "block",
+        "position": {
+          "x": 806,
+          "y": 191,
+          "w": 388,
+          "h": 128
+        }
+      },
+      {
+        "item": "bar_5",
+        "type": "block",
+        "position": {
+          "x": 806,
+          "y": 191,
+          "w": 388,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_conn_reason",
+        "type": "block",
+        "position": {
+          "x": 814,
+          "y": 199,
+          "w": 372,
+          "h": 114
+        }
+      },
+      {
+        "item": "card_6",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 331,
+          "w": 1188,
+          "h": 138
+        }
+      },
+      {
+        "item": "viz_steps",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 339,
+          "w": 1172,
+          "h": 124
+        }
+      },
+      {
+        "item": "card_7",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 481,
+          "w": 1188,
+          "h": 168
+        }
+      },
+      {
+        "item": "bar_7",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 481,
+          "w": 1188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_current",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 489,
+          "w": 1172,
+          "h": 154
+        }
+      },
+      {
+        "item": "card_8",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 661,
+          "w": 1188,
+          "h": 208
+        }
+      },
+      {
+        "item": "bar_8",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 661,
+          "w": 1188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_providers",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 669,
+          "w": 1172,
+          "h": 194
+        }
+      },
+      {
+        "item": "card_9",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 881,
+          "w": 1188,
+          "h": 68
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 400,
-          "y": 760,
-          "w": 800,
-          "h": 200
+          "x": 14,
+          "y": 889,
+          "w": 1172,
+          "h": 54
+        }
+      },
+      {
+        "item": "viz_write",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 961,
+          "w": 1188,
+          "h": 28
+        }
+      },
+      {
+        "item": "viz_conn_write",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1001,
+          "w": 1188,
+          "h": 28
         }
       }
-    ],
-    "globalInputs": [
-      "input_cfg_mode",
-      "input_cfg_provider",
-      "input_cfg_model",
-      "input_cfg_endpoint",
-      "input_cfg_inbox_index",
-      "input_cfg_inbox_sourcetype",
-      "input_cfg_save"
     ]
   }
 }
