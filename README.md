@@ -18,7 +18,7 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
 | **Data Topology** | Link graph and Sankey of data sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port / HEC / SC4S → index, plus forwarder → indexer. Click a source for latest event, totals, 24h trend, and 2σ drop/burst outliers |
 | **Derek+ Data Quality Agent** | Agentic loop over health tiles and learned ingest bounds (instance features, silent hosts, search CPU, HEC, SC4S, Edge). A human must click APPROVE or DISMISS before anything is recorded. |
-| **AI provider setup** | Configure OpenAI / Cisco / Azure / Anthropic / custom (mode, model, endpoint, HEC inbox). No API keys on this page. |
+| **AI provider setup** | Set AI provider, model, and key in the UI, then SAVE to the search-head config lookup |
 
 Saved searches (all **disabled** on install):
 
@@ -54,7 +54,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/` Python, no `
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.9.spl`.
+3. Upload `dist/splunk_exec_health-1.7.13.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -85,7 +85,7 @@ Do not put SMTP passwords, Slack webhook URLs, API tokens, or HEC token **secret
 
 ## Derek+ Data Quality Agent
 
-The agent is a **search-head loop**. It ships with **LOCAL** AI mode (no outbound LLM, no API keys in the app). You can optionally configure a provider (OpenAI, Cisco AI Defense, Azure OpenAI, Anthropic, or a custom OpenAI-compatible proxy). Each cycle:
+The agent is a **search-head loop**. It ships with **LOCAL** AI mode (no outbound LLM, no keys in the install package). You can optionally configure a provider (OpenAI, Cisco AI Defense, Azure OpenAI, Anthropic, or a custom OpenAI-compatible proxy). Each cycle:
 
 1. **Observe** — health tiles and learned bounds: `health.log` features, live ingest, license 7-day MA, `predict()`, host 2-sigma, HEC silence, heartbeat vs data / HOST DOWN, search CPU, SC4S errors, Edge queues.
 2. **Investigate** — tools: `tcpin_connections` forwarder type/connection, recent `_internal` ERROR/WARN component counts, `_introspection` CPU, Edge `mstats`.
@@ -100,21 +100,20 @@ To work a suggestion:
 1. Filter if you want (or leave `all`) and click **Select** on a work-queue row.
 2. Read **This suggestion** — likely cause, suggested fix, and where to act.
 3. Click **APPROVE** or **DISMISS**. The recorded decision panel fills and the queue row turns green. Search does not open. This app sets `outputlookup` `is_risky = false` in `default/commands.conf` so Splunk Cloud will run that write on the dashboard.
-4. Optional: type `ASK` to send the briefing to a configured AI provider.
+4. Optional: click **ASK** to send the briefing to a configured AI provider. Search does not open.
 
-Enable **Exec Health - Data quality agent report** if you want open findings emailed. Never put passwords, HEC secrets, webhook URLs, or LLM keys in the lookups.
+Enable **Exec Health - Data quality agent report** if you want open findings emailed. Never put HEC token secrets or webhook URLs in the lookups. The AI key is entered on **AI provider setup** only.
 
 ### Optional AI provider
 
-Use **Configure → AI provider** (or click the AI provider tile on the agent dashboard). That page writes `lookups/dq_agent_ai_config.csv`. It has **no API key field**.
+Use **Configure → AI provider** (or click the AI provider tile on the agent dashboard). Fill in **AI provider**, **model**, and **API key**, then click **SAVE**. Search does not open. That writes `lookups/dq_agent_ai_config.csv` on this search head. The install package ships `api_key=none`; dashboards show **SET** / **MISSING**, not the key.
 
-1. Set mode to **Provider**, pick OpenAI / Cisco AI Defense / Azure OpenAI / Anthropic / custom, then model, endpoint, and HEC reply index/sourcetype.
-2. Type **SAVE**, click the control, press **Run** in Search.
-3. Store API keys and HEC tokens **outside this app**: gateway environment or Splunk **storage/passwords**. Never in lookups or macros.
-4. Enable **Exec Health - AI provider dispatch** and attach a **webhook** in Splunk Web to your gateway. Do not put that URL in the app package.
-5. On the agent dashboard, review a finding, type **ASK**, press **Run**. The gateway should HEC-write the reply to the index/sourcetype you saved.
+1. Pick OpenAI / Cisco AI Defense / Azure OpenAI / Anthropic / custom, enter the model id and key, click **SAVE**.
+2. Enable **Exec Health - AI provider dispatch** and attach a **webhook** in Splunk Web to your gateway. Do not put that URL in the app package, and do not attach email to that search.
+3. On the agent dashboard, review a finding, click **ASK**.
+4. Pick **None** and SAVE to turn the provider off. Leave the key field blank to keep a key that is already stored.
 
-Cisco endpoint looks like `https://gateway.aidefense.security.cisco.com/<tenant>/connections/<conn>/v1/chat/completions`. Until you SAVE in the UI, macros `exec_health_ai_*` remain the fallback (default `off`).
+Until you SAVE in the UI, macros `exec_health_ai_*` remain the fallback (default `off`). HEC token secrets and webhook URLs still do not belong in this app.
 
 `tools/ai_gateway_example.py` is a development example (not in the Cloud `.spl`). It reads `OPENAI_API_KEY` / `CISCO_API_KEY` / `AZURE_OPENAI_API_KEY` / `ANTHROPIC_API_KEY` and `SPLUNK_HEC_URL` / `SPLUNK_HEC_TOKEN` from the environment.
 
@@ -186,5 +185,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, no Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.9.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.13.spl --included-tags private_app
 ```

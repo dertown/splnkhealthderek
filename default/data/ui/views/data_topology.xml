@@ -27,23 +27,11 @@
       }
     },
     "input_source": {
-      "type": "input.dropdown",
-      "title": "Data source",
+      "type": "input.text",
+      "title": "Selected data source (set by clicking data_source)",
       "options": {
         "token": "tok_data_source",
-        "defaultValue": "none",
-        "items": "> frame(label, value) | prepend(prependItems)"
-      },
-      "dataSources": {
-        "primary": "ds_topo_src_list"
-      },
-      "context": {
-        "prependItems": [
-          {
-            "label": "Click a source or pick one",
-            "value": "none"
-          }
-        ]
+        "defaultValue": "none"
       }
     }
   },
@@ -81,19 +69,11 @@
         "query": "| stats sum(events) as events by ingest_path | sort 0 -events"
       }
     },
-    "ds_topo_src_list": {
-      "type": "ds.chain",
-      "name": "Data source picker",
-      "options": {
-        "extend": "ds_topo_paths",
-        "query": "| stats count by data_source | eval label=data_source, value=data_source | table label, value | sort label"
-      }
-    },
     "ds_topo_src_stats": {
       "type": "ds.search",
       "name": "Selected source latest and totals",
       "options": {
-        "query": "| tstats count as events, latest(_time) as last_event, earliest(_time) as first_event, dc(sourcetype) as sourcetypes, dc(index) as indexes where index=`exec_health_idx` host=\"$tok_data_source$\"\n| eval data_source=replace(\"$tok_data_source$\", \"[^A-Za-z0-9._:-]\", \"\")\n| where data_source!=\"none\" AND data_source!=\"\" AND data_source!=\"*\"\n| eval age_min=round((now()-last_event)/60, 0)\n| eval age=tostring(now()-last_event, \"duration\")\n| eval last_event=strftime(last_event, \"%Y-%m-%d %H:%M:%S\")\n| eval first_event=strftime(first_event, \"%Y-%m-%d %H:%M:%S\")\n| eval _color_rank=if(age_min>(`exec_health_silence_sec`/60), 1, 3)\n| table data_source, last_event, first_event, age, age_min, events, sourcetypes, indexes, _color_rank",
+        "query": "| tstats count as events, latest(_time) as last_event, earliest(_time) as first_event, dc(sourcetype) as sourcetypes where index=`exec_health_idx` host=\"$tok_data_source$\"\n| eval data_source=replace(\"$tok_data_source$\", \"[^A-Za-z0-9._:-]\", \"\")\n| where data_source!=\"none\" AND data_source!=\"\" AND data_source!=\"*\"\n| eval age_min=round((now()-last_event)/60, 0)\n| eval age=tostring(now()-last_event, \"duration\")\n| eval last_event=strftime(last_event, \"%Y-%m-%d %H:%M:%S\")\n| eval first_event=strftime(first_event, \"%Y-%m-%d %H:%M:%S\")\n| eval _color_rank=if(age_min>(`exec_health_silence_sec`/60), 1, 3)\n| table data_source, last_event, first_event, age, age_min, events, sourcetypes, _color_rank",
         "refresh": "5m",
         "refreshType": "delay"
       }
@@ -173,21 +153,13 @@
         "extend": "ds_topo_paths",
         "query": "| table data_source, ingest_path, splunk_index"
       }
-    },
-    "ds_tcpin_link": {
-      "type": "ds.chain",
-      "name": "Forwarder topology nodes only",
-      "options": {
-        "extend": "ds_tcpin",
-        "query": "| table data_source, connection, receiver"
-      }
     }
   },
   "visualizations": {
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Data topology\nHow servers and data sources reach Splunk: **data source \u2192 ingest path \u2192 index**, plus **forwarder \u2192 indexer** from `_internal` `tcpin_connections`. **Click a data source** (table row, graph node, or the picker) for latest event, totals, 24-hour trend, and sudden drops or bursts. Search does not open.",
+        "markdown": "# Data topology\nHow servers and data sources reach Splunk: **data source \u2192 ingest path \u2192 index**, plus **forwarder \u2192 indexer** from `_internal` `tcpin_connections`. **Click a data_source** in the graph or table for latest event, totals, 24-hour trend, and sudden drops or bursts. Search does not open.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -345,7 +317,7 @@
     },
     "viz_table": {
       "type": "splunk.table",
-      "title": "Top source \u2192 path \u2192 index flows \u2014 click a source",
+      "title": "Top source \u2192 path \u2192 index flows \u2014 click data_source",
       "dataSources": {
         "primary": "ds_topo_paths"
       },
@@ -395,7 +367,7 @@
     "viz_src_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## Selected data source\nLatest event and totals follow the time picker. Trend and outliers use the last **24 hours** at 15-minute buckets vs that source's `streamstats` mean \u00b1 `exec_health_sigma` (default 2). **DROP** = sudden traffic loss. **BURST** = sudden spike. Empty panels mean nothing is selected, or there is no indexed `host=` match (HEC token names are not hosts).",
+        "markdown": "## Selected data source\nClick a **data_source** above. Latest event and totals follow the time picker. Trend and outliers use the last **24 hours** at 15-minute buckets vs that source's `streamstats` mean \u00b1 `exec_health_sigma` (default 2). **DROP** = sudden traffic loss. **BURST** = sudden spike. Empty panels mean nothing is selected yet.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -587,44 +559,6 @@
         }
       ]
     },
-    "viz_tcpin_link": {
-      "type": "splunk.linkgraph",
-      "title": "Servers: forwarder \u2192 connection type \u2192 indexer",
-      "dataSources": {
-        "primary": "ds_tcpin_link"
-      },
-      "showLastUpdated": true,
-      "showProgressBar": true,
-      "options": {
-        "fieldOrder": [
-          "data_source",
-          "connection",
-          "receiver"
-        ],
-        "linkColor": "#009CEB",
-        "nodeHighlightColor": "#7B56DB",
-        "nodeWidth": 170,
-        "nodeHeight": 22,
-        "nodeSpacingX": 40,
-        "nodeSpacingY": 12,
-        "resultLimit": 40,
-        "showNodeCounts": true,
-        "showValueCounts": true
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.setToken",
-          "options": {
-            "tokens": [
-              {
-                "token": "tok_data_source",
-                "key": "row.data_source.value"
-              }
-            ]
-          }
-        }
-      ]
-    },
     "viz_tcpin_sankey": {
       "type": "splunk.sankey",
       "title": "Forwarder \u2192 indexer volume (KB)",
@@ -647,7 +581,7 @@
     },
     "viz_hec": {
       "type": "splunk.table",
-      "title": "HEC tokens as data sources",
+      "title": "HEC tokens as data sources \u2014 click data_source",
       "dataSources": {
         "primary": "ds_hec_paths"
       },
@@ -682,17 +616,21 @@
       },
       "eventHandlers": [
         {
-          "type": "drilldown.linkToSearch",
+          "type": "drilldown.setToken",
           "options": {
-            "type": "auto",
-            "newTab": true
+            "tokens": [
+              {
+                "token": "tok_data_source",
+                "key": "row.data_source.value"
+              }
+            ]
           }
         }
       ]
     },
     "viz_tcpin_table": {
       "type": "splunk.table",
-      "title": "Forwarder connections (metrics.log tcpin) \u2014 click a source",
+      "title": "Forwarder connections (metrics.log tcpin) \u2014 click data_source",
       "dataSources": {
         "primary": "ds_tcpin"
       },
@@ -922,21 +860,11 @@
         }
       },
       {
-        "item": "viz_tcpin_link",
-        "type": "block",
-        "position": {
-          "x": 0,
-          "y": 2130,
-          "w": 1200,
-          "h": 360
-        }
-      },
-      {
         "item": "viz_tcpin_sankey",
         "type": "block",
         "position": {
           "x": 0,
-          "y": 2490,
+          "y": 2130,
           "w": 600,
           "h": 300
         }
@@ -946,7 +874,7 @@
         "type": "block",
         "position": {
           "x": 600,
-          "y": 2490,
+          "y": 2130,
           "w": 600,
           "h": 300
         }
@@ -956,7 +884,7 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 2790,
+          "y": 2430,
           "w": 1200,
           "h": 280
         }
@@ -966,15 +894,14 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 3070,
+          "y": 2710,
           "w": 1200,
           "h": 110
         }
       }
     ],
     "globalInputs": [
-      "input_global_trp",
-      "input_source"
+      "input_global_trp"
     ]
   }
 }

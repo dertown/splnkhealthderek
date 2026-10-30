@@ -1,7 +1,7 @@
 provider,provider_label,default_endpoint,notes
 none,Off local briefing only,none,Default. No outbound AI call. Paste ai_brief into Splunk AI Assistant if you want a second opinion.
-openai,OpenAI,https://api.openai.com/v1/chat/completions,Put the API key in your webhook gateway or Splunk storage/passwords. Never in this app.
-cisco,Cisco AI Defense,none,Set exec_health_ai_endpoint to your Cisco AI Defense gateway URL including tenant and connection. Store the token outside this app.
-azure,Azure OpenAI,none,Set exec_health_ai_endpoint to your Azure deployment chat/completions URL. The Azure key stays in the gateway.
-anthropic,Anthropic,https://api.anthropic.com/v1/messages,Put the API key in the gateway. Never in this app.
-custom,Custom OpenAI-compatible,none,Set exec_health_ai_endpoint to your proxy. Auth stays in the gateway.
+openai,OpenAI,https://api.openai.com/v1/chat/completions,Enter the API key on AI provider setup. It is stored in dq_agent_ai_config on this search head.
+cisco,Cisco AI Defense,none,Enter the Cisco token on AI provider setup. Set a custom endpoint in the provider catalog if your tenant URL is not the default.
+azure,Azure OpenAI,none,Enter the Azure key on AI provider setup. Default endpoint stays none until your deployment URL is in the catalog.
+anthropic,Anthropic,https://api.anthropic.com/v1/messages,Enter the API key on AI provider setup. It is stored in dq_agent_ai_config on this search head.
+custom,Custom OpenAI-compatible,none,Enter the key on AI provider setup. Point default_endpoint at your proxy in the provider catalog.

@@ -1,39 +1,21 @@
 <dashboard version="2" theme="dark">
   <label>AI provider setup</label>
-  <description>Configure optional OpenAI, Cisco, Azure, or custom model integration. No API keys on this page.</description>
+  <description>Set provider, model, and key, then click SAVE. Search does not open.</description>
   <definition><![CDATA[
 {
   "title": "AI provider setup",
-  "description": "Configure optional OpenAI, Cisco, Azure, or custom model integration. No API keys on this page.",
+  "description": "Set provider, model, and key, then click SAVE. Search does not open.",
   "defaults": {},
   "inputs": {
-    "input_cfg_mode": {
-      "type": "input.dropdown",
-      "title": "AI mode",
-      "options": {
-        "token": "tok_cfg_mode",
-        "defaultValue": "off",
-        "items": [
-          {
-            "label": "Off \u2014 local briefing only",
-            "value": "off"
-          },
-          {
-            "label": "Provider \u2014 queue ASK to your gateway",
-            "value": "provider"
-          }
-        ]
-      }
-    },
     "input_cfg_provider": {
       "type": "input.dropdown",
-      "title": "Provider",
+      "title": "AI provider",
       "options": {
         "token": "tok_cfg_provider",
         "defaultValue": "none",
         "items": [
           {
-            "label": "None",
+            "label": "None \u2014 local briefing only",
             "value": "none"
           },
           {
@@ -61,42 +43,26 @@
     },
     "input_cfg_model": {
       "type": "input.text",
-      "title": "Model id (example gpt-4o-mini)",
+      "title": "Model",
       "options": {
         "token": "tok_cfg_model",
-        "defaultValue": "none"
+        "defaultValue": ""
       }
     },
-    "input_cfg_endpoint": {
+    "input_cfg_key": {
       "type": "input.text",
-      "title": "Chat endpoint URL (none = provider default)",
+      "title": "API key",
       "options": {
-        "token": "tok_cfg_endpoint",
-        "defaultValue": "none"
-      }
-    },
-    "input_cfg_inbox_index": {
-      "type": "input.text",
-      "title": "HEC reply index",
-      "options": {
-        "token": "tok_cfg_inbox_index",
-        "defaultValue": "main"
-      }
-    },
-    "input_cfg_inbox_sourcetype": {
-      "type": "input.text",
-      "title": "HEC reply sourcetype",
-      "options": {
-        "token": "tok_cfg_inbox_sourcetype",
-        "defaultValue": "derek_health_ai"
+        "token": "tok_cfg_key",
+        "defaultValue": ""
       }
     },
     "input_cfg_save": {
       "type": "input.text",
-      "title": "Type SAVE to write these settings",
+      "title": "Save latch (set by SAVE)",
       "options": {
         "token": "tok_cfg_save",
-        "defaultValue": "NO"
+        "defaultValue": "review"
       }
     }
   },
@@ -105,8 +71,8 @@
       "type": "ds.search",
       "name": "Saved AI config",
       "options": {
-        "query": "| inputlookup dq_agent_ai_config\n| where stanza=\"default\"\n| head 1\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval ai_status=case(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\", \"PROVIDER\", mode=\"provider\", \"MISCONFIG\", 1=1, \"LOCAL\")\n| eval status_color=case(ai_status=\"PROVIDER\", \"YELLOW\", ai_status=\"MISCONFIG\", \"RED\", 1=1, \"GREEN\")\n| eval _color_rank=case(ai_status=\"MISCONFIG\", 1, ai_status=\"PROVIDER\", 2, 1=1, 3)\n| table ai_status, status_color, mode, provider, provider_label, model, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
-        "refresh": "30s",
+        "query": "| inputlookup dq_agent_ai_config\n| where stanza=\"default\"\n| head 1\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval key_state=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", \"SET\", \"MISSING\")\n| eval ai_status=case(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_state=\"SET\", \"PROVIDER\", mode=\"provider\", \"MISCONFIG\", 1=1, \"LOCAL\")\n| eval status_color=case(ai_status=\"PROVIDER\", \"YELLOW\", ai_status=\"MISCONFIG\", \"RED\", 1=1, \"GREEN\")\n| eval _color_rank=case(ai_status=\"MISCONFIG\", 1, ai_status=\"PROVIDER\", 2, 1=1, 3)\n| table ai_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank\n\n| eval _gate=\"$tok_cfg_save$\"",
+        "refresh": "10s",
         "refreshType": "delay",
         "queryParameters": {
           "earliest": "0",
@@ -131,8 +97,21 @@
       "type": "ds.search",
       "name": "Save control",
       "options": {
-        "query": "| makeresults\n| eval confirm=\"$tok_cfg_save$\", mode=\"$tok_cfg_mode$\", provider=\"$tok_cfg_provider$\"\n| eval ready=if(confirm=\"SAVE\" AND (mode=\"off\" OR (mode=\"provider\" AND provider!=\"none\" AND provider!=\"\")), 1, 0)\n| eval button_label=if(ready=1, \"CLICK TO SAVE CONFIG\", \"TYPE SAVE TO WRITE SETTINGS\")\n| eval button_color=if(ready=1, \"YELLOW\", \"N/A\")\n| table button_label, button_color, ready",
+        "query": "| makeresults\n| eval button_label=\"SAVE\"\n| eval click_action=\"save\"\n| eval _color_rank=3\n| table button_label, click_action, _color_rank",
         "refresh": "30s",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "0",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_ai_write": {
+      "type": "ds.search",
+      "name": "Write AI config",
+      "options": {
+        "query": "| makeresults\n| eval save=\"$tok_cfg_save$\"\n| eval stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT inbox_index AS prev_inbox, inbox_sourcetype AS prev_st, endpoint AS prev_endpoint, api_key AS prev_key\n| eval provider=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\")\n| eval provider=if(provider=\"openai\" OR provider=\"cisco\" OR provider=\"azure\" OR provider=\"anthropic\" OR provider=\"custom\", provider, \"none\")\n| eval model=replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\")\n| eval model=if(model=\"\" OR isnull(model), \"none\", model)\n| eval api_key=replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\")\n| eval api_key=if(api_key=\"\" OR isnull(api_key) OR api_key=\"none\", coalesce(prev_key, \"none\"), api_key)\n| eval api_key=if(provider=\"none\", \"none\", api_key)\n| where save=\"save\" AND (provider=\"none\" OR (provider!=\"none\" AND model!=\"none\" AND api_key!=\"none\" AND api_key!=\"\"))\n| eval mode=if(provider=\"none\", \"off\", \"provider\")\n| lookup dq_agent_ai_providers provider OUTPUT default_endpoint\n| eval endpoint=coalesce(default_endpoint, prev_endpoint, \"none\")\n| eval inbox_index=coalesce(prev_inbox, \"main\")\n| eval inbox_sourcetype=coalesce(prev_st, \"derek_health_ai\")\n| eval updated_by=\"human_dashboard\", updated_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ui_config\"\n| table stanza, mode, provider, model, endpoint, api_key, inbox_index, inbox_sourcetype, updated_by, updated_at, note\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_config\n    | stats latest(mode) as mode, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(api_key) as api_key, latest(inbox_index) as inbox_index, latest(inbox_sourcetype) as inbox_sourcetype, latest(updated_by) as updated_by, latest(updated_at) as updated_at, latest(note) as note by stanza\n    | outputlookup dq_agent_ai_config\n]\n| where stanza=\"default\"\n| eval key_state=if(api_key!=\"none\" AND api_key!=\"\", \"SET\", \"MISSING\")\n| eval _color_rank=3\n| table updated_at, provider, model, key_state, mode, _color_rank",
+        "refresh": "5m",
         "refreshType": "delay",
         "queryParameters": {
           "earliest": "0",
@@ -145,7 +124,7 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# AI provider setup\nChoose how Derek+ talks to a model. This page stores **mode, provider, model, endpoint, and HEC inbox** only. **Never type API keys, HEC tokens, or webhook URLs here** \u2014 they are searchable. Put secrets in your gateway environment or Splunk **storage/passwords**.",
+        "markdown": "# AI provider setup\nFill in **AI provider**, **model**, and **API key**, then click **SAVE** on the same row. That writes Splunk config on this search head (`dq_agent_ai_config`). Search does not open. The key is never shown after save. Leave key blank to keep the value already stored.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -204,14 +183,14 @@
     "viz_steps": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## After you save\n1. Enable **Exec Health - AI provider dispatch**.\n2. On that search, add a **webhook** in Splunk Web to your gateway (OpenAI, Cisco AI Defense, Azure, or `tools/ai_gateway_example.py`).\n3. Point the gateway at this HEC index/sourcetype.\n4. Open **Derek+ Data Quality Agent**, review a finding, type **ASK**, press **Run**.\nCisco endpoint looks like `https://gateway.aidefense.security.cisco.com/<tenant>/connections/<conn>/v1/chat/completions`.",
+        "markdown": "## After you save\n1. Enable **Exec Health - AI provider dispatch**.\n2. Attach a **webhook** in Splunk Web to your gateway if replies should return via HEC.\n3. Open **Derek+ Data Quality Agent**, review a finding, click **ASK**.\nPick **None** and SAVE to turn the provider off.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
     },
     "viz_current": {
       "type": "splunk.table",
-      "title": "Saved integration settings (no secrets)",
+      "title": "Saved settings (key is stored, not displayed)",
       "dataSources": {
         "primary": "ds_ai_current"
       },
@@ -243,16 +222,7 @@
             "value": "#14301A"
           }
         ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
+      }
     },
     "viz_providers": {
       "type": "splunk.table",
@@ -288,82 +258,86 @@
             "value": "#14301A"
           }
         ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
+      }
     },
     "viz_save": {
-      "type": "splunk.singlevalue",
-      "title": "Save (opens Search; you must press Run)",
+      "type": "splunk.table",
+      "title": "SAVE",
       "dataSources": {
         "primary": "ds_ai_save"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": false,
       "options": {
-        "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-        "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
-        "backgroundColor": "transparent",
-        "majorFontSize": 22
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "headerVisibility": "none",
+        "columnFormat": {
+          "button_label": {
+            "width": 420,
+            "align": "center"
+          },
+          "click_action": {
+            "width": 1
+          }
+        }
       },
       "context": {
-        "statusColors": [
+        "rowColors": [
           {
-            "match": "GREEN",
-            "value": "#53A051"
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
           },
           {
-            "match": "YELLOW",
-            "value": "#F8BE34"
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
           },
           {
-            "match": "RED",
-            "value": "#DC4E41"
-          },
-          {
-            "match": "N/A",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "LOCAL",
-            "value": "#53A051"
-          },
-          {
-            "match": "PROVIDER",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "MISCONFIG",
-            "value": "#DC4E41"
-          },
-          {
-            "match": "WAIT",
-            "value": "#6B6B6B"
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
           }
         ]
       },
       "eventHandlers": [
         {
-          "type": "drilldown.linkToSearch",
+          "type": "drilldown.setToken",
           "options": {
-            "type": "custom",
-            "newTab": true,
-            "query": "| inputlookup dq_agent_ai_config | eval src=1 | append [ | makeresults | eval confirm=\"$tok_cfg_save$\" | eval mode=lower(\"$tok_cfg_mode$\") | eval mode=if(mode=\"provider\", \"provider\", \"off\") | eval provider=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\") | eval provider=if(provider=\"openai\" OR provider=\"cisco\" OR provider=\"azure\" OR provider=\"anthropic\" OR provider=\"custom\", provider, \"none\") | eval model=replace(lower(\"$tok_cfg_model$\"), \"[^a-z0-9._-]\", \"\") | eval model=if(model=\"\" OR isnull(model), \"none\", model) | eval endpoint=replace(\"$tok_cfg_endpoint$\", \"[^-A-Za-z0-9:/.?&=]\", \"\") | eval endpoint=if(endpoint=\"\" OR isnull(endpoint), \"none\", endpoint) | eval inbox_index=replace(\"$tok_cfg_inbox_index$\", \"[^A-Za-z0-9_]\", \"\") | eval inbox_index=if(inbox_index=\"\" OR isnull(inbox_index), \"_internal\", inbox_index) | eval inbox_sourcetype=replace(\"$tok_cfg_inbox_sourcetype$\", \"[^A-Za-z0-9_]\", \"\") | eval inbox_sourcetype=if(inbox_sourcetype=\"\" OR isnull(inbox_sourcetype), \"derek_health_ai_unconfigured\", inbox_sourcetype) | where confirm=\"SAVE\" AND (mode=\"off\" OR (mode=\"provider\" AND provider!=\"none\")) | eval stanza=\"default\", src=2, updated_by=\"human_dashboard\", updated_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ui_config\" | table stanza, mode, provider, model, endpoint, inbox_index, inbox_sourcetype, updated_by, updated_at, note, src ] | sort stanza, -src | dedup stanza | fields - src | outputlookup dq_agent_ai_config"
+            "tokens": [
+              {
+                "token": "tok_cfg_save",
+                "key": "row.click_action.value"
+              }
+            ]
           }
         }
       ]
     },
+    "viz_write": {
+      "type": "splunk.singlevalue",
+      "title": "",
+      "dataSources": {
+        "primary": "ds_ai_write"
+      },
+      "hideWhenNoData": true,
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"key_state\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "majorFontSize": 14
+      }
+    },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Saving writes `lookups/dq_agent_ai_config.csv` on this search head. It does not call a model and does not change `inputs.conf`. Webhook URLs and API keys never belong in this lookup.",
+        "markdown": "SAVE updates `lookups/dq_agent_ai_config.csv` on this search head only. The install package ships `api_key=none`. HEC token secrets and webhook URLs still do not belong in this app.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -379,7 +353,47 @@
           "x": 0,
           "y": 0,
           "w": 1200,
-          "h": 140
+          "h": 90
+        }
+      },
+      {
+        "item": "input_cfg_provider",
+        "type": "input",
+        "position": {
+          "x": 0,
+          "y": 90,
+          "w": 250,
+          "h": 95
+        }
+      },
+      {
+        "item": "input_cfg_model",
+        "type": "input",
+        "position": {
+          "x": 250,
+          "y": 90,
+          "w": 250,
+          "h": 95
+        }
+      },
+      {
+        "item": "input_cfg_key",
+        "type": "input",
+        "position": {
+          "x": 500,
+          "y": 90,
+          "w": 400,
+          "h": 95
+        }
+      },
+      {
+        "item": "viz_save",
+        "type": "block",
+        "position": {
+          "x": 900,
+          "y": 90,
+          "w": 300,
+          "h": 95
         }
       },
       {
@@ -387,9 +401,9 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 140,
+          "y": 185,
           "w": 300,
-          "h": 180
+          "h": 150
         }
       },
       {
@@ -397,9 +411,9 @@
         "type": "block",
         "position": {
           "x": 300,
-          "y": 140,
+          "y": 185,
           "w": 900,
-          "h": 180
+          "h": 150
         }
       },
       {
@@ -407,9 +421,9 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 320,
+          "y": 335,
           "w": 1200,
-          "h": 200
+          "h": 180
         }
       },
       {
@@ -417,40 +431,31 @@
         "type": "block",
         "position": {
           "x": 0,
-          "y": 520,
+          "y": 515,
           "w": 1200,
-          "h": 240
-        }
-      },
-      {
-        "item": "viz_save",
-        "type": "block",
-        "position": {
-          "x": 0,
-          "y": 760,
-          "w": 400,
-          "h": 200
+          "h": 220
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 400,
-          "y": 760,
-          "w": 800,
-          "h": 200
+          "x": 0,
+          "y": 735,
+          "w": 1200,
+          "h": 80
+        }
+      },
+      {
+        "item": "viz_write",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 815,
+          "w": 1200,
+          "h": 40
         }
       }
-    ],
-    "globalInputs": [
-      "input_cfg_mode",
-      "input_cfg_provider",
-      "input_cfg_model",
-      "input_cfg_endpoint",
-      "input_cfg_inbox_index",
-      "input_cfg_inbox_sourcetype",
-      "input_cfg_save"
     ]
   }
 }

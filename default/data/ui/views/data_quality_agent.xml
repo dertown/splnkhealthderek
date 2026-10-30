@@ -50,12 +50,36 @@
         "defaultValue": "review"
       }
     },
-    "input_ai_confirm": {
+    "input_ai_ask": {
       "type": "input.text",
-      "title": "Optional: type ASK for a second opinion",
+      "title": "Ask latch (set by ASK)",
       "options": {
-        "token": "tok_ai_confirm",
-        "defaultValue": "NO"
+        "token": "tok_ai_ask",
+        "defaultValue": "review"
+      }
+    },
+    "input_entity": {
+      "type": "input.text",
+      "title": "Selected entity",
+      "options": {
+        "token": "tok_entity",
+        "defaultValue": "none"
+      }
+    },
+    "input_issue": {
+      "type": "input.text",
+      "title": "Selected issue",
+      "options": {
+        "token": "tok_issue",
+        "defaultValue": "none"
+      }
+    },
+    "input_ai_brief": {
+      "type": "input.text",
+      "title": "Selected briefing",
+      "options": {
+        "token": "tok_ai_brief",
+        "defaultValue": "none"
       }
     }
   },
@@ -169,7 +193,7 @@
       "type": "ds.search",
       "name": "AI provider status",
       "options": {
-        "query": "| inputlookup dq_agent_ai_config\n| where stanza=\"default\"\n| head 1\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval ai_status=case(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\", \"PROVIDER\", mode=\"provider\", \"MISCONFIG\", 1=1, \"LOCAL\")\n| eval status_color=case(ai_status=\"PROVIDER\", \"YELLOW\", ai_status=\"MISCONFIG\", \"RED\", 1=1, \"GREEN\")\n| eval _color_rank=case(ai_status=\"MISCONFIG\", 1, ai_status=\"PROVIDER\", 2, 1=1, 3)\n| table ai_status, status_color, mode, provider, provider_label, model, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
+        "query": "| inputlookup dq_agent_ai_config\n| where stanza=\"default\"\n| head 1\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval inbox_index=coalesce(inbox_index, \"_internal\")\n| eval inbox_sourcetype=coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\")\n| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes\n| eval endpoint=if(endpoint=\"none\" OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval key_state=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", \"SET\", \"MISSING\")\n| eval ai_status=case(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_state=\"SET\", \"PROVIDER\", mode=\"provider\", \"MISCONFIG\", 1=1, \"LOCAL\")\n| eval status_color=case(ai_status=\"PROVIDER\", \"YELLOW\", ai_status=\"MISCONFIG\", \"RED\", 1=1, \"GREEN\")\n| eval _color_rank=case(ai_status=\"MISCONFIG\", 1, ai_status=\"PROVIDER\", 2, 1=1, 3)\n| table ai_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
         "refresh": "30s",
         "refreshType": "delay",
         "queryParameters": {
@@ -182,8 +206,21 @@
       "type": "ds.search",
       "name": "Ask AI control",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", confirm=\"$tok_ai_confirm$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, updated_at\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval ready=if(confirm=\"ASK\" AND finding_id!=\"none\" AND finding_id!=\"\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\", 1, 0)\n| eval button_label=case(mode!=\"provider\", \"OPEN AI SETUP FIRST\", ready=1, \"CLICK TO ASK AI\", 1=1, \"TYPE ASK AFTER A REVIEW\")\n| eval button_color=if(ready=1, \"YELLOW\", \"N/A\")\n| table button_label, button_color, ready",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, api_key, updated_at\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1, 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", configured=0, \"OPEN AI SETUP FIRST\", 1=1, \"ASK\")\n| eval click_action=\"ask\"\n| eval _color_rank=if(picked=1 AND configured=1, 3, 1)\n| table button_label, click_action, _color_rank",
         "refresh": "30s",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "0",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_dq_ai_write": {
+      "type": "ds.search",
+      "name": "Write ASK request",
+      "options": {
+        "query": "| makeresults\n| eval ask=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at\n| eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| where ask=\"ask\" AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1\n| eval status=\"pending\", actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ask_ai_provider\"\n| eval entity=if(entity=\"\" OR isnull(entity), \"none\", entity)\n| eval issue=if(issue=\"\" OR isnull(issue), \"none\", issue)\n| eval ai_brief=if(ai_brief=\"\" OR isnull(ai_brief), \"none\", ai_brief)\n| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_requests\n    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief by finding_id\n    | outputlookup dq_agent_ai_requests\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=2\n| table requested_at, finding_id, provider, status, _color_rank",
+        "refresh": "5m",
         "refreshType": "delay",
         "queryParameters": {
           "earliest": "0",
@@ -195,7 +232,7 @@
       "type": "ds.search",
       "name": "AI provider replies",
       "options": {
-        "query": "search [| inputlookup dq_agent_ai_config | where stanza=\"default\" | head 1 | eval inbox_index=replace(coalesce(inbox_index, \"_internal\"), \"[^A-Za-z0-9_]\", \"\") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\"), \"[^A-Za-z0-9_]\", \"\") | eval search=\"index=\".inbox_index.\" sourcetype=\".inbox_sourcetype | return $search]\n| eval fid=\"$tok_finding_id$\"\n| where fid!=\"none\" AND fid!=\"\" AND (finding_id=fid OR match(coalesce(_raw, \"\"), fid))\n| eval reply=coalesce(reply, ai_reply, _raw)\n| sort 0 -_time\n| head 10\n| table _time, provider, model, finding_id, reply",
+        "query": "search [| inputlookup dq_agent_ai_config | where stanza=\"default\" | head 1 | eval inbox_index=replace(coalesce(inbox_index, \"_internal\"), \"[^A-Za-z0-9_]\", \"\") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, \"derek_health_ai_unconfigured\"), \"[^A-Za-z0-9_]\", \"\") | eval search=\"index=\".inbox_index.\" sourcetype=\".inbox_sourcetype | return $search]\n| eval _gate=\"$tok_ai_ask$\"\n| eval fid=\"$tok_finding_id$\"\n| where fid!=\"none\" AND fid!=\"\" AND (finding_id=fid OR match(coalesce(_raw, \"\"), fid))\n| eval reply=coalesce(reply, ai_reply, _raw)\n| sort 0 -_time\n| head 10\n| table _time, provider, model, finding_id, reply",
         "refresh": "30s",
         "refreshType": "delay",
         "queryParameters": {
@@ -679,77 +716,81 @@
             "value": "#14301A"
           }
         ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
+      }
     },
     "viz_ai_ask": {
-      "type": "splunk.singlevalue",
-      "title": "Optional \u2014 send briefing to your configured provider",
+      "type": "splunk.table",
+      "title": "Optional \u2014 click ASK",
       "dataSources": {
         "primary": "ds_dq_ai_ready"
       },
-      "showLastUpdated": true,
+      "showLastUpdated": false,
       "showProgressBar": false,
       "options": {
-        "majorValue": "> primary | seriesByName(\"button_label\") | lastPoint()",
-        "majorColor": "> primary | seriesByName(\"button_color\") | lastPoint() | matchValue(statusColors)",
-        "backgroundColor": "transparent",
-        "majorFontSize": 16
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "headerVisibility": "none",
+        "columnFormat": {
+          "button_label": {
+            "width": 420,
+            "align": "center"
+          },
+          "click_action": {
+            "width": 1
+          }
+        }
       },
       "context": {
-        "statusColors": [
+        "rowColors": [
           {
-            "match": "GREEN",
-            "value": "#53A051"
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
           },
           {
-            "match": "YELLOW",
-            "value": "#F8BE34"
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
           },
           {
-            "match": "RED",
-            "value": "#DC4E41"
-          },
-          {
-            "match": "N/A",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "LOCAL",
-            "value": "#53A051"
-          },
-          {
-            "match": "PROVIDER",
-            "value": "#F8BE34"
-          },
-          {
-            "match": "MISCONFIG",
-            "value": "#DC4E41"
-          },
-          {
-            "match": "WAIT",
-            "value": "#6B6B6B"
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
           }
         ]
       },
       "eventHandlers": [
         {
-          "type": "drilldown.linkToSearch",
+          "type": "drilldown.setToken",
           "options": {
-            "type": "custom",
-            "newTab": true,
-            "query": "| inputlookup dq_agent_ai_requests | append [ | makeresults | eval finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", confirm=\"$tok_ai_confirm$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\" | lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, updated_at | eval used_ui=if(updated_at=\"0\" OR isnull(updated_at), 0, 1) | eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\")) | eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\")) | eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\")) | eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\")) | where confirm=\"ASK\" AND finding_id!=\"none\" AND finding_id!=\"\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" | eval status=\"pending\", actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"ask_ai_provider\" | table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief ] | outputlookup dq_agent_ai_requests"
+            "tokens": [
+              {
+                "token": "tok_ai_ask",
+                "key": "row.click_action.value"
+              }
+            ]
           }
         }
       ]
+    },
+    "viz_ai_write": {
+      "type": "splunk.singlevalue",
+      "title": "",
+      "dataSources": {
+        "primary": "ds_dq_ai_write"
+      },
+      "hideWhenNoData": true,
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "options": {
+        "majorValue": "> primary | seriesByName(\"status\") | lastPoint()",
+        "backgroundColor": "transparent",
+        "majorFontSize": 14
+      }
     },
     "viz_ai_replies": {
       "type": "splunk.table",
@@ -785,21 +826,12 @@
             "value": "#14301A"
           }
         ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
+      }
     },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. API keys stay on **Configure \u2192 AI provider** / your gateway \u2014 never in this queue.",
+        "markdown": "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. Click **ASK** to queue a briefing for the saved provider. Search does not open. The API key stays in the AI provider lookup \u2014 never in this queue table.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -929,6 +961,16 @@
         }
       },
       {
+        "item": "viz_ai_write",
+        "type": "block",
+        "position": {
+          "x": 0,
+          "y": 1300,
+          "w": 1200,
+          "h": 40
+        }
+      },
+      {
         "item": "viz_ai_replies",
         "type": "block",
         "position": {
@@ -951,8 +993,7 @@
     ],
     "globalInputs": [
       "input_global_trp",
-      "input_ask",
-      "input_ai_confirm"
+      "input_ask"
     ]
   }
 }
