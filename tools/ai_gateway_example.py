@@ -42,7 +42,9 @@ def env_key(provider: str) -> str:
     return os.environ.get(var) or os.environ.get("OPENAI_API_KEY") or ""
 
 
-def chat_openai_compatible(endpoint: str, key: str, model: str, prompt: str, azure: bool) -> str:
+def chat_openai_compatible(
+    endpoint: str, key: str, model: str, prompt: str, azure: bool, timeout: int = 60
+) -> str:
     body = {
         "model": model,
         "messages": [
@@ -58,6 +60,8 @@ def chat_openai_compatible(endpoint: str, key: str, model: str, prompt: str, azu
         ],
         "temperature": 0.2,
     }
+    if timeout <= 20:
+        body["max_tokens"] = 16
     headers = {"Content-Type": "application/json"}
     if azure:
         headers["api-key"] = key
@@ -69,15 +73,15 @@ def chat_openai_compatible(endpoint: str, key: str, model: str, prompt: str, azu
         headers=headers,
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=60, context=ssl.create_default_context()) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context()) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
     return payload["choices"][0]["message"]["content"]
 
 
-def chat_anthropic(endpoint: str, key: str, model: str, prompt: str) -> str:
+def chat_anthropic(endpoint: str, key: str, model: str, prompt: str, timeout: int = 60) -> str:
     body = {
         "model": model,
-        "max_tokens": 1024,
+        "max_tokens": 16 if timeout <= 20 else 1024,
         "system": (
             "You are Derek+ Health Agent. Diagnose Splunk health. Do not request secrets. "
             "Do not claim you applied a Splunk change."
@@ -94,7 +98,7 @@ def chat_anthropic(endpoint: str, key: str, model: str, prompt: str) -> str:
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=60, context=ssl.create_default_context()) as resp:
+    with urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context()) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
     return payload["content"][0]["text"]
 
@@ -115,33 +119,66 @@ def hec_send(event: dict) -> None:
         resp.read()
 
 
+def payload_key(result: dict, provider: str) -> str:
+    """Prefer the key saved on AI provider setup; fall back to the environment."""
+    saved = (result.get("api_key") or "").strip()
+    if saved and saved != "none":
+        return saved
+    return env_key(provider)
+
+
 def handle_result(result: dict) -> dict:
     provider = (result.get("provider") or "openai").strip().lower()
     endpoint = (result.get("endpoint") or "").strip()
     model = (result.get("model") or "").strip()
+    note = (result.get("note") or "").strip()
+    finding_id = result.get("finding_id")
+    is_ping = note == "connection_test" or finding_id == "connection_test"
+    timeout = 20 if is_ping else 60
     if not model or model == "none":
         model = DEFAULT_MODEL
     prompt = result.get("ai_brief") or result.get("issue") or ""
-    key = env_key(provider)
-    if not key:
-        raise RuntimeError("No API key in the environment for provider " + provider)
-    if not endpoint or endpoint == "none":
-        raise RuntimeError("No endpoint configured for provider " + provider)
-    if provider == "anthropic":
-        reply = chat_anthropic(endpoint, key, model, prompt)
-    else:
-        reply = chat_openai_compatible(endpoint, key, model, prompt, azure=(provider == "azure"))
-    event = {
-        "finding_id": result.get("finding_id"),
-        "entity": result.get("entity"),
-        "issue": result.get("issue"),
-        "provider": provider,
-        "model": model,
-        "reply": reply,
-        "status": "replied",
-    }
-    hec_send(event)
-    return {"ok": True, "finding_id": event["finding_id"]}
+    key = payload_key(result, provider)
+    try:
+        if not key:
+            raise RuntimeError("No API key saved or in the environment for provider " + provider)
+        if not endpoint or endpoint == "none":
+            raise RuntimeError("No endpoint configured for provider " + provider)
+        if provider == "anthropic":
+            reply = chat_anthropic(endpoint, key, model, prompt, timeout=timeout)
+        else:
+            reply = chat_openai_compatible(
+                endpoint, key, model, prompt, azure=(provider == "azure"), timeout=timeout
+            )
+        event = {
+            "finding_id": finding_id,
+            "entity": result.get("entity"),
+            "issue": result.get("issue"),
+            "provider": provider,
+            "model": model,
+            "reply": reply,
+            "status": "replied",
+            "note": note or "ask_ai_provider",
+            "conn_status": "PASS" if is_ping else "",
+        }
+        hec_send(event)
+        return {"ok": True, "finding_id": event["finding_id"]}
+    except (urllib.error.URLError, RuntimeError, KeyError, IndexError, TimeoutError) as exc:
+        if is_ping:
+            fail_event = {
+                "finding_id": finding_id or "connection_test",
+                "entity": result.get("entity") or "ai_setup",
+                "issue": "connection_test",
+                "provider": provider,
+                "model": model,
+                "reply": str(exc)[:200],
+                "status": "failed",
+                "note": "connection_test",
+                "conn_status": "FAIL",
+            }
+            hec_send(fail_event)
+            return {"ok": False, "finding_id": fail_event["finding_id"], "error": str(exc)[:200]}
+        raise
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -1,0 +1,22 @@
+provider,model,model_label
+none,none,Not needed
+openai,gpt-4o,gpt-4o
+openai,gpt-4o-mini,gpt-4o-mini
+openai,gpt-4.1,gpt-4.1
+openai,gpt-4.1-mini,gpt-4.1-mini
+openai,o4-mini,o4-mini
+openai,o3,o3
+cisco,gpt-4o,gpt-4o
+cisco,gpt-4o-mini,gpt-4o-mini
+cisco,gpt-4.1,gpt-4.1
+azure,gpt-4o,gpt-4o
+azure,gpt-4o-mini,gpt-4o-mini
+azure,gpt-4.1,gpt-4.1
+anthropic,claude-sonnet-4-5,Claude Sonnet 4.5
+anthropic,claude-opus-4,Claude Opus 4
+anthropic,claude-3-5-sonnet-latest,Claude 3.5 Sonnet
+anthropic,claude-3-5-haiku-latest,Claude 3.5 Haiku
+custom,gpt-4o,gpt-4o
+custom,gpt-4o-mini,gpt-4o-mini
+custom,llama-3.1-70b,Llama 3.1 70B
+custom,mixtral-8x7b,Mixtral 8x7B

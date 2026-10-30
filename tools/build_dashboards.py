@@ -28,9 +28,19 @@ STATUS_COLORS = [
     {"match": "RED", "value": RED},
     {"match": "N/A", "value": YELLOW},
     {"match": "LOCAL", "value": GREEN},
-    {"match": "PROVIDER", "value": YELLOW},
+    {"match": "READY", "value": GREEN},
+    {"match": "PROVIDER", "value": GREEN},
+    {"match": "FAILED", "value": RED},
     {"match": "MISCONFIG", "value": RED},
+    {"match": "WAITING", "value": YELLOW},
+    {"match": "STALLED", "value": RED},
+    {"match": "REPLIED", "value": GREEN},
+    {"match": "IDLE", "value": "#6B6B6B"},
     {"match": "WAIT", "value": "#6B6B6B"},
+    {"match": "PASS", "value": GREEN},
+    {"match": "TESTING", "value": YELLOW},
+    {"match": "SKIP", "value": "#6B6B6B"},
+    {"match": "FAIL", "value": RED},
 ]
 
 # Row colors: 1=red/alert, 2=yellow, 3=green/ok
@@ -104,7 +114,7 @@ def md(text: str, font: str = "default") -> dict:
     }
 
 
-def decision_button(title: str, ds_id: str, token: str = "tok_decision") -> dict:
+def decision_button(title: str, ds_id: str, token: str = "tok_decision", fill: str | None = None) -> dict:
     """One-row table so row.click_action.value is a real table drilldown."""
     viz = table(title, ds_id, count=1)
     viz["showLastUpdated"] = False
@@ -118,10 +128,21 @@ def decision_button(title: str, ds_id: str, token: str = "tok_decision") -> dict
         }
     ]
     viz["options"]["headerVisibility"] = "none"
+    viz["options"]["fontSize"] = "large"
     viz["options"]["columnFormat"] = {
-        "button_label": {"width": 420, "align": "center"},
+        "button_label": {"width": 380, "align": "center"},
         "click_action": {"width": 1},
     }
+    if fill:
+        viz["options"]["backgroundColor"] = fill
+        viz["options"]["tableFormat"] = {
+            "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+            "headerBackgroundColor": fill,
+            "headerColor": "#FFFFFF",
+            "cellTextColor": "#FFFFFF",
+            "align": "center",
+        }
+        viz["context"] = {"btnColors": [{"from": 0, "to": 10, "value": fill}]}
     return viz
 
 
@@ -1625,10 +1646,21 @@ Q_DQ_AI_STATUS = Q_DQ_AI_CFG_ROW + r"""
 | lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes
 | eval endpoint=if(endpoint="none" OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
 | eval key_state=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", "SET", "MISSING")
-| eval ai_status=case(mode="provider" AND provider!="none" AND provider!="" AND key_state="SET", "PROVIDER", mode="provider", "MISCONFIG", 1=1, "LOCAL")
-| eval status_color=case(ai_status="PROVIDER", "YELLOW", ai_status="MISCONFIG", "RED", 1=1, "GREEN")
-| eval _color_rank=case(ai_status="MISCONFIG", 1, ai_status="PROVIDER", 2, 1=1, 3)
-| table ai_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank
+| eval model_ok=if(isnotnull(model) AND model!="" AND model!="none", 1, 0)
+| eval endpoint_ok=if(isnotnull(endpoint) AND endpoint!="" AND endpoint!="none", 1, 0)
+| eval setup_reason=case(
+    mode!="provider" OR provider="none" OR provider="", "Local only. No provider is saved.",
+    key_state!="SET", "Setup incomplete: API key is missing. Enter a key and click SAVE.",
+    model_ok=0, "Setup incomplete: model is missing. Enter a model id and click SAVE.",
+    endpoint_ok=0, "Setup incomplete: ".coalesce(provider_label, provider)." has no endpoint. Set default_endpoint in the provider catalog, then SAVE again.",
+    1=1, "Ready. Provider ".coalesce(provider_label, provider).", model ".model.", key SET.")
+| eval ai_status=case(
+    mode!="provider" OR provider="none" OR provider="", "LOCAL",
+    key_state="SET" AND model_ok=1 AND endpoint_ok=1, "READY",
+    1=1, "FAILED")
+| eval status_color=ai_status
+| eval _color_rank=case(ai_status="FAILED", 1, ai_status="READY", 3, 1=1, 3)
+| table setup_reason, ai_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank
 """
 
 Q_DQ_AI_ASK_BUTTON = r"""
@@ -1682,6 +1714,16 @@ Q_DQ_AI_SAVE_BUTTON = r"""
 | table button_label, click_action, _color_rank
 """
 
+Q_DQ_AI_MODELS = r"""
+| inputlookup dq_agent_ai_models
+| eval p=replace(lower("$tok_cfg_provider$"), "[^a-z]", "")
+| eval p=if(p="" OR isnull(p), "none", p)
+| where provider=p
+| eval label=coalesce(model_label, model), value=model
+| table label, value
+| sort label
+"""
+
 # Writes only after SAVE is clicked. Empty page-load skips outputlookup.
 # api_key is stored on this search head lookup, never in the app package.
 Q_DQ_AI_SAVE_CONFIG = r"""
@@ -1696,7 +1738,7 @@ Q_DQ_AI_SAVE_CONFIG = r"""
 | eval api_key=replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")
 | eval api_key=if(api_key="" OR isnull(api_key) OR api_key="none", coalesce(prev_key, "none"), api_key)
 | eval api_key=if(provider="none", "none", api_key)
-| where save="save" AND (provider="none" OR (provider!="none" AND model!="none" AND api_key!="none" AND api_key!=""))
+| where save="save"
 | eval mode=if(provider="none", "off", "provider")
 | lookup dq_agent_ai_providers provider OUTPUT default_endpoint
 | eval endpoint=coalesce(default_endpoint, prev_endpoint, "none")
@@ -1715,12 +1757,153 @@ Q_DQ_AI_SAVE_CONFIG = r"""
 | table updated_at, provider, model, key_state, mode, _color_rank
 """
 
+# Queues a short provider ping after SAVE when the config is complete. The Cloud
+# app cannot HTTPS to OpenAI/Cisco; dispatch + webhook + HEC is the path.
+Q_DQ_AI_CONN_WRITE = r"""
+| makeresults
+| eval save="$tok_cfg_save$"
+| eval stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT api_key AS prev_key, endpoint AS prev_endpoint
+| eval provider=replace(lower("$tok_cfg_provider$"), "[^a-z]", "")
+| eval provider=if(provider="openai" OR provider="cisco" OR provider="azure" OR provider="anthropic" OR provider="custom", provider, "none")
+| eval model=replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")
+| eval model=if(model="" OR isnull(model), "none", model)
+| eval api_key=replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")
+| eval api_key=if(api_key="" OR isnull(api_key) OR api_key="none", coalesce(prev_key, "none"), api_key)
+| eval api_key=if(provider="none", "none", api_key)
+| lookup dq_agent_ai_providers provider OUTPUT default_endpoint
+| eval endpoint=coalesce(default_endpoint, prev_endpoint, "none")
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none" AND len(api_key)>=8, 1, 0)
+| eval model_ok=if(model!="none" AND model!="", 1, 0)
+| eval endpoint_ok=if(match(lower(coalesce(endpoint, "")), "^https://[a-z0-9]"), 1, 0)
+| where save="save" AND provider!="none" AND key_ok=1 AND model_ok=1 AND endpoint_ok=1
+| eval finding_id="connection_test", entity="ai_setup", issue="connection_test", status="pending", actor="human_dashboard"
+| eval requested_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="connection_test"
+| eval ai_brief="Connection test. Reply with the single word PONG. Do not request secrets. Do not claim you changed Splunk."
+| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief
+| appendpipe [
+    | inputlookup append=true dq_agent_ai_requests
+    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief by finding_id
+    | outputlookup dq_agent_ai_requests
+]
+| where finding_id="connection_test"
+| eval _color_rank=2
+| table requested_at, finding_id, provider, status, _color_rank
+"""
+
+Q_DQ_AI_CONN_TEST = Q_DQ_AI_CFG_ROW + r"""
+| lookup dq_agent_ai_providers provider OUTPUT provider_label, default_endpoint, notes
+| eval endpoint=if(endpoint="none" OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
+| eval key_state=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", "SET", "MISSING")
+| eval model_ok=if(isnotnull(model) AND model!="" AND model!="none", 1, 0)
+| eval endpoint_ok=if(isnotnull(endpoint) AND endpoint!="" AND endpoint!="none", 1, 0)
+| eval endpoint_https=if(match(lower(coalesce(endpoint, "")), "^https://[a-z0-9]"), 1, 0)
+| eval key_shape=if(key_state="SET" AND len(api_key)>=8, "ok", "bad")
+| eval setup_reason=case(
+    mode!="provider" OR provider="none" OR provider="", "Local only. No provider is saved.",
+    key_state!="SET", "Setup incomplete: API key is missing. Enter a key and click SAVE.",
+    model_ok=0, "Setup incomplete: model is missing. Enter a model id and click SAVE.",
+    endpoint_ok=0, "Setup incomplete: ".coalesce(provider_label, provider)." has no endpoint. Set default_endpoint in the provider catalog, then SAVE again.",
+    1=1, "Ready. Provider ".coalesce(provider_label, provider).", model ".model.", key SET.")
+| eval ai_status=case(
+    mode!="provider" OR provider="none" OR provider="", "LOCAL",
+    key_state="SET" AND model_ok=1 AND endpoint_ok=1, "READY",
+    1=1, "FAILED")
+| fields - api_key
+| eval finding_id="connection_test"
+| lookup dq_agent_ai_requests finding_id OUTPUT status AS ping_status, requested_at AS ping_at, note AS ping_note
+| eval ping_at_epoch=if(isnotnull(ping_at) AND ping_at!="0" AND ping_at!="", strptime(ping_at, "%Y-%m-%d %H:%M:%S"), null())
+| eval wait_sec=if(isnotnull(ping_at_epoch), now()-ping_at_epoch, null())
+| eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())
+| eval ping_replied=0, dispatch_runs=0, ping_reply_at=0
+| append [
+    search [| inputlookup dq_agent_ai_config | where stanza="default" | head 1 | eval inbox_index=replace(coalesce(inbox_index, "_internal"), "[^A-Za-z0-9_]", "") | eval inbox_sourcetype=replace(coalesce(inbox_sourcetype, "derek_health_ai_unconfigured"), "[^A-Za-z0-9_]", "") | eval search="index=".inbox_index." sourcetype=".inbox_sourcetype." (finding_id=connection_test OR connection_test) earliest=-24h latest=now" | return $search]
+    | sort 0 -_time
+    | head 1
+    | eval ping_replied=1, ping_reply_at=_time
+    | eval ping_reply_status=lower(coalesce(status, conn_status, "replied"))
+    | eval ping_fail_msg=substr(replace(coalesce(reply, error, "none"), "[^A-Za-z0-9 .:_-]", ""), 1, 120)
+    | table ping_replied, ping_reply_at, ping_reply_status, ping_fail_msg
+]
+| append [
+    search index=_internal sourcetype=scheduler savedsearch_name="Exec Health - AI provider dispatch" earliest=-2h latest=now
+    | stats count as dispatch_runs, latest(status) as dispatch_status
+    | table dispatch_runs, dispatch_status
+]
+| stats first(mode) as mode, first(provider) as provider, first(provider_label) as provider_label, first(model) as model, first(key_state) as key_state, first(endpoint) as endpoint, first(inbox_index) as inbox_index, first(inbox_sourcetype) as inbox_sourcetype, first(notes) as notes, first(setup_reason) as setup_reason, first(ai_status) as ai_status, first(key_shape) as key_shape, first(endpoint_https) as endpoint_https, first(ping_status) as ping_status, first(ping_at) as ping_at, first(ping_note) as ping_note, first(ping_at_epoch) as ping_at_epoch, first(wait_min) as wait_min, max(ping_replied) as ping_replied, max(ping_reply_at) as ping_reply_at, values(ping_reply_status) as ping_reply_status, values(ping_fail_msg) as ping_fail_msg, max(dispatch_runs) as dispatch_runs, values(dispatch_status) as dispatch_status
+| eval ping_replied=if(ping_replied=1 AND (isnull(ping_at_epoch) OR ping_reply_at+60>=ping_at_epoch), 1, 0)
+| eval conn_status=case(
+    ai_status="LOCAL", "SKIP",
+    ai_status="FAILED", "FAIL",
+    key_shape!="ok", "FAIL",
+    endpoint_https!=1, "FAIL",
+    ping_replied=1 AND (ping_reply_status="failed" OR ping_reply_status="error" OR ping_reply_status="fail"), "FAIL",
+    ping_replied=1, "PASS",
+    ping_status="failed" OR ping_status="error", "FAIL",
+    ping_status="pending" AND wait_min>=5 AND dispatch_runs=0, "FAIL",
+    ping_status="pending" AND wait_min>=5, "FAIL",
+    ping_status="pending", "TESTING",
+    1=1, "TESTING")
+| eval conn_reason=case(
+    conn_status="SKIP", "No provider is set. Connection test was not run.",
+    ai_status="FAILED", setup_reason,
+    key_shape!="ok", "Connection test failed: API key is missing or too short. Enter a key and click SAVE.",
+    endpoint_https!=1, "Connection test failed: endpoint is not HTTPS. Set default_endpoint to an https URL in the provider catalog, then SAVE.",
+    ping_replied=1 AND (ping_reply_status="failed" OR ping_reply_status="error" OR ping_reply_status="fail"), "Provider rejected the connection test. ".if(ping_fail_msg="none" OR isnull(ping_fail_msg), "Check the API key and endpoint.", ping_fail_msg),
+    conn_status="PASS", "Connection test passed. ".coalesce(provider_label, provider)." replied to the ping.",
+    ping_status="pending" AND wait_min>=5 AND dispatch_runs=0, "No reply after ".tostring(wait_min)." minutes and dispatch has not run. Enable Exec Health - AI provider dispatch and attach a webhook to your AI gateway, then SAVE to test again.",
+    ping_status="pending" AND wait_min>=5, "Dispatch ran but no provider reply in HEC after ".tostring(wait_min)." minutes. Check the gateway, API key, and inbox index/sourcetype. Click SAVE to test again.",
+    ping_status="pending", "Connection test ping queued at ".coalesce(ping_at, "unknown")+". Waiting for the gateway to call the provider and reply via HEC.",
+    1=1, "Connection test ping is being queued. Click SAVE if this stays TESTING.")
+| eval tile_status=case(conn_status="SKIP", "LOCAL", conn_status="FAIL", "FAILED", 1=1, conn_status)
+| eval status_color=ai_status
+| eval _color_rank=case(conn_status="FAIL" OR ai_status="FAILED", 1, conn_status="TESTING", 2, 1=1, 3)
+| table setup_reason, ai_status, conn_status, conn_reason, tile_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank
+"""
+
 Q_DQ_AI_QUEUE = r"""
 | inputlookup dq_agent_ai_requests
 | where NOT (finding_id="placeholder" AND status="none")
 | eval _color_rank=case(status="pending", 2, 1=1, 3)
 | table requested_at, finding_id, entity, issue, provider, model, status, actor, note, _color_rank
 | sort 0 -requested_at
+"""
+
+Q_DQ_AI_ASK_STATUS = r"""
+| makeresults
+| eval finding_id="$tok_finding_id$", ask="$tok_ai_ask$", stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, api_key, endpoint, updated_at
+| eval used_ui=if(updated_at="0" OR isnull(updated_at), 0, 1)
+| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
+| eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
+| eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
+| eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
+| eval configured=if(mode="provider" AND provider!="none" AND provider!="" AND key_ok=1 AND isnotnull(model) AND model!="none" AND model!="", 1, 0)
+| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider AS req_provider, note AS req_note
+| eval wait_sec=if(isnotnull(requested_at) AND requested_at!="0" AND requested_at!="", now()-strptime(requested_at, "%Y-%m-%d %H:%M:%S"), null())
+| eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())
+| eval ask_state=case(
+    picked=0, "IDLE",
+    ask="ask" AND configured=0, "FAILED",
+    req_status="failed" OR req_status="error", "FAILED",
+    req_status="done" OR req_status="replied", "REPLIED",
+    req_status="pending" AND wait_min>=15, "STALLED",
+    req_status="pending", "WAITING",
+    ask="ask" AND configured=1 AND (isnull(req_status) OR req_status="" OR req_status="none"), "FAILED",
+    1=1, "IDLE")
+| eval ask_message=case(
+    ask_state="IDLE" AND picked=0, "Select a suggestion, then click ASK.",
+    ask_state="IDLE", "No ASK has been sent for this suggestion yet.",
+    ask_state="FAILED" AND configured=0, "ASK failed: AI provider is not ready. Open AI provider setup and SAVE provider, model, and key.",
+    ask_state="FAILED" AND picked=1 AND (isnull(req_status) OR req_status="" OR req_status="none"), "ASK failed: the request was not queued. Confirm a suggestion is selected and the provider is READY, then click ASK again.",
+    ask_state="FAILED", "ASK failed: ".coalesce(req_note, "the provider returned an error."),
+    ask_state="WAITING", "Waiting on ".coalesce(req_provider, provider, "the provider")+". Queued at ".coalesce(requested_at, "unknown")+". Enable Exec Health - AI provider dispatch if this stays pending.",
+    ask_state="STALLED", "Still waiting after ".tostring(wait_min)." minutes. Dispatch may be disabled, the webhook may be missing, or the provider did not reply.",
+    ask_state="REPLIED", "Provider replied. See the replies table below.",
+    1=1, "ASK status unknown.")
+| eval _color_rank=case(ask_state="FAILED" OR ask_state="STALLED", 1, ask_state="WAITING", 2, ask_state="REPLIED", 3, 1=1, 3)
+| table ask_state, ask_message, _color_rank
 """
 
 Q_DQ_AI_REPLIES = r"""
@@ -1795,6 +1978,9 @@ def data_quality_agent() -> dict:
     brief_table.pop("eventHandlers", None)
     replies_table = table("Provider replies for this suggestion", "ds_dq_ai_replies", count=5)
     replies_table.pop("eventHandlers", None)
+    ask_msg_table = table("ASK result — waiting or failed", "ds_dq_ai_ask_status", count=1)
+    ask_msg_table.pop("eventHandlers", None)
+    ask_msg_table["showLastUpdated"] = False
     return {
         "title": "Derek+ Data Quality Agent",
         "description": "Click Select, then click APPROVE or DISMISS. That records the decision. Search does not open.",
@@ -1855,9 +2041,10 @@ def data_quality_agent() -> dict:
             "ds_dq_dismiss": ds("Dismiss control", Q_DQ_CHOOSE_DISMISS, "0", "now", refresh="30s"),
             "ds_dq_save": ds("Write agent decision", Q_DQ_SAVE_DECISION, "0", "now", refresh="5m"),
             "ds_dq_recorded": ds("Recorded decision", Q_DQ_RECORDED_READ, "0", "now", refresh="10s"),
-            "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_STATUS, "0", "now", refresh="30s"),
+            "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_CONN_TEST, "0", "now", refresh="10s"),
             "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_BUTTON, "0", "now", refresh="30s"),
             "ds_dq_ai_write": ds("Write ASK request", Q_DQ_AI_ASK_WRITE, "0", "now", refresh="5m"),
+            "ds_dq_ai_ask_status": ds("ASK wait or fail", Q_DQ_AI_ASK_STATUS, "0", "now", refresh="10s"),
             "ds_dq_ai_replies": ds("AI provider replies", Q_DQ_AI_REPLIES, "-24h", "now", refresh="30s"),
         },
         "visualizations": {
@@ -1871,7 +2058,7 @@ def data_quality_agent() -> dict:
             "viz_status": single_status("Queue health", "ds_dq_status", "agent_status", "issues"),
             "viz_count": single_number("Open suggestions", "ds_dq_status", "issues", "", spark=None, precision=0),
             "viz_ai_status": {
-                **single_status("AI provider (click to set up)", "ds_dq_ai_status", "ai_status", "status_color"),
+                **single_status("AI setup (click to open)", "ds_dq_ai_status", "tile_status", "tile_status"),
                 "eventHandlers": [
                     {
                         "type": "drilldown.linkToDashboard",
@@ -1885,8 +2072,8 @@ def data_quality_agent() -> dict:
             },
             "viz_findings": findings_table,
             "viz_selected": suggestion_table,
-            "viz_approve": decision_button("3. Click APPROVE", "ds_dq_approve"),
-            "viz_dismiss": decision_button("Or click DISMISS", "ds_dq_dismiss"),
+            "viz_approve": decision_button("", "ds_dq_approve", fill=GREEN),
+            "viz_dismiss": decision_button("", "ds_dq_dismiss", fill=RED),
             "viz_recorded": recorded_table,
             "viz_write": {
                 "type": "splunk.singlevalue",
@@ -1902,7 +2089,9 @@ def data_quality_agent() -> dict:
                 },
             },
             "viz_brief": brief_table,
-            "viz_ai_ask": decision_button("Optional — click ASK", "ds_dq_ai_ready", token="tok_ai_ask"),
+            "viz_ai_ask": decision_button("", "ds_dq_ai_ready", token="tok_ai_ask", fill="#7B56DB"),
+            "viz_ai_ask_state": single_status("ASK status", "ds_dq_ai_ask_status", "ask_state", "ask_state"),
+            "viz_ai_ask_msg": ask_msg_table,
             "viz_ai_write": {
                 "type": "splunk.singlevalue",
                 "title": "",
@@ -1931,15 +2120,17 @@ def data_quality_agent() -> dict:
                 block("viz_ai_status", 800, 90, 400, 130),
                 block("viz_findings", 0, 220, 1200, 300),
                 block("viz_selected", 0, 520, 1200, 220),
-                block("viz_approve", 0, 740, 400, 140),
-                block("viz_dismiss", 400, 740, 400, 140),
-                block("viz_recorded", 800, 740, 400, 140),
-                block("viz_write", 0, 1260, 1200, 40),
-                block("viz_brief", 0, 880, 800, 150),
-                block("viz_ai_ask", 800, 880, 400, 150),
-                block("viz_ai_write", 0, 1300, 1200, 40),
-                block("viz_ai_replies", 0, 1030, 1200, 150),
-                block("viz_footer", 0, 1180, 1200, 80),
+                block("viz_approve", 0, 740, 400, 90),
+                block("viz_dismiss", 400, 740, 400, 90),
+                block("viz_recorded", 800, 740, 400, 90),
+                block("viz_brief", 0, 830, 800, 150),
+                block("viz_ai_ask", 800, 830, 400, 150),
+                block("viz_ai_ask_state", 0, 980, 280, 130),
+                block("viz_ai_ask_msg", 280, 980, 920, 130),
+                block("viz_ai_replies", 0, 1110, 1200, 150),
+                block("viz_footer", 0, 1260, 1200, 80),
+                block("viz_write", 0, 1340, 1200, 40),
+                block("viz_ai_write", 0, 1380, 1200, 40),
             ],
             extra_inputs=[
                 "input_ask",
@@ -1949,8 +2140,14 @@ def data_quality_agent() -> dict:
 
 
 def ai_provider_setup() -> dict:
-    saved_table = table("Saved settings (key is stored, not displayed)", "ds_ai_current", count=5)
+    saved_table = table("Saved settings (key is stored, not displayed)", "ds_ai_saved", count=5)
     saved_table.pop("eventHandlers", None)
+    reason_table = table("Why this status", "ds_ai_reason", count=1)
+    reason_table.pop("eventHandlers", None)
+    reason_table["showLastUpdated"] = False
+    conn_reason_table = table("Connection test", "ds_ai_conn_reason", count=1)
+    conn_reason_table.pop("eventHandlers", None)
+    conn_reason_table["showLastUpdated"] = False
     providers_table = table("Supported providers", "ds_ai_providers", count=10)
     providers_table.pop("eventHandlers", None)
     write_viz = {
@@ -1988,9 +2185,15 @@ def ai_provider_setup() -> dict:
                 },
             },
             "input_cfg_model": {
-                "type": "input.text",
+                "type": "input.dropdown",
                 "title": "Model",
-                "options": {"token": "tok_cfg_model", "defaultValue": ""},
+                "options": {
+                    "token": "tok_cfg_model",
+                    "defaultValue": "none",
+                    "selectFirstSearchResult": True,
+                    "items": "> frame(label, value)",
+                },
+                "dataSources": {"primary": "ds_ai_models"},
             },
             "input_cfg_key": {
                 "type": "input.text",
@@ -2006,10 +2209,25 @@ def ai_provider_setup() -> dict:
         "dataSources": {
             "ds_ai_current": ds(
                 "Saved AI config",
-                Q_DQ_AI_STATUS + '\n| eval _gate="$tok_cfg_save$"',
+                Q_DQ_AI_CONN_TEST + '\n| eval _gate="$tok_cfg_save$"',
                 "0",
                 "now",
                 refresh="10s",
+            ),
+            "ds_ai_reason": chain(
+                "Setup reason",
+                "ds_ai_current",
+                "| table setup_reason, ai_status, _color_rank",
+            ),
+            "ds_ai_conn_reason": chain(
+                "Connection test reason",
+                "ds_ai_current",
+                "| table conn_reason, conn_status, _color_rank",
+            ),
+            "ds_ai_saved": chain(
+                "Saved settings view",
+                "ds_ai_current",
+                "| table mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank",
             ),
             "ds_ai_providers": ds(
                 "Provider catalog",
@@ -2018,28 +2236,49 @@ def ai_provider_setup() -> dict:
                 "now",
                 refresh="5m",
             ),
+            "ds_ai_models": ds("Models for selected provider", Q_DQ_AI_MODELS, "0", "now", refresh="30s"),
             "ds_ai_save": ds("Save control", Q_DQ_AI_SAVE_BUTTON, "0", "now", refresh="30s"),
             "ds_ai_write": ds("Write AI config", Q_DQ_AI_SAVE_CONFIG, "0", "now", refresh="5m"),
+            "ds_ai_conn_write": ds("Queue connection test", Q_DQ_AI_CONN_WRITE, "0", "now", refresh="5m"),
         },
         "visualizations": {
             "viz_header": md(
                 "# AI provider setup\n"
-                "Fill in **AI provider**, **model**, and **API key**, then click **SAVE** on the same row. "
-                "That writes Splunk config on this search head (`dq_agent_ai_config`). Search does not open. "
+                "Pick an **AI provider**, then a **model** from that provider's list, enter the **API key**, and click **SAVE**. "
+                "That writes Splunk config on this search head (`dq_agent_ai_config`) and runs a **connection test**. Search does not open. "
                 "The key is never shown after save. Leave key blank to keep the value already stored."
             ),
-            "viz_status": single_status("Current mode", "ds_ai_current", "ai_status", "status_color"),
+            "viz_status": single_status("Setup status", "ds_ai_current", "ai_status", "status_color"),
+            "viz_conn": single_status("Connection test", "ds_ai_current", "conn_status", "conn_status"),
+            "viz_reason": reason_table,
+            "viz_conn_reason": conn_reason_table,
             "viz_steps": md(
-                "## After you save\n"
+                "## After a READY save\n"
+                "SAVE queues a short ping. **PASS** means the gateway reached the provider and a reply landed in HEC. "
+                "**TESTING** is waiting on dispatch. **FAIL** has the reason in **Connection test**.\n"
                 "1. Enable **Exec Health - AI provider dispatch**.\n"
                 "2. Attach a **webhook** in Splunk Web to your gateway if replies should return via HEC.\n"
                 "3. Open **Derek+ Data Quality Agent**, review a finding, click **ASK**.\n"
+                "**FAILED** setup means provider, model, key, or endpoint is missing. "
                 "Pick **None** and SAVE to turn the provider off."
             ),
             "viz_current": saved_table,
             "viz_providers": providers_table,
-            "viz_save": decision_button("SAVE", "ds_ai_save", token="tok_cfg_save"),
+            "viz_save": decision_button("", "ds_ai_save", token="tok_cfg_save", fill="#009CEB"),
             "viz_write": write_viz,
+            "viz_conn_write": {
+                "type": "splunk.singlevalue",
+                "title": "",
+                "dataSources": {"primary": "ds_ai_conn_write"},
+                "hideWhenNoData": True,
+                "showLastUpdated": False,
+                "showProgressBar": False,
+                "options": {
+                    "majorValue": "> primary | seriesByName(\"status\") | lastPoint()",
+                    "backgroundColor": "transparent",
+                    "majorFontSize": 14,
+                },
+            },
             "viz_footer": md(
                 "SAVE updates `lookups/dq_agent_ai_config.csv` on this search head only. "
                 "The install package ships `api_key=none`. HEC token secrets and webhook URLs still do not belong in this app."
@@ -2052,19 +2291,23 @@ def ai_provider_setup() -> dict:
                 input_block("input_cfg_model", 250, 90, 250, 95),
                 input_block("input_cfg_key", 500, 90, 400, 95),
                 block("viz_save", 900, 90, 300, 95),
-                block("viz_status", 0, 185, 300, 150),
-                block("viz_steps", 300, 185, 900, 150),
-                block("viz_current", 0, 335, 1200, 180),
-                block("viz_providers", 0, 515, 1200, 220),
-                block("viz_footer", 0, 735, 1200, 80),
-                block("viz_write", 0, 815, 1200, 40),
+                block("viz_status", 0, 185, 200, 140),
+                block("viz_conn", 200, 185, 200, 140),
+                block("viz_reason", 400, 185, 400, 140),
+                block("viz_conn_reason", 800, 185, 400, 140),
+                block("viz_steps", 0, 325, 1200, 110),
+                block("viz_current", 0, 435, 1200, 180),
+                block("viz_providers", 0, 615, 1200, 220),
+                block("viz_footer", 0, 835, 1200, 80),
+                block("viz_write", 0, 915, 1200, 40),
+                block("viz_conn_write", 0, 955, 1200, 40),
             ],
             include_time=False,
         ),
     }
 
 
-APP_VERSION = "1.7.13"
+APP_VERSION = "1.7.16"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2112,7 +2355,7 @@ def about() -> dict:
                 "- No custom Python, inputs, or indexes.conf in the install package (avoids AppInspect manual checks)\n"
                 "- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n"
                 "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n"
-                "- The Data Quality Agent records a decision only after a human clicks APPROVE or DISMISS (no Python LLM client). AI provider, model, and key are saved from the setup page to a search-head lookup\n"
+                "- The Data Quality Agent records a decision only after a human clicks APPROVE or DISMISS (no Python LLM client). AI provider, model, and key are saved from the setup page to a search-head lookup; SAVE also queues a connection-test ping\n"
                 "- `commands.conf` marks `outputlookup` not-risky in this app so the approvals lookup can be written from the dashboard\n\n"
                 "Self-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** "
                 "(`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via "
@@ -2160,7 +2403,7 @@ def readme() -> dict:
                 "- **SC4S Syslog & Edge/Ingest Processors** — syslog sources, Edge in vs out, filter efficiency\n"
                 "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index; click a source for latest event, totals, 24h trend, and 2σ drop/burst outliers\n"
                 "- **Derek+ Data Quality Agent** — agentic loop over health tiles and learned ingest bounds; a human must APPROVE or DISMISS\n"
-                "- **AI provider setup** — Configure → AI provider: provider, model, and key, then SAVE\n\n"
+                "- **AI provider setup** — Configure → AI provider: provider, model, and key, then SAVE (runs a connection test)\n\n"
                 "**GREEN** = within baseline · **YELLOW** = watch · **RED** = action required."
             ),
             "viz_heartbeat": md(
@@ -2210,7 +2453,7 @@ def readme() -> dict:
                 "- HEC token silence\n"
                 "- Host data silent with heartbeat\n"
                 "- Data quality agent report (open findings + proposed fixes; enable email yourself — the agent never auto-fixes)\n"
-                "- AI provider dispatch (pending ASK requests; attach a webhook in Splunk Web — never put the webhook URL in this app)"
+                "- AI provider dispatch (pending ASK and connection-test pings; attach a webhook in Splunk Web — never put the webhook URL in this app)"
             ),
             "viz_hec": md(
                 "## HEC token names\n"
@@ -2366,7 +2609,7 @@ SAVED_SEARCHES = [
     (
         "Exec Health - AI provider dispatch",
         Q_DQ_AI_DISPATCH,
-        "Lists pending human-approved ASK requests for the configured AI provider, including the key saved on AI provider setup. Enable after you SAVE a provider. Attach a webhook in Splunk Web to your gateway. Do not put webhook URLs or HEC tokens in this app, and do not attach email to this search. The search never calls a provider itself.",
+        "Lists pending ASK requests and connection-test pings for the configured AI provider, including the key saved on AI provider setup. Enable after you SAVE a provider. Attach a webhook in Splunk Web to your gateway. Do not put webhook URLs or HEC tokens in this app, and do not attach email to this search. The search never calls a provider itself.",
         [
             ("cron_schedule", "*/5 * * * *"),
             ("dispatch.earliest_time", "-15m"),

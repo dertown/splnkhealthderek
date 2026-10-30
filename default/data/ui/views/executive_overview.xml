@@ -214,16 +214,56 @@
             "value": "#53A051"
           },
           {
+            "match": "READY",
+            "value": "#53A051"
+          },
+          {
             "match": "PROVIDER",
-            "value": "#F8BE34"
+            "value": "#53A051"
+          },
+          {
+            "match": "FAILED",
+            "value": "#DC4E41"
           },
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
           },
           {
+            "match": "WAITING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "STALLED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "REPLIED",
+            "value": "#53A051"
+          },
+          {
+            "match": "IDLE",
+            "value": "#6B6B6B"
+          },
+          {
             "match": "WAIT",
             "value": "#6B6B6B"
+          },
+          {
+            "match": "PASS",
+            "value": "#53A051"
+          },
+          {
+            "match": "TESTING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "SKIP",
+            "value": "#6B6B6B"
+          },
+          {
+            "match": "FAIL",
+            "value": "#DC4E41"
           }
         ]
       }
@@ -342,16 +382,56 @@
             "value": "#53A051"
           },
           {
+            "match": "READY",
+            "value": "#53A051"
+          },
+          {
             "match": "PROVIDER",
-            "value": "#F8BE34"
+            "value": "#53A051"
+          },
+          {
+            "match": "FAILED",
+            "value": "#DC4E41"
           },
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
           },
           {
+            "match": "WAITING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "STALLED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "REPLIED",
+            "value": "#53A051"
+          },
+          {
+            "match": "IDLE",
+            "value": "#6B6B6B"
+          },
+          {
             "match": "WAIT",
             "value": "#6B6B6B"
+          },
+          {
+            "match": "PASS",
+            "value": "#53A051"
+          },
+          {
+            "match": "TESTING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "SKIP",
+            "value": "#6B6B6B"
+          },
+          {
+            "match": "FAIL",
+            "value": "#DC4E41"
           }
         ]
       }
@@ -393,16 +473,56 @@
             "value": "#53A051"
           },
           {
+            "match": "READY",
+            "value": "#53A051"
+          },
+          {
             "match": "PROVIDER",
-            "value": "#F8BE34"
+            "value": "#53A051"
+          },
+          {
+            "match": "FAILED",
+            "value": "#DC4E41"
           },
           {
             "match": "MISCONFIG",
             "value": "#DC4E41"
           },
           {
+            "match": "WAITING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "STALLED",
+            "value": "#DC4E41"
+          },
+          {
+            "match": "REPLIED",
+            "value": "#53A051"
+          },
+          {
+            "match": "IDLE",
+            "value": "#6B6B6B"
+          },
+          {
             "match": "WAIT",
             "value": "#6B6B6B"
+          },
+          {
+            "match": "PASS",
+            "value": "#53A051"
+          },
+          {
+            "match": "TESTING",
+            "value": "#F8BE34"
+          },
+          {
+            "match": "SKIP",
+            "value": "#6B6B6B"
+          },
+          {
+            "match": "FAIL",
+            "value": "#DC4E41"
           }
         ]
       }

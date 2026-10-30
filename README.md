@@ -54,7 +54,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/` Python, no `
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.13.spl`.
+3. Upload `dist/splunk_exec_health-1.7.16.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -106,16 +106,17 @@ Enable **Exec Health - Data quality agent report** if you want open findings ema
 
 ### Optional AI provider
 
-Use **Configure → AI provider** (or click the AI provider tile on the agent dashboard). Fill in **AI provider**, **model**, and **API key**, then click **SAVE**. Search does not open. That writes `lookups/dq_agent_ai_config.csv` on this search head. The install package ships `api_key=none`; dashboards show **SET** / **MISSING**, not the key.
+Use **Configure → AI provider** (or click the AI provider tile on the agent dashboard). Fill in **AI provider**, **model**, and **API key**, then click **SAVE**. Search does not open. That writes `lookups/dq_agent_ai_config.csv` on this search head and queues a **connection test** ping. The install package ships `api_key=none`; dashboards show **SET** / **MISSING**, not the key. Setup status is **READY** / **FAILED** / **LOCAL**. The connection tile is **PASS** / **TESTING** / **FAIL** / **SKIP**.
 
 1. Pick OpenAI / Cisco AI Defense / Azure OpenAI / Anthropic / custom, enter the model id and key, click **SAVE**.
-2. Enable **Exec Health - AI provider dispatch** and attach a **webhook** in Splunk Web to your gateway. Do not put that URL in the app package, and do not attach email to that search.
-3. On the agent dashboard, review a finding, click **ASK**.
-4. Pick **None** and SAVE to turn the provider off. Leave the key field blank to keep a key that is already stored.
+2. Enable **Exec Health - AI provider dispatch** and attach a **webhook** in Splunk Web to your gateway. Do not put that URL in the app package, and do not attach email to that search. SAVE cannot call the provider from the search head; the gateway does, then replies via HEC.
+3. Wait for **PASS** on the connection test (or read **FAIL** for the reason). Click SAVE again to re-test.
+4. On the agent dashboard, review a finding, click **ASK**.
+5. Pick **None** and SAVE to turn the provider off. Leave the key field blank to keep a key that is already stored.
 
 Until you SAVE in the UI, macros `exec_health_ai_*` remain the fallback (default `off`). HEC token secrets and webhook URLs still do not belong in this app.
 
-`tools/ai_gateway_example.py` is a development example (not in the Cloud `.spl`). It reads `OPENAI_API_KEY` / `CISCO_API_KEY` / `AZURE_OPENAI_API_KEY` / `ANTHROPIC_API_KEY` and `SPLUNK_HEC_URL` / `SPLUNK_HEC_TOKEN` from the environment.
+`tools/ai_gateway_example.py` is a development example (not in the Cloud `.spl`). It prefers the API key from the dispatch payload (the key you SAVE), then `OPENAI_API_KEY` / `CISCO_API_KEY` / `AZURE_OPENAI_API_KEY` / `ANTHROPIC_API_KEY`. Set `SPLUNK_HEC_URL` / `SPLUNK_HEC_TOKEN` from the environment. Connection-test rows use `finding_id=connection_test`.
 
 ## Tune thresholds
 
@@ -185,5 +186,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, no Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.13.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.16.spl --included-tags private_app
 ```
