@@ -13,10 +13,10 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 | View | Purpose |
 | --- | --- |
 | **Splunk Health Derek+** | GREEN / YELLOW / RED rollup, GB/day vs 7-day MA, splunkd health report, search-head load, silent hosts, `_introspection` CPU/memory |
-| **Host Heartbeat & Ingestion Latency** | Last indexed data vs last `_internal` heartbeat, `metadata type=hosts` inventory, 24-hour 2σ baseline table |
+| **Host Heartbeat & Ingestion Latency** | Fleet-wide, right-now liveness: last indexed data vs last `_internal` heartbeat, plus current volume vs 24-hour 2σ baseline per host |
 | **HEC Token Performance** | Events per HEC token, 1-hour rolling window, flag if a ~100 eps token sits at 0 for 5+ minutes |
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
-| **Data Topology** | Link graph and Sankey of data sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port / HEC / SC4S → index, plus forwarder → indexer. Click a source for latest event, totals, 24h trend, and 2σ drop/burst outliers |
+| **Data Topology** | Link graph and Sankey of data sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port / HEC / SC4S → index, plus forwarder → indexer. Click a source for its first/latest event, totals, 24h trend, and 2σ drop/burst outliers (history of one source; liveness stays on Host Heartbeat) |
 | **Derek+ Data Quality Agent** | Agentic loop over health tiles and learned ingest bounds (instance features, silent hosts, search CPU, HEC, SC4S, Edge). A human must click APPROVE or DISMISS before anything is recorded. |
 | **AI provider setup** | Set AI provider, model, and key in the UI, then SAVE to the search-head config lookup |
 
@@ -54,7 +54,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.29.spl`.
+3. Upload `dist/splunk_exec_health-1.7.30.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -186,5 +186,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.29.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.30.spl --included-tags private_app
 ```

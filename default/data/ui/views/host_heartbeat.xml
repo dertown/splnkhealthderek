@@ -4,7 +4,7 @@
   <definition><![CDATA[
 {
   "title": "Host Heartbeat & Ingestion Latency",
-  "description": "Last indexed data vs last _internal heartbeat, plus 24-hour streamstats baselines.",
+  "description": "Fleet liveness right now: last indexed data vs _internal heartbeat, and current 2-sigma volume status per host.",
   "defaults": {
     "dataSources": {
       "ds.search": {
@@ -122,24 +122,6 @@
           "earliest": "-25h@m",
           "latest": "@m"
         }
-      }
-    },
-    "ds_host_volume": {
-      "type": "ds.search",
-      "name": "Host volume over time",
-      "options": {
-        "query": "| tstats count as events where index=`exec_health_idx` host=$host_filter$ by _time span=15m host\n| timechart span=15m sum(events) as events by host",
-        "refresh": "5m",
-        "refreshType": "delay"
-      }
-    },
-    "ds_metadata": {
-      "type": "ds.search",
-      "name": "metadata type=hosts",
-      "options": {
-        "query": "| metadata type=hosts index=`exec_health_idx`\n| eval last_seen=strftime(lastTime, \"%Y-%m-%d %H:%M:%S\"), first_seen=strftime(firstTime, \"%Y-%m-%d %H:%M:%S\"), age=tostring(now()-lastTime, \"duration\")\n| eval _color_rank=if((now()-lastTime)>`exec_health_silence_sec`, 1, 3)\n| table host, first_seen, last_seen, totalCount, age, _color_rank\n| sort _color_rank, host",
-        "refresh": "5m",
-        "refreshType": "delay"
       }
     }
   },
@@ -272,7 +254,7 @@
     },
     "viz_baseline": {
       "type": "splunk.table",
-      "title": "Per-host 24-hour mean / stdev (streamstats window=96 @ 15m)",
+      "title": "Current volume vs 24-hour baseline, all hosts (streamstats window=96 @ 15m)",
       "dataSources": {
         "primary": "ds_baseline"
       },
@@ -316,79 +298,10 @@
         }
       ]
     },
-    "viz_volume": {
-      "type": "splunk.area",
-      "title": "Ingestion volume by host",
-      "dataSources": {
-        "primary": "ds_host_volume"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": true,
-      "options": {
-        "seriesColors": [
-          "#7B56DB",
-          "#009CEB",
-          "#00CDAF",
-          "#DD9900",
-          "#FF677B"
-        ],
-        "legendDisplay": "right",
-        "yAxisTitleText": "events / 15m",
-        "areaOpacity": 0.35,
-        "nullValueDisplay": "connect",
-        "backgroundColor": "transparent"
-      }
-    },
-    "viz_meta": {
-      "type": "splunk.table",
-      "title": "Metadata inventory (type=hosts)",
-      "dataSources": {
-        "primary": "ds_metadata"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": true,
-      "options": {
-        "count": 20,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        },
-        "backgroundColor": "transparent"
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#5C1A1A"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#5C4A12"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#14301A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "`tstats latest(_time)` is the source of truth for last data / last heartbeat. `| metadata type=hosts` is shown for inventory comparison. Override `exec_health_silence_sec` (default 3600) and `exec_health_sigma` (default 2) as needed.",
+        "markdown": "`tstats latest(_time)` is the source of truth for last data / last heartbeat. This page is the **fleet-wide, right-now** view. For one source's history (first/last event, 24-hour trend, drop/burst buckets) and how it reaches Splunk, open **Data Topology** and click a source. Override `exec_health_silence_sec` (default 3600) and `exec_health_sigma` (default 2) as needed.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -513,45 +426,13 @@
         "strokeColor": "#26304A",
         "strokeWidth": 1
       }
-    },
-    "bar_8": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#009CEB",
-        "rx": 2
-      }
-    },
-    "card_9": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
-        "strokeWidth": 1
-      }
-    },
-    "bar_9": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
-      }
-    },
-    "card_10": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
-        "strokeWidth": 1
-      }
     }
   },
   "layout": {
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 1582,
+      "height": 1052,
       "display": "auto-scale",
       "backgroundColor": "#0B0F19"
     },
@@ -743,7 +624,7 @@
           "x": 6,
           "y": 586,
           "w": 1188,
-          "h": 308
+          "h": 348
         }
       },
       {
@@ -763,7 +644,7 @@
           "x": 14,
           "y": 594,
           "w": 1172,
-          "h": 294
+          "h": 334
         }
       },
       {
@@ -771,69 +652,9 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 906,
+          "y": 946,
           "w": 1188,
-          "h": 288
-        }
-      },
-      {
-        "item": "bar_8",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 906,
-          "w": 1188,
-          "h": 4
-        }
-      },
-      {
-        "item": "viz_volume",
-        "type": "block",
-        "position": {
-          "x": 14,
-          "y": 914,
-          "w": 1172,
-          "h": 274
-        }
-      },
-      {
-        "item": "card_9",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1206,
-          "w": 1188,
-          "h": 268
-        }
-      },
-      {
-        "item": "bar_9",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1206,
-          "w": 1188,
-          "h": 4
-        }
-      },
-      {
-        "item": "viz_meta",
-        "type": "block",
-        "position": {
-          "x": 14,
-          "y": 1214,
-          "w": 1172,
-          "h": 254
-        }
-      },
-      {
-        "item": "card_10",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1486,
-          "w": 1188,
-          "h": 78
+          "h": 88
         }
       },
       {
@@ -841,9 +662,9 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 1494,
+          "y": 954,
           "w": 1172,
-          "h": 64
+          "h": 74
         }
       }
     ],

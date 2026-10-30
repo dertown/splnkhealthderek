@@ -742,11 +742,10 @@ Q_TOPO_SRC_STATS = r"""
 | eval data_source=replace("$tok_data_source$", "[^A-Za-z0-9._:-]", "")
 | where data_source!="none" AND data_source!="" AND data_source!="*"
 | eval age_min=round((now()-last_event)/60, 0)
-| eval age=tostring(now()-last_event, "duration")
 | eval last_event=strftime(last_event, "%Y-%m-%d %H:%M:%S")
 | eval first_event=strftime(first_event, "%Y-%m-%d %H:%M:%S")
 | eval _color_rank=if(age_min>(`exec_health_silence_sec`/60), 1, 3)
-| table data_source, last_event, first_event, age, age_min, events, sourcetypes, _color_rank
+| table data_source, first_event, last_event, events, sourcetypes, _color_rank
 """.strip()
 
 Q_TOPO_SRC_TREND = r"""
@@ -1122,11 +1121,6 @@ Q_BASELINE_ALL = host_baseline_core("host=$host_filter$") + r"""
 | sort _color_rank, host
 """
 
-Q_HOST_VOLUME = r"""
-| tstats count as events where index=`exec_health_idx` host=$host_filter$ by _time span=15m host
-| timechart span=15m sum(events) as events by host
-""".strip()
-
 Q_HOST_LIST = r"""
 | tstats count where index=`exec_health_idx` by host
 | rename host as label
@@ -1135,19 +1129,11 @@ Q_HOST_LIST = r"""
 | sort label
 """.strip()
 
-Q_METADATA = r"""
-| metadata type=hosts index=`exec_health_idx`
-| eval last_seen=strftime(lastTime, "%Y-%m-%d %H:%M:%S"), first_seen=strftime(firstTime, "%Y-%m-%d %H:%M:%S"), age=tostring(now()-lastTime, "duration")
-| eval _color_rank=if((now()-lastTime)>`exec_health_silence_sec`, 1, 3)
-| table host, first_seen, last_seen, totalCount, age, _color_rank
-| sort _color_rank, host
-""".strip()
-
 
 def host_heartbeat() -> dict:
     return {
         "title": "Host Heartbeat & Ingestion Latency",
-        "description": "Last indexed data vs last _internal heartbeat, plus 24-hour streamstats baselines.",
+        "description": "Fleet liveness right now: last indexed data vs _internal heartbeat, and current 2-sigma volume status per host.",
         "defaults": defaults(),
         "inputs": {
             "input_global_trp": timerange("-24h@h,now"),
@@ -1188,8 +1174,6 @@ def host_heartbeat() -> dict:
                 '| append [| makeresults | eval state="HOST DOWN", hosts=0] | where state="HOST DOWN" | stats max(hosts) as hosts',
             ),
             "ds_baseline": ds("24h streamstats baseline", Q_BASELINE_ALL, "-25h@m", "@m"),
-            "ds_host_volume": ds("Host volume over time", Q_HOST_VOLUME),
-            "ds_metadata": ds("metadata type=hosts", Q_METADATA),
         },
         "visualizations": {
             "viz_header": md(
@@ -1202,12 +1186,11 @@ def host_heartbeat() -> dict:
             "viz_silent": single_number("Data silent / heartbeat only", "ds_state_silent", "hosts", "", None, 0),
             "viz_down": single_number("Host down", "ds_state_down", "hosts", "", None, 0),
             "viz_table": table("Last data received vs last internal heartbeat", "ds_phone_home", count=30),
-            "viz_baseline": table("Per-host 24-hour mean / stdev (streamstats window=96 @ 15m)", "ds_baseline", count=30),
-            "viz_volume": area("Ingestion volume by host", "ds_host_volume", "events / 15m"),
-            "viz_meta": table("Metadata inventory (type=hosts)", "ds_metadata", count=20),
+            "viz_baseline": table("Current volume vs 24-hour baseline, all hosts (streamstats window=96 @ 15m)", "ds_baseline", count=30),
             "viz_footer": md(
                 "`tstats latest(_time)` is the source of truth for last data / last heartbeat. "
-                "`| metadata type=hosts` is shown for inventory comparison. "
+                "This page is the **fleet-wide, right-now** view. For one source's history "
+                "(first/last event, 24-hour trend, drop/burst buckets) and how it reaches Splunk, open **Data Topology** and click a source. "
                 "Override `exec_health_silence_sec` (default 3600) and `exec_health_sigma` (default 2) as needed."
             ),
         },
@@ -1219,10 +1202,8 @@ def host_heartbeat() -> dict:
                 block("viz_silent", 600, 90, 300, 150),
                 block("viz_down", 900, 90, 300, 150),
                 block("viz_table", 0, 240, 1200, 340),
-                block("viz_baseline", 0, 580, 1200, 320),
-                block("viz_volume", 0, 900, 1200, 300),
-                block("viz_meta", 0, 1200, 1200, 280),
-                block("viz_footer", 0, 1480, 1200, 90),
+                block("viz_baseline", 0, 580, 1200, 360),
+                block("viz_footer", 0, 940, 1200, 100),
             ],
             extra_inputs=["input_host"],
         ),
@@ -1519,8 +1500,6 @@ def sc4s_edge() -> dict:
 
 
 def data_topology() -> dict:
-    src_age = single_number("Minutes since latest event", "ds_topo_src_stats", "age_min", "", None, 0)
-    src_age["options"]["underLabel"] = "in selected time range"
     src_out_n = single_number("Drop / burst buckets", "ds_topo_src_out_n", "outliers", "", None, 0)
     src_out_n["options"]["underLabel"] = "2σ vs prior 24h"
     return {
@@ -1617,16 +1596,16 @@ def data_topology() -> dict:
             "viz_table": drill_source(table("Top source → path → index flows — click data_source", "ds_topo_paths", count=20)),
             "viz_src_header": md(
                 "## Selected data source\n"
-                "Click a **data_source** above. Latest event and totals follow the time picker. "
+                "Click a **data_source** above. First/latest event and totals follow the time picker; "
+                "whether the host is alive right now is on **Host Heartbeat**. "
                 "Trend and outliers use the last **24 hours** at 15-minute buckets vs that source's "
                 "`streamstats` mean ± `exec_health_sigma` (default 2). "
                 "**DROP** = sudden traffic loss. **BURST** = sudden spike. Empty panels mean nothing is selected yet."
             ),
             "viz_src_total": single_number("Total events", "ds_topo_src_stats", "events", "", None, 0),
-            "viz_src_age": src_age,
             "viz_src_types": single_number("Sourcetypes", "ds_topo_src_stats", "sourcetypes", "", None, 0),
             "viz_src_out_n": src_out_n,
-            "viz_src_stats": table("Latest event, first event, and totals", "ds_topo_src_stats", count=1),
+            "viz_src_stats": table("First event, latest event, and totals", "ds_topo_src_stats", count=1),
             "viz_src_trend": line("Event trend vs 24-hour mean and 2σ bounds", "ds_topo_src_trend", "events / 15m"),
             "viz_src_outliers": table("Sudden drops and traffic bursts (2σ)", "ds_topo_src_outliers", count=20),
             "viz_tcpin_sankey": sankey("Forwarder → indexer volume (KB)", "ds_tcpin_sankey"),
@@ -1651,10 +1630,9 @@ def data_topology() -> dict:
                 block("viz_methods", 700, 610, 500, 320),
                 block("viz_table", 0, 930, 1200, 280),
                 block("viz_src_header", 0, 1210, 1200, 90),
-                block("viz_src_total", 0, 1300, 300, 140),
-                block("viz_src_age", 300, 1300, 300, 140),
-                block("viz_src_types", 600, 1300, 300, 140),
-                block("viz_src_out_n", 900, 1300, 300, 140),
+                block("viz_src_total", 0, 1300, 400, 140),
+                block("viz_src_types", 400, 1300, 400, 140),
+                block("viz_src_out_n", 800, 1300, 400, 140),
                 block("viz_src_stats", 0, 1440, 1200, 150),
                 block("viz_src_trend", 0, 1590, 1200, 280),
                 block("viz_src_outliers", 0, 1870, 1200, 260),
@@ -2390,7 +2368,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.29"
+APP_VERSION = "1.7.30"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
