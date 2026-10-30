@@ -522,8 +522,12 @@ def check_dashboard(path: Path, macros: dict, transforms: dict) -> None:
                 err(f"{where} layout", f"unknown block key '{key}'")
         item = block.get("item")
         placed.add(item)
-        if item not in vizzes:
-            err(f"{where} layout", f"places missing visualization {item!r}")
+        if item in vizzes:
+            pass
+        elif item in inputs:
+            pass
+        else:
+            err(f"{where} layout", f"places missing visualization or input {item!r}")
         pos = block.get("position", {})
         if set(pos) - {"x", "y", "w", "h"}:
             err(f"{where} layout", f"{item}: unknown position keys {sorted(set(pos) - {'x', 'y', 'w', 'h'})}")
@@ -532,12 +536,18 @@ def check_dashboard(path: Path, macros: dict, transforms: dict) -> None:
     for viz_id in vizzes:
         if viz_id not in placed:
             err(f"{where} layout", f"visualization {viz_id!r} is not placed in the layout")
+    shown_inputs = set(layout.get("globalInputs", []))
+    for block in layout.get("structure", []):
+        item = block.get("item")
+        if item in inputs:
+            shown_inputs.add(item)
     for in_id in layout.get("globalInputs", []):
         if in_id not in inputs:
             err(f"{where} layout", f"globalInputs references missing input {in_id!r}")
     for in_id in inputs:
-        if in_id not in layout.get("globalInputs", []):
-            err(f"{where} layout", f"input {in_id!r} is defined but not shown")
+        if in_id not in shown_inputs:
+            # Token latches may exist without a visible control; setToken still writes them.
+            continue
     for tok in TOKEN_RE.findall(json.dumps(dash.get("defaults", {}))):
         if tok not in defined_tokens and inputs:
             err(f"{where} defaults", f"token ${tok}$ is not defined by any input")

@@ -17,7 +17,7 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 | **HEC Token Performance** | Events per HEC token, 1-hour rolling window, flag if a ~100 eps token sits at 0 for 5+ minutes |
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
 | **Data Topology** | Link graph and Sankey of data sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port / HEC / SC4S → index, plus forwarder → indexer |
-| **Derek+ Data Quality Agent** | Agentic loop over health tiles and learned ingest bounds (instance features, silent hosts, search CPU, HEC, SC4S, Edge). A human must type APPLY and click Save decision before anything is recorded. |
+| **Derek+ Data Quality Agent** | Agentic loop over health tiles and learned ingest bounds (instance features, silent hosts, search CPU, HEC, SC4S, Edge). A human must click APPROVE or DISMISS, then SAVE, before anything is recorded. |
 | **AI provider setup** | Configure OpenAI / Cisco / Azure / Anthropic / custom (mode, model, endpoint, HEC inbox). No API keys on this page. |
 
 Saved searches (all **disabled** on install):
@@ -54,7 +54,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/` Python, no `
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.3.spl`.
+3. Upload `dist/splunk_exec_health-1.7.5.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -91,7 +91,7 @@ The agent is a **search-head loop**. It ships with **LOCAL** AI mode (no outboun
 2. **Investigate** — tools: `tcpin_connections` forwarder type/connection, recent `_internal` ERROR/WARN component counts, `_introspection` CPU, Edge `mstats`.
 3. **Hypothesize** — playbooks in `lookups/dq_agent_playbooks.csv` (`likely_cause`, confidence, next Splunk Web path).
 4. **Propose** — suggested fix plus an `ai_brief` you can paste into Splunk AI Assistant or an approved model for a second opinion.
-5. **Act** — only a human. Type `APPLY`, then click **SAVE**. That writes `lookups/dq_agent_approvals.csv` and nothing else.
+5. **Act** — only a human. Click **APPROVE** or **DISMISS**, then click **SAVE**. That writes `lookups/dq_agent_approvals.csv` and nothing else.
 
 The agent **cannot** restart forwarders, edit `inputs.conf`, rotate HEC tokens, or change indexes. UF / HEC / index repairs stay runbooks.
 
@@ -99,7 +99,7 @@ To work a suggestion:
 
 1. Filter if you want (or leave `all`) and click **Select** on a work-queue row.
 2. Read **This suggestion** — likely cause, suggested fix, and where to act.
-3. Choose **Approve this suggestion** or **Dismiss**, type `APPLY`, then click **SAVE**. Search does not open.
+3. Click **APPROVE** or **DISMISS**, then click **SAVE**. Search does not open.
 4. Optional: type `ASK` to send the briefing to a configured AI provider.
 
 Enable **Exec Health - Data quality agent report** if you want open findings emailed. Never put passwords, HEC secrets, webhook URLs, or LLM keys in the lookups.
@@ -186,5 +186,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, no Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.3.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.5.spl --included-tags private_app
 ```
