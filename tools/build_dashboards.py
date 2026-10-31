@@ -142,7 +142,11 @@ def md(text: str, font: str = "default") -> dict:
 
 
 def decision_button(title: str, ds_id: str, token: str = "tok_decision", fill: str | None = None) -> dict:
-    """One-row table so row.click_action.value is a real table drilldown."""
+    """One-row table so row._click_action.value is a real table drilldown.
+
+    The action lives in a hidden _ field so the label is the only visible column and
+    fills the table; a second visible column forces Studio scrollbars in the pill.
+    """
     viz = table(title, ds_id, count=1)
     viz["showLastUpdated"] = False
     viz["showProgressBar"] = False
@@ -150,16 +154,13 @@ def decision_button(title: str, ds_id: str, token: str = "tok_decision", fill: s
         {
             "type": "drilldown.setToken",
             "options": {
-                "tokens": [{"token": token, "key": "row.click_action.value"}],
+                "tokens": [{"token": token, "key": "row._click_action.value"}],
             },
         }
     ]
     viz["options"]["headerVisibility"] = "none"
     viz["options"]["fontSize"] = "default"
-    viz["options"]["columnFormat"] = {
-        "button_label": {"width": BUTTON_W - 2 * BUTTON_PAD_X - 40, "align": "center"},
-        "click_action": {"width": 1},
-    }
+    viz["options"]["columnFormat"] = {"button_label": {"align": "center"}}
     if fill:
         viz["options"]["backgroundColor"] = fill
         viz["options"]["tableFormat"] = {
@@ -387,10 +388,10 @@ ACCENT_GRAPH = "#DD9900"
 GUTTER = 6
 BAR_H = 4
 # Buttons render as a compact rounded pill centered in their grid cell. The table
-# inside needs ~44px for one row, and its columns must sum to less than its width,
-# or Studio adds scrollbars and hides the label.
+# inside shows a single auto-width column; a fixed-width or second column makes
+# Studio add scrollbars that hide the label.
 BUTTON_W = 260
-BUTTON_H = 52
+BUTTON_H = 56
 BUTTON_RX = 8
 BUTTON_PAD_X = 8
 BUTTON_PAD_Y = 4
@@ -1699,9 +1700,9 @@ Q_DQ_CHOOSE_APPROVE = r"""
 | eval finding_id="$tok_finding_id$"
 | eval picked=if(finding_id!="none" AND finding_id!="", 1, 0)
 | eval button_label=if(picked=1, "APPROVE", "PICK A ROW FIRST")
-| eval click_action="approve"
+| eval _click_action="approve"
 | eval _color_rank=if(picked=1, 2, 1)
-| table button_label, click_action, _color_rank
+| table button_label, _click_action, _color_rank
 """
 
 Q_DQ_CHOOSE_DISMISS = r"""
@@ -1709,9 +1710,9 @@ Q_DQ_CHOOSE_DISMISS = r"""
 | eval finding_id="$tok_finding_id$"
 | eval picked=if(finding_id!="none" AND finding_id!="", 1, 0)
 | eval button_label=if(picked=1, "DISMISS", "PICK A ROW FIRST")
-| eval click_action="dismiss"
+| eval _click_action="dismiss"
 | eval _color_rank=if(picked=1, 2, 1)
-| table button_label, click_action, _color_rank
+| table button_label, _click_action, _color_rank
 """
 
 # Only writes when APPROVE/DISMISS is chosen. Empty results skip appendpipe, so
@@ -1828,9 +1829,9 @@ Q_DQ_AI_ASK_BUTTON = r"""
 | eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
 | eval configured=if(mode="provider" AND provider!="none" AND provider!="" AND key_ok=1, 1, 0)
 | eval button_label=case(picked=0, "PICK A ROW FIRST", configured=0, "OPEN AI SETUP FIRST", 1=1, "ASK AGAIN")
-| eval click_action="retry".tostring(now())
+| eval _click_action="retry".tostring(now())
 | eval _color_rank=if(picked=1 AND configured=1, 3, 1)
-| table button_label, click_action, _color_rank
+| table button_label, _click_action, _color_rank
 """
 
 # Writes a pending ASK row only after the ASK tile is clicked. Page load is a no-op.
@@ -1877,9 +1878,9 @@ Q_DQ_AI_SAVE_BUTTON = r"""
 | makeresults
 | eval p=replace(lower("$tok_cfg_provider$"), "[^a-z]", ""), m=replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", ""), k=len(replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", ""))
 | eval button_label="SAVE"
-| eval click_action="save|".p."|".m."|".tostring(k)
+| eval _click_action="save|".p."|".m."|".tostring(k)
 | eval _color_rank=3
-| table button_label, click_action, _color_rank
+| table button_label, _click_action, _color_rank
 """
 
 Q_DQ_AI_MODELS = r"""
@@ -2407,7 +2408,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.33"
+APP_VERSION = "1.7.34"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 

@@ -219,7 +219,7 @@
       "type": "ds.search",
       "name": "Save control",
       "options": {
-        "query": "| makeresults\n| eval p=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\"), m=replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\"), k=len(replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\"))\n| eval button_label=\"SAVE\"\n| eval click_action=\"save|\".p.\"|\".m.\"|\".tostring(k)\n| eval _color_rank=3\n| table button_label, click_action, _color_rank",
+        "query": "| makeresults\n| eval p=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\"), m=replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\"), k=len(replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\"))\n| eval button_label=\"SAVE\"\n| eval _click_action=\"save|\".p.\"|\".m.\"|\".tostring(k)\n| eval _color_rank=3\n| table button_label, _click_action, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -616,11 +616,7 @@
         "fontSize": "default",
         "columnFormat": {
           "button_label": {
-            "width": 204,
             "align": "center"
-          },
-          "click_action": {
-            "width": 1
           }
         },
         "backgroundColor": "#53A051"
@@ -641,7 +637,7 @@
             "tokens": [
               {
                 "token": "tok_cfg_save",
-                "key": "row.click_action.value"
+                "key": "row._click_action.value"
               }
             ]
           }
@@ -868,9 +864,9 @@
         "type": "block",
         "position": {
           "x": 920,
-          "y": 111,
+          "y": 109,
           "w": 260,
-          "h": 52
+          "h": 56
         }
       },
       {
@@ -878,9 +874,9 @@
         "type": "block",
         "position": {
           "x": 928,
-          "y": 115,
+          "y": 113,
           "w": 244,
-          "h": 44
+          "h": 48
         }
       },
       {
