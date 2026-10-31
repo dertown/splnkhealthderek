@@ -2414,7 +2414,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.36"
+APP_VERSION = "1.7.37"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2637,9 +2637,11 @@ SS_COMMON = [
     ("alert.expires", "24h"),
     ("alert.suppress", "1"),
     ("alert.track", "1"),
-    ("alert_type", "number of events"),
-    ("alert_comparator", "greater than"),
-    ("alert_threshold", "0"),
+    # .conf names for the trigger condition; alert_type/alert_comparator/
+    # alert_threshold are REST-only and Splunk logs them as invalid keys here.
+    ("counttype", "number of events"),
+    ("relation", "greater than"),
+    ("quantity", "0"),
     ("request.ui_dispatch_view", "search"),
     ("display.general.type", "statistics"),
     ("display.page.search.tab", "statistics"),
