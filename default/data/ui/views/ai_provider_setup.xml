@@ -219,7 +219,7 @@
       "type": "ds.search",
       "name": "Save control",
       "options": {
-        "query": "| makeresults\n| eval p=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\"), m=replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\"), k=len(replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\"))\n| eval button_label=\"SAVE\"\n| eval click_action=\"save|\".p.\"|\".m.\"|\".tostring(k)\n| eval _color_rank=3\n| table button_label, click_action, _color_rank",
+        "query": "| makeresults\n| eval p=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\"), m=replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\"), k=len(replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\"))\n| eval button_label=\"SAVE\"\n| eval _click_action=\"save|\".p.\"|\".m.\"|\".tostring(k)\n| eval _color_rank=3\n| table button_label, _click_action, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -616,11 +616,7 @@
         "fontSize": "default",
         "columnFormat": {
           "button_label": {
-            "width": 204,
             "align": "center"
-          },
-          "click_action": {
-            "width": 1
           }
         },
         "backgroundColor": "#53A051"
@@ -641,7 +637,7 @@
             "tokens": [
               {
                 "token": "tok_cfg_save",
-                "key": "row.click_action.value"
+                "key": "row._click_action.value"
               }
             ]
           }
@@ -867,20 +863,20 @@
         "item": "pill_2",
         "type": "block",
         "position": {
-          "x": 940,
-          "y": 115,
-          "w": 220,
-          "h": 44
+          "x": 920,
+          "y": 109,
+          "w": 260,
+          "h": 56
         }
       },
       {
         "item": "viz_save",
         "type": "block",
         "position": {
-          "x": 946,
-          "y": 119,
-          "w": 208,
-          "h": 36
+          "x": 928,
+          "y": 113,
+          "w": 244,
+          "h": 48
         }
       },
       {
