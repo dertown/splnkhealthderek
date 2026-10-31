@@ -139,7 +139,7 @@
       "type": "ds.search",
       "name": "Approve control",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval button_label=if(picked=1, \"APPROVE\", \"PICK A ROW FIRST\")\n| eval _click_action=\"approve\"\n| eval _color_rank=if(picked=1, 2, 1)\n| table button_label, _click_action, _color_rank",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval _pressed=if(picked=1 AND \"$tok_decision$\"=\"approve\", 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", _pressed=1, \"APPROVED\", 1=1, \"APPROVE\")\n| eval _click_action=\"approve\"\n| table button_label, _click_action, _pressed",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -150,7 +150,7 @@
       "type": "ds.search",
       "name": "Dismiss control",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval button_label=if(picked=1, \"DISMISS\", \"PICK A ROW FIRST\")\n| eval _click_action=\"dismiss\"\n| eval _color_rank=if(picked=1, 2, 1)\n| table button_label, _click_action, _color_rank",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval _pressed=if(picked=1 AND \"$tok_decision$\"=\"dismiss\", 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", _pressed=1, \"DISMISSED\", 1=1, \"DISMISS\")\n| eval _click_action=\"dismiss\"\n| table button_label, _click_action, _pressed",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -191,7 +191,7 @@
       "type": "ds.search",
       "name": "Ask AI control",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1, 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", configured=0, \"OPEN AI SETUP FIRST\", 1=1, \"ASK AGAIN\")\n| eval _click_action=\"retry\".tostring(now())\n| eval _color_rank=if(picked=1 AND configured=1, 3, 1)\n| table button_label, _click_action, _color_rank",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1, 1, 0)\n| eval _pressed=if(picked=1 AND configured=1 AND match(\"$tok_ai_ask$\", \"^retry\"), 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", configured=0, \"OPEN AI SETUP FIRST\", _pressed=1, \"ASKED\", 1=1, \"ASK AGAIN\")\n| eval _click_action=\"retry\".tostring(now())\n| table button_label, _click_action, _pressed",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -596,10 +596,10 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+          "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
+          "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
           "headerBackgroundColor": "#53A051",
-          "headerColor": "#FFFFFF",
-          "cellTextColor": "#FFFFFF",
+          "headerColor": "#000000",
           "align": "center"
         },
         "headerVisibility": "none",
@@ -612,11 +612,24 @@
         "backgroundColor": "#53A051"
       },
       "context": {
-        "btnColors": [
+        "btnFill": [
           {
-            "from": 0,
-            "to": 10,
-            "value": "#53A051"
+            "value": "#53A051",
+            "to": 0.5
+          },
+          {
+            "value": "#000000",
+            "from": 0.5
+          }
+        ],
+        "btnText": [
+          {
+            "value": "#000000",
+            "to": 0.5
+          },
+          {
+            "value": "#53A051",
+            "from": 0.5
           }
         ]
       },
@@ -647,10 +660,10 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+          "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
+          "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
           "headerBackgroundColor": "#DC4E41",
-          "headerColor": "#FFFFFF",
-          "cellTextColor": "#FFFFFF",
+          "headerColor": "#000000",
           "align": "center"
         },
         "headerVisibility": "none",
@@ -663,11 +676,24 @@
         "backgroundColor": "#DC4E41"
       },
       "context": {
-        "btnColors": [
+        "btnFill": [
           {
-            "from": 0,
-            "to": 10,
-            "value": "#DC4E41"
+            "value": "#DC4E41",
+            "to": 0.5
+          },
+          {
+            "value": "#000000",
+            "from": 0.5
+          }
+        ],
+        "btnText": [
+          {
+            "value": "#000000",
+            "to": 0.5
+          },
+          {
+            "value": "#DC4E41",
+            "from": 0.5
           }
         ]
       },
@@ -772,10 +798,10 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+          "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
+          "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
           "headerBackgroundColor": "#7B56DB",
-          "headerColor": "#FFFFFF",
-          "cellTextColor": "#FFFFFF",
+          "headerColor": "#000000",
           "align": "center"
         },
         "headerVisibility": "none",
@@ -788,11 +814,24 @@
         "backgroundColor": "#7B56DB"
       },
       "context": {
-        "btnColors": [
+        "btnFill": [
           {
-            "from": 0,
-            "to": 10,
-            "value": "#7B56DB"
+            "value": "#7B56DB",
+            "to": 0.5
+          },
+          {
+            "value": "#000000",
+            "from": 0.5
+          }
+        ],
+        "btnText": [
+          {
+            "value": "#000000",
+            "to": 0.5
+          },
+          {
+            "value": "#7B56DB",
+            "from": 0.5
           }
         ]
       },
