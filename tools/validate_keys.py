@@ -110,8 +110,9 @@ SAVEDSEARCH_KEYS = {
     "dispatch.time_format", "dispatch.auto_cancel", "dispatch.auto_pause",
     "dispatch.reduce_freq", "dispatch.rt_backfill", "dispatch.sample_ratio",
     "dispatchAs",
+    # alert_type/alert_comparator/alert_threshold are REST API names only; in
+    # savedsearches.conf Splunk reports them as invalid keys.
     "counttype", "relation", "quantity", "alert_condition",
-    "alert_type", "alert_comparator", "alert_threshold",
     "alert.digest_mode", "alert.expires", "alert.severity", "alert.suppress",
     "alert.suppress.fields", "alert.suppress.group_name", "alert.suppress.period",
     "alert.track", "alert.display_view", "alert.managedBy",
@@ -137,8 +138,8 @@ SAVEDSEARCH_KEYS = {
 }
 
 SAVEDSEARCH_ENUMS = {
-    "alert_type": {"always", "custom", "number of events", "number of hosts", "number of sources"},
-    "alert_comparator": {"greater than", "less than", "equal to", "not equal to", "drops by", "rises by"},
+    "counttype": {"always", "custom", "number of events", "number of hosts", "number of sources"},
+    "relation": {"greater than", "less than", "equal to", "not equal to", "drops by", "rises by"},
     "display.general.type": {"events", "statistics", "visualizations"},
     "display.page.search.tab": {"events", "statistics", "visualizations", "patterns"},
     "alert.severity": {"1", "2", "3", "4", "5", "6"},
