@@ -219,7 +219,7 @@
       "type": "ds.search",
       "name": "Save control",
       "options": {
-        "query": "| makeresults\n| eval p=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\"), m=replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\"), k=len(replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\"))\n| eval button_label=\"SAVE\"\n| eval _click_action=\"save|\".p.\"|\".m.\"|\".tostring(k)\n| eval _color_rank=3\n| table button_label, _click_action, _color_rank",
+        "query": "| makeresults\n| eval p=replace(lower(\"$tok_cfg_provider$\"), \"[^a-z]\", \"\"), m=replace(\"$tok_cfg_model$\", \"[^A-Za-z0-9._-]\", \"\"), k=len(replace(\"$tok_cfg_key$\", \"[^A-Za-z0-9._/=+-]\", \"\"))\n| eval _click_action=\"save|\".p.\"|\".m.\"|\".tostring(k)\n| eval _pressed=if(\"$tok_cfg_save$\"=_click_action, 1, 0)\n| eval button_label=if(_pressed=1, \"SAVED\", \"SAVE\")\n| table button_label, _click_action, _pressed",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -606,10 +606,10 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+          "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
+          "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
           "headerBackgroundColor": "#53A051",
-          "headerColor": "#FFFFFF",
-          "cellTextColor": "#FFFFFF",
+          "headerColor": "#000000",
           "align": "center"
         },
         "headerVisibility": "none",
@@ -622,11 +622,24 @@
         "backgroundColor": "#53A051"
       },
       "context": {
-        "btnColors": [
+        "btnFill": [
           {
-            "from": 0,
-            "to": 10,
-            "value": "#53A051"
+            "value": "#53A051",
+            "to": 0.5
+          },
+          {
+            "value": "#000000",
+            "from": 0.5
+          }
+        ],
+        "btnText": [
+          {
+            "value": "#000000",
+            "to": 0.5
+          },
+          {
+            "value": "#53A051",
+            "from": 0.5
           }
         ]
       },

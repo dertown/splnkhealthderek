@@ -146,6 +146,8 @@ def decision_button(title: str, ds_id: str, token: str = "tok_decision", fill: s
 
     The action lives in a hidden _ field so the label is the only visible column and
     fills the table; a second visible column forces Studio scrollbars in the pill.
+    Hidden _pressed (0/1) flips the button to its negative: fill with black text,
+    then black with fill-colored text once clicked. Studio has no hover state.
     """
     viz = table(title, ds_id, count=1)
     viz["showLastUpdated"] = False
@@ -164,13 +166,16 @@ def decision_button(title: str, ds_id: str, token: str = "tok_decision", fill: s
     if fill:
         viz["options"]["backgroundColor"] = fill
         viz["options"]["tableFormat"] = {
-            "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(btnColors)",
+            "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
+            "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
             "headerBackgroundColor": fill,
-            "headerColor": "#FFFFFF",
-            "cellTextColor": "#FFFFFF",
+            "headerColor": BUTTON_INK,
             "align": "center",
         }
-        viz["context"] = {"btnColors": [{"from": 0, "to": 10, "value": fill}]}
+        viz["context"] = {
+            "btnFill": [{"value": fill, "to": 0.5}, {"value": BUTTON_INK, "from": 0.5}],
+            "btnText": [{"value": BUTTON_INK, "to": 0.5}, {"value": fill, "from": 0.5}],
+        }
     return viz
 
 
@@ -395,6 +400,7 @@ BUTTON_H = 56
 BUTTON_RX = 8
 BUTTON_PAD_X = 8
 BUTTON_PAD_Y = 4
+BUTTON_INK = "#000000"
 HIDDEN_PREFIXES = ()
 TRANSPARENT_TYPES = (
     "splunk.table", "splunk.line", "splunk.area", "splunk.column", "splunk.linkgraph", "splunk.sankey",
@@ -1699,20 +1705,20 @@ Q_DQ_CHOOSE_APPROVE = r"""
 | makeresults
 | eval finding_id="$tok_finding_id$"
 | eval picked=if(finding_id!="none" AND finding_id!="", 1, 0)
-| eval button_label=if(picked=1, "APPROVE", "PICK A ROW FIRST")
+| eval _pressed=if(picked=1 AND "$tok_decision$"="approve", 1, 0)
+| eval button_label=case(picked=0, "PICK A ROW FIRST", _pressed=1, "APPROVED", 1=1, "APPROVE")
 | eval _click_action="approve"
-| eval _color_rank=if(picked=1, 2, 1)
-| table button_label, _click_action, _color_rank
+| table button_label, _click_action, _pressed
 """
 
 Q_DQ_CHOOSE_DISMISS = r"""
 | makeresults
 | eval finding_id="$tok_finding_id$"
 | eval picked=if(finding_id!="none" AND finding_id!="", 1, 0)
-| eval button_label=if(picked=1, "DISMISS", "PICK A ROW FIRST")
+| eval _pressed=if(picked=1 AND "$tok_decision$"="dismiss", 1, 0)
+| eval button_label=case(picked=0, "PICK A ROW FIRST", _pressed=1, "DISMISSED", 1=1, "DISMISS")
 | eval _click_action="dismiss"
-| eval _color_rank=if(picked=1, 2, 1)
-| table button_label, _click_action, _color_rank
+| table button_label, _click_action, _pressed
 """
 
 # Only writes when APPROVE/DISMISS is chosen. Empty results skip appendpipe, so
@@ -1828,10 +1834,10 @@ Q_DQ_AI_ASK_BUTTON = r"""
 | eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
 | eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
 | eval configured=if(mode="provider" AND provider!="none" AND provider!="" AND key_ok=1, 1, 0)
-| eval button_label=case(picked=0, "PICK A ROW FIRST", configured=0, "OPEN AI SETUP FIRST", 1=1, "ASK AGAIN")
+| eval _pressed=if(picked=1 AND configured=1 AND match("$tok_ai_ask$", "^retry"), 1, 0)
+| eval button_label=case(picked=0, "PICK A ROW FIRST", configured=0, "OPEN AI SETUP FIRST", _pressed=1, "ASKED", 1=1, "ASK AGAIN")
 | eval _click_action="retry".tostring(now())
-| eval _color_rank=if(picked=1 AND configured=1, 3, 1)
-| table button_label, _click_action, _color_rank
+| table button_label, _click_action, _pressed
 """
 
 # Writes a pending ASK row only after the ASK tile is clicked. Page load is a no-op.
@@ -1877,10 +1883,10 @@ Q_DQ_AI_ASK_WRITE = r"""
 Q_DQ_AI_SAVE_BUTTON = r"""
 | makeresults
 | eval p=replace(lower("$tok_cfg_provider$"), "[^a-z]", ""), m=replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", ""), k=len(replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", ""))
-| eval button_label="SAVE"
 | eval _click_action="save|".p."|".m."|".tostring(k)
-| eval _color_rank=3
-| table button_label, _click_action, _color_rank
+| eval _pressed=if("$tok_cfg_save$"=_click_action, 1, 0)
+| eval button_label=if(_pressed=1, "SAVED", "SAVE")
+| table button_label, _click_action, _pressed
 """
 
 Q_DQ_AI_MODELS = r"""
@@ -2408,7 +2414,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.35"
+APP_VERSION = "1.7.36"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
