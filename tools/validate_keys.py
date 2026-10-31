@@ -240,7 +240,9 @@ def check_collections() -> None:
             err("collections.conf", f"[{stanza}] enforceTypes must be boolean")
 
 
-COMMANDS_CONF_KEYS = {"is_risky", "chunked", "filename", "python.version", "local"}
+COMMANDS_CONF_KEYS = {"is_risky", "chunked", "filename", "python.version", "python.required", "local"}
+# AppInspect 4.4+ (Cloud) fails any Python-backed stanza without these.
+PYTHON_REQUIRED_ALLOWED = {"3.13", "3.14"}
 COMMANDS_CONF_STANZAS = {"outputlookup", "derekaiping"}
 
 
@@ -257,6 +259,9 @@ def check_commands_conf() -> None:
         check_keys("commands.conf", stanza, keys, COMMANDS_CONF_KEYS)
         if "is_risky" in keys and keys["is_risky"] not in BOOL:
             err("commands.conf", f"[{stanza}] is_risky must be boolean")
+        required = {v.strip() for v in keys.get("python.required", "").split(",") if v.strip()}
+        if not required or not required <= PYTHON_REQUIRED_ALLOWED:
+            err("commands.conf", f"[{stanza}] needs python.required set to 3.13 and/or 3.14 for AppInspect Cloud vetting")
     cmd = conf.get("derekaiping", {})
     if not cmd:
         err("commands.conf", "missing [derekaiping] stanza")
