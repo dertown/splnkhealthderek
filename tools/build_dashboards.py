@@ -2408,7 +2408,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.34"
+APP_VERSION = "1.7.35"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
