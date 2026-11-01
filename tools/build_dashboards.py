@@ -254,6 +254,17 @@ def table(title: str, ds_id: str, rank_field: str = "_color_rank", count: int = 
     }
 
 
+def open_dashboard(viz: dict, dashboard: str) -> dict:
+    """Clicking the panel opens another dashboard in this app."""
+    viz["eventHandlers"] = [
+        {
+            "type": "drilldown.linkToDashboard",
+            "options": {"app": "splunk_exec_health", "dashboard": dashboard, "newTab": False},
+        }
+    ]
+    return viz
+
+
 def drill_source(viz: dict, field: str = "data_source") -> dict:
     """Click a topology row or node to set tok_data_source (does not open Search)."""
     viz = dict(viz)
@@ -299,22 +310,6 @@ def area(title: str, ds_id: str, y_title: str) -> dict:
             "yAxisTitleText": y_title,
             "areaOpacity": 0.35,
             "nullValueDisplay": "connect",
-        },
-    }
-
-
-def column(title: str, ds_id: str, y_title: str) -> dict:
-    return {
-        "type": "splunk.column",
-        "title": title,
-        "dataSources": {"primary": ds_id},
-        "showLastUpdated": True,
-        "showProgressBar": True,
-        "options": {
-            "seriesColors": ACCENT,
-            "legendDisplay": "right",
-            "yAxisTitleText": y_title,
-            "dataValuesDisplay": "off",
         },
     }
 
@@ -509,40 +504,6 @@ search `exec_health_health_report`
 | stats min(score) as score, count(eval(score<2)) as unhealthy_hosts by feature
 """.strip()
 
-Q_HEALTH_COMPONENTS = (
-    Q_HEALTH_BY_FEATURE
-    + "\n"
-    + r"""| eval component="instance:".feature
-| table component, score
-| append [
-    | tstats count as events where index=`exec_health_idx` earliest=-15m latest=now
-    | eval component="ingestion_live_15m", score=if(events>0, 2, 0)
-    | table component, score
-]
-| append [
-    search `exec_health_license_usage` earliest=-8d@d latest=@d
-    | eval GB=b/1024/1024/1024
-    | bin _time span=1d
-    | stats sum(GB) as daily_GB by _time
-    | streamstats window=7 current=f avg(daily_GB) as ma_7d
-    | sort 0 -_time
-    | head 1
-    | eval drop_pct=if(ma_7d>0, round(((ma_7d-daily_GB)/ma_7d)*100, 1), 0)
-    | eval component="ingest_vs_7d_ma", score=case(isnull(ma_7d) OR ma_7d=0, 2, drop_pct>=`exec_health_drop_red_pct`, 0, drop_pct>=`exec_health_drop_yellow_pct`, 1, 1=1, 2)
-    | table component, score
-]
-| append [
-    | tstats latest(_time) as last_data where index=`exec_health_idx` earliest=-24h latest=now by host
-    | eval silent=if((now()-last_data)>`exec_health_silence_sec`, 1, 0)
-    | stats count as hosts, sum(silent) as silent_hosts
-    | eval silent_ratio=if(hosts>0, silent_hosts/hosts, 1)
-    | eval component="host_silence", score=case(hosts=0, 0, silent_hosts=0, 2, silent_ratio>0.2, 0, 1=1, 1)
-    | table component, score
-]
-| eval _color_rank=case(score<=0, 1, score<2, 2, 1=1, 3)
-""".strip()
-)
-
 # Complete days only (the data source ends at @d): a partial "today" would always
 # look like a large drop against the 7-day average.
 Q_LICENSE_DAILY = r"""
@@ -588,14 +549,6 @@ search index=_introspection sourcetype=splunk_resource_usage component=Hostwide
     | where count=0
     | eval shc_status="N/A", health_score=1, status_detail="No _introspection data"
 ]
-""".strip()
-
-Q_SILENT = r"""
-| tstats latest(_time) as last_data where index=`exec_health_idx` by host
-| eval silent=if((now()-last_data)>`exec_health_silence_sec`, 1, 0)
-| stats count as hosts, sum(silent) as silent_hosts
-| fillnull value=0 hosts, silent_hosts
-| eval health_score=case(hosts=0, 0, silent_hosts=0, 2, silent_hosts/hosts>0.2, 0, 1=1, 1)
 """.strip()
 
 Q_LIVE = r"""
@@ -648,13 +601,6 @@ def host_baseline_core(host_clause: str = "") -> str:
         "| eval z_score=if(stdev_vol>0, round((events-mean_vol)/stdev_vol, 2), 0)"
     )
 
-
-Q_HOST_ALERTS = host_baseline_core() + r"""
-| where baseline_state="ALERT"
-| eval _color_rank=1
-| table host, events, mean_vol, stdev_vol, lower_bound, z_score, baseline_state, _color_rank
-| sort host
-"""
 
 Q_TOPO_ENRICH = r"""
 | rex field=source "(?i)(?:^|[^A-Za-z])(?<net_proto>tcp|udp)[:/](?<net_port>\d+)"
@@ -719,16 +665,6 @@ Q_TOPO_PATHS = (
     + "\n| table data_source, ingest_path, splunk_index, events, _color_rank"
 )
 
-Q_TOPO_OVERVIEW = (
-    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
-    + Q_TOPO_ENRICH
-    + "\n| stats sum(events) as events by host, ingest_path, index"
-    + "\n| sort 0 -events"
-    + "\n| head 40"
-    + "\n| rename host as data_source, index as splunk_index"
-    + "\n| table data_source, ingest_path, splunk_index"
-)
-
 Q_TCPIN_PATHS = r"""
 search index=_internal source=*metrics.log group=tcpin_connections
 | eval data_source=coalesce(sourceHost, hostname)
@@ -746,18 +682,6 @@ search index=_internal source=*metrics.log group=tcpin_connections
 | head 80
 | eval _color_rank=3
 | table data_source, connection, receiver, kb, eps, _color_rank
-""".strip()
-
-Q_HEC_PATHS = r"""
-search `exec_health_hec_metrics`
-| `exec_health_hec_normalize`
-| lookup hec_token_map token OUTPUT token_name
-| eval data_source=coalesce(token_name, token)
-| stats sum(hec_events) as events, sum(hec_bytes) as bytes by data_source
-| eval kb=round(bytes/1024, 1), ingest_path="HEC", splunk_index="HTTP Event Collector", _color_rank=3
-| sort 0 -events
-| head 40
-| table data_source, ingest_path, splunk_index, events, kb, _color_rank
 """.strip()
 
 # Per-source drill-down. tok_data_source is set by clicking data_source in the
@@ -962,40 +886,173 @@ def dq_agent_findings_core() -> str:
     )
 
 
+AREA_HOSTS = "Hosts & instances"
+AREA_FLOW = "Data flow"
+AREA_HEC = "HEC tokens"
+AREA_SC4S = "SC4S & Edge"
+
+
+def _area_row(query: str, area: str, score: str, detail: str) -> str:
+    return f'{query.strip()}\n| eval area="{area}", score={score}, detail={detail}\n| table area, score, detail'
+
+
+def exec_area_rollup() -> str:
+    """One row per area: the worst score and the reasons behind it.
+
+    Reuses each detail dashboard's own search so this page cannot disagree with the
+    page it summarizes. A null score means "no data" (N/A): it adds a reason but never
+    changes the status. The base search window is -15m; pieces needing more set their own.
+    """
+    rows = [
+        _area_row(
+            Q_INDEXER_CLUSTER,
+            AREA_HOSTS,
+            'if(clustering_status="N/A", null(), health_score)',
+            '"Health report: ".status_detail',
+        ),
+        _area_row(Q_SHC, AREA_HOSTS, 'if(shc_status="N/A", null(), health_score)', "status_detail"),
+        _area_row(
+            host_state_counts("earliest=-24h latest=now")
+            + r"""
+| stats count as n, sum(eval(if(state="DATA SILENT" OR state="HOST DOWN", hosts, 0))) as silent, sum(eval(if(state="HEARTBEAT ONLY", hosts, 0))) as heartbeat_only, sum(eval(if(state="DELAYED", hosts, 0))) as delayed, sum(hosts) as total
+| fillnull value=0 silent, heartbeat_only, delayed, total
+| eval with_data=total-heartbeat_only""",
+            AREA_HOSTS,
+            "case(with_data=0, 0, silent=0, 2, silent/with_data>0.2, 0, 1=1, 1)",
+            'silent." of ".with_data." hosts silent or down, ".delayed." delayed, ".heartbeat_only." heartbeat only"',
+        ),
+        _area_row(
+            host_baseline_core() + '\n| stats count as scored, count(eval(baseline_state="ALERT")) as alerts',
+            AREA_HOSTS,
+            "case(scored=0, null(), alerts>0, 1, 1=1, 2)",
+            'alerts." hosts below 24-hour volume baseline"',
+        ),
+        _area_row(
+            r"""
+search index=_internal source=*metrics.log group=queue blocked=true
+| stats count as blocked""",
+            AREA_HOSTS,
+            "null()",
+            'blocked." blocked-queue reports"',
+        ),
+        _area_row(Q_LIVE, AREA_FLOW, "if(events>0, 2, 0)", 'events." events indexed in 15m"'),
+        _area_row(
+            Q_LICENSE_DAILY.replace(
+                "search `exec_health_license_usage`",
+                "search `exec_health_license_usage` earliest=-15d@d latest=@d",
+                1,
+            )
+            + "\n| tail 1",
+            AREA_FLOW,
+            "health_score",
+            'daily_GB." GB last complete day, ".variance_pct."% vs 7-day average"',
+        ),
+        _area_row(
+            r"""
+| tstats count where index=`exec_health_idx` earliest=-4h@h latest=now by host index
+| stats dc(host) as sources, dc(index) as indexes""",
+            AREA_FLOW,
+            "null()",
+            'sources." sources into ".indexes." indexes (4h)"',
+        ),
+        _area_row(
+            hec_state_core()
+            + '\n| stats count as tokens, count(eval(hec_state="ALERT")) as alerts, count(eval(hec_state="YELLOW")) as watch',
+            AREA_HEC,
+            "case(tokens=0, null(), alerts>0, 0, watch>0, 1, 1=1, 2)",
+            'if(tokens=0, "No HEC token metrics", tokens." active tokens, ".alerts." silent vs baseline")',
+        ),
+        _area_row(
+            r"""
+| tstats count as events where index=`exec_health_idx` `exec_health_sc4s` earliest=-15m latest=now""",
+            AREA_SC4S,
+            "if(events>0, 2, null())",
+            'events." syslog events in 15m"',
+        ),
+        # A keyword match can be message content rather than an outage, so it is YELLOW here.
+        _area_row(
+            Q_SC4S_ERRORS + "\n| stats count as n, sum(issues) as issues\n| fillnull value=0 issues",
+            AREA_SC4S,
+            "if(issues>0, 1, null())",
+            'issues." syslog error or warning matches"',
+        ),
+        _area_row(
+            Q_EDGE_QUEUE
+            + "\n| stats count as processors, max(queue_fill_pct) as max_fill, sum(export_errors_per_sec) as errors\n| fillnull value=0 max_fill, errors",
+            AREA_SC4S,
+            "case(processors=0, null(), errors>0 OR max_fill>=80, 0, max_fill>=50, 1, 1=1, 2)",
+            'if(processors=0, "No Edge Processor metrics", processors." Edge processors, queue ".max_fill."% full, ".errors." export errors/sec")',
+        ),
+        _area_row(
+            Q_EDGE_SUMMARY,
+            AREA_SC4S,
+            "if(events_in_eps>0 AND events_out_eps=0, 0, null())",
+            'if(events_in_eps>0, events_in_eps." events/sec into Edge, ".events_out_eps." out", null())',
+        ),
+    ]
+    appended = "".join(f"\n| append [\n{row}\n]" for row in rows[1:])
+    return (
+        rows[0]
+        + appended
+        + r"""
+| stats min(score) as _score, list(detail) as detail by area
+| eval detail=mvjoin(detail, "; ")
+| eval status=case(isnull(_score), "N/A", _score>=2, "GREEN", _score>=1, "YELLOW", 1=1, "RED")
+| eval _color_rank=case(isnull(_score), 3, _score<1, 1, _score<2, 2, 1=1, 3)
+| sort _color_rank, area
+| table area, status, detail, _score, _color_rank"""
+    )
+
+
+EXEC_AGENT_COUNTS = r"""
+| where status="open"
+| stats count as open_findings, count(eval(severity="RED")) as red_findings
+| eval health_score=case(red_findings>0, 0, open_findings>0, 1, 1=1, 2)
+"""
+
+
 def executive_overview() -> dict:
+    def area_tile(title: str, ds_id: str, dashboard: str) -> dict:
+        return open_dashboard(single_status(f"{title} (click to open)", ds_id, "status", "status"), dashboard)
+
+    def area_ds(name: str, area: str) -> dict:
+        return chain(name, "ds_areas", f'| where area="{area}"\n| table status')
+
+    agent_tile = single_number("Agent findings open (click to open)", "ds_agent", "open_findings", "", None, 0)
+    agent_tile["options"]["majorColor"] = "> primary | seriesByName(\"health_score\") | lastPoint() | rangeValue(healthColors)"
+    agent_tile["context"] = {"healthColors": HEALTH_COLORS}
+    open_dashboard(agent_tile, "data_quality_agent")
+
+    areas_table = table("Status by area, worst first", "ds_areas", count=4)
+    areas_table.pop("eventHandlers", None)
+
     return {
         "title": "Splunk Health Derek+",
-        "description": "Traffic-light health for Splunk ingestion, clustering, and host baselines.",
-        "defaults": defaults(),
-        "inputs": {"input_global_trp": timerange("-24h@h,now")},
+        "description": "High-level state of the system, rolled up from every other dashboard in this app.",
+        "inputs": {},
         "dataSources": {
-            "ds_health_components": ds("Health components", Q_HEALTH_COMPONENTS, "-15m", "now"),
+            "ds_areas": ds("Status by area", exec_area_rollup(), "-15m", "now"),
             "ds_overall_health": chain(
                 "Overall health",
-                "ds_health_components",
+                "ds_areas",
                 """
-| stats min(score) as overall_score
-| eval overall_status=case(overall_score>=2, "GREEN", overall_score>=1, "YELLOW", 1=1, "RED")
-| eval overall_score=coalesce(overall_score, 0)
-| appendpipe [ stats count | where count=0 | eval overall_score=1, overall_status="YELLOW" ]
+| stats min(_score) as overall_score
+| eval overall_status=case(isnull(overall_score), "YELLOW", overall_score>=2, "GREEN", overall_score>=1, "YELLOW", 1=1, "RED")
 """.strip(),
             ),
+            "ds_area_hosts": area_ds("Hosts & instances status", AREA_HOSTS),
+            "ds_area_flow": area_ds("Data flow status", AREA_FLOW),
+            "ds_area_hec": area_ds("HEC status", AREA_HEC),
+            "ds_area_sc4s": area_ds("SC4S and Edge status", AREA_SC4S),
+            "ds_agent": ds("Open agent findings", Q_DQ_AGENT_FINDINGS + EXEC_AGENT_COUNTS, "-24h", "now"),
             "ds_license_daily": ds("License GB/day vs 7d MA", Q_LICENSE_DAILY, "-15d@d", "@d", refresh="15m"),
-            "ds_indexer_cluster": ds("Indexer cluster peers", Q_INDEXER_CLUSTER, "-15m", "now"),
-            "ds_shc": ds("Search head cluster", Q_SHC, "-15m", "now"),
-            "ds_silent": ds("Silent hosts", Q_SILENT, "-24h", "now"),
             "ds_live": ds("Live indexed events 15m", Q_LIVE, "-15m", "now"),
-            "ds_top_indexes": ds("Top indexes by GB", Q_TOP_INDEXES),
-            "ds_introspection": ds("Hostwide introspection", Q_INTROSPECTION),
-            "ds_host_alerts": ds("Host 2-sigma alerts", Q_HOST_ALERTS, "-25h@m", "@m"),
-            "ds_topo_overview": ds("Data topology preview", Q_TOPO_OVERVIEW),
-            "ds_dq_preview": ds("Data quality agent preview", Q_DQ_AGENT_PREVIEW, "-24h", "now"),
         },
         "visualizations": {
             "viz_header": md(
                 "# Splunk Health Derek+\n"
-                "Traffic lights combine the splunkd health report, live ingestion, 7-day volume baseline, and silent hosts. "
-                "GREEN = within baseline · YELLOW = watch · RED = action required."
+                "**Overall health** is the worst status across the areas below. Click an area to open its dashboard. "
+                "GREEN = within baseline · YELLOW = watch · RED = action required · N/A = no data for that area."
             ),
             "viz_overall": single_status("Overall health", "ds_overall_health", "overall_status", "overall_score"),
             "viz_gb": single_number("Ingestion (complete days)", "ds_license_daily", "daily_GB", " GB", spark="daily_GB", precision=2),
@@ -1018,67 +1075,20 @@ def executive_overview() -> dict:
                 "context": {"healthColors": HEALTH_COLORS},
             },
             "viz_live": single_number("Indexed events (15m)", "ds_live", "events", "", spark=None, precision=0),
-            "viz_idx_cluster": single_status("Instance health", "ds_indexer_cluster", "clustering_status", "health_score"),
-            "viz_shc": single_status("Search head load", "ds_shc", "shc_status", "health_score"),
-            "viz_silent": {
-                "type": "splunk.singlevalue",
-                "title": "Silent hosts (>1h no data)",
-                "dataSources": {"primary": "ds_silent"},
-                "showLastUpdated": True,
-                "showProgressBar": True,
-                "options": {
-                    "majorValue": "> primary | seriesByName(\"silent_hosts\") | lastPoint()",
-                    "majorColor": "> primary | seriesByName(\"health_score\") | lastPoint() | rangeValue(healthColors)",
-                    "sparklineDisplay": "off",
-                    "trendDisplay": "off",
-                    "majorFontSize": 32,
-                },
-                "context": {"healthColors": HEALTH_COLORS},
-            },
+            "viz_area_hosts": area_tile(AREA_HOSTS, "ds_area_hosts", "host_heartbeat"),
+            "viz_area_flow": area_tile(AREA_FLOW, "ds_area_flow", "data_topology"),
+            "viz_area_hec": area_tile(AREA_HEC, "ds_area_hec", "hec_performance"),
+            "viz_area_sc4s": area_tile(AREA_SC4S, "ds_area_sc4s", "sc4s_edge"),
+            "viz_agent": agent_tile,
+            "viz_areas": areas_table,
             "viz_ingest_chart": line("Daily ingestion vs 7-day moving average", "ds_license_daily", "GB / day"),
-            "viz_topo": {
-                **linkgraph(
-                    "Data topology — sources → ingest path → index (open Data Topology for the full map)",
-                    "ds_topo_overview",
-                    ["data_source", "ingest_path", "splunk_index"],
-                ),
-                "eventHandlers": [
-                    {
-                        "type": "drilldown.linkToDashboard",
-                        "options": {
-                            "app": "splunk_exec_health",
-                            "dashboard": "data_topology",
-                            "newTab": False,
-                        },
-                    }
-                ],
-            },
-            "viz_top_indexes": table("Top indexes by license usage (GB)", "ds_top_indexes", count=15),
-            "viz_intro": table("Indexer/SH resource usage (_introspection)", "ds_introspection", count=15),
-            "viz_host_alerts": table("Hosts below 2σ 24-hour baseline (latest complete 15m)", "ds_host_alerts", count=25),
-            "viz_components": table("Health component scores", "ds_health_components", count=20),
-            "viz_dq_preview": {
-                **table(
-                    "Derek+ Data Quality Agent — open findings (click through; the agent never applies a fix unattended)",
-                    "ds_dq_preview",
-                    count=8,
-                ),
-                "eventHandlers": [
-                    {
-                        "type": "drilldown.linkToDashboard",
-                        "options": {
-                            "app": "splunk_exec_health",
-                            "dashboard": "data_quality_agent",
-                            "newTab": False,
-                        },
-                    }
-                ],
-            },
             "viz_footer": md(
-                "Baselines use **streamstats** (host volume) and **predict**/moving average (daily GB), not static thresholds. "
-                "Instance health is the splunkd health report (`health.log`, PeriodicHealthReporter); search-head load is `_introspection` (no cluster-manager REST — Splunk Cloud compatible). "
+                "Every status comes from the same searches as the dashboard it opens. "
+                "Agent findings are not counted in Overall health: they are built from these same signals, "
+                "and dismissing a finding should not turn the system green. "
+                "Ingestion latency is on **Host Heartbeat** only, because it needs a raw event search. "
                 "Tune `exec_health_*` macros in Settings > Advanced search > Search macros. "
-                "Saved alerts ship **disabled** — enable them after configuring email in Splunk (do not put webhook URLs or passwords in this app)."
+                "Saved alerts ship **disabled**; enable them after configuring email in Splunk (do not put webhook URLs or passwords in this app)."
             ),
         },
         "layout": grid(
@@ -1088,18 +1098,16 @@ def executive_overview() -> dict:
                 block("viz_gb", 300, 90, 300, 180),
                 block("viz_var", 600, 90, 300, 180),
                 block("viz_live", 900, 90, 300, 180),
-                block("viz_idx_cluster", 0, 270, 400, 160),
-                block("viz_shc", 400, 270, 400, 160),
-                block("viz_silent", 800, 270, 400, 160),
-                block("viz_ingest_chart", 0, 430, 1200, 300),
-                block("viz_topo", 0, 730, 1200, 340),
-                block("viz_top_indexes", 0, 1070, 600, 300),
-                block("viz_intro", 600, 1070, 600, 300),
-                block("viz_host_alerts", 0, 1370, 700, 320),
-                block("viz_components", 700, 1370, 500, 320),
-                block("viz_dq_preview", 0, 1690, 1200, 300),
-                block("viz_footer", 0, 1990, 1200, 110),
-            ]
+                block("viz_area_hosts", 0, 270, 240, 160),
+                block("viz_area_flow", 240, 270, 240, 160),
+                block("viz_area_hec", 480, 270, 240, 160),
+                block("viz_area_sc4s", 720, 270, 240, 160),
+                block("viz_agent", 960, 270, 240, 160),
+                block("viz_areas", 0, 430, 1200, 280),
+                block("viz_ingest_chart", 0, 710, 1200, 300),
+                block("viz_footer", 0, 1010, 1200, 110),
+            ],
+            include_time=False,
         ),
     }
 
@@ -1127,9 +1135,11 @@ Q_PHONE_HOME = r"""
 | sort _color_rank, host
 """.strip()
 
-Q_STATE_COUNTS = r"""
-| tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) host=$host_filter$ by index host
-| eval kind=if(index="_internal", "heartbeat", "data")
+def host_state_counts(clause: str) -> str:
+    """Hosts per liveness state. Shared with the executive rollup so they agree."""
+    return (
+        f"| tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) {clause} by index host\n"
+        + r"""| eval kind=if(index="_internal", "heartbeat", "data")
 | stats max(eval(if(kind="data", last_seen, null()))) as last_data, max(eval(if(kind="heartbeat", last_seen, null()))) as last_heartbeat by host
 | eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat
 | eval state=case(
@@ -1140,6 +1150,20 @@ Q_STATE_COUNTS = r"""
     1=1, "OK")
 | stats count as hosts by state
 """.strip()
+    )
+
+
+Q_STATE_COUNTS = host_state_counts("host=$host_filter$")
+
+Q_HEALTH_FEATURES = (
+    Q_HEALTH_BY_FEATURE
+    + "\n"
+    + r"""| eval status=case(score>=2, "GREEN", score>=1, "YELLOW", 1=1, "RED")
+| eval _color_rank=case(score<=0, 1, score<2, 2, 1=1, 3)
+| table feature, status, unhealthy_hosts, _color_rank
+| sort _color_rank, feature
+""".strip()
+)
 
 Q_LATENCY = r"""
 search index=`exec_health_idx` host=$host_filter$ earliest=-15m@m latest=now
@@ -1174,8 +1198,8 @@ Q_HOST_LIST = r"""
 
 def host_heartbeat() -> dict:
     return {
-        "title": "Host Heartbeat & Ingestion Latency",
-        "description": "Fleet liveness right now: last indexed data vs _internal heartbeat, ingestion latency, and current 2-sigma volume status per host.",
+        "title": "Host Heartbeat & Instance Health",
+        "description": "Fleet liveness right now: last indexed data vs _internal heartbeat, ingestion latency, 2-sigma volume per host, plus splunkd health, CPU/memory, and blocked queues.",
         "defaults": defaults(),
         "inputs": {
             "input_global_trp": timerange("-24h@h,now"),
@@ -1217,6 +1241,9 @@ def host_heartbeat() -> dict:
             ),
             "ds_latency": ds("Ingestion latency (last 15m)", Q_LATENCY, "-15m@m", "now"),
             "ds_baseline": ds("24h streamstats baseline", Q_BASELINE_ALL, "-25h@m", "@m"),
+            "ds_features": ds("Splunkd health report by feature", Q_HEALTH_FEATURES, "-15m", "now"),
+            "ds_introspection": ds("Hostwide introspection", Q_INTROSPECTION),
+            "ds_ingest_actions": ds("Blocked ingestion queues", Q_INGEST_ACTIONS),
         },
         "visualizations": {
             "viz_header": md(
@@ -1231,6 +1258,9 @@ def host_heartbeat() -> dict:
             "viz_table": table("Last data received vs last internal heartbeat", "ds_phone_home", count=30),
             "viz_latency": table("Ingestion latency: index time minus event time, last 15 minutes (seconds)", "ds_latency", count=30),
             "viz_baseline": table("Current volume vs 24-hour baseline, all hosts (streamstats window=96 @ 15m)", "ds_baseline", count=30),
+            "viz_features": table("Splunkd health report by feature (last 15 minutes)", "ds_features", count=15),
+            "viz_intro": table("Instance CPU and memory (_introspection)", "ds_introspection", count=15),
+            "viz_ingest": line("Blocked ingestion queues (metrics.log blocked=true)", "ds_ingest_actions", "blocked reports / 5m"),
             "viz_footer": md(
                 "`tstats latest(_time)` is the source of truth for last data / last heartbeat. "
                 "This page is the **fleet-wide, right-now** view. For one source's history "
@@ -1249,7 +1279,10 @@ def host_heartbeat() -> dict:
                 block("viz_table", 0, 240, 1200, 340),
                 block("viz_latency", 0, 580, 1200, 320),
                 block("viz_baseline", 0, 900, 1200, 360),
-                block("viz_footer", 0, 1260, 1200, 110),
+                block("viz_features", 0, 1260, 600, 320),
+                block("viz_intro", 600, 1260, 600, 320),
+                block("viz_ingest", 0, 1580, 1200, 260),
+                block("viz_footer", 0, 1840, 1200, 110),
             ],
             extra_inputs=["input_host"],
         ),
@@ -1314,12 +1347,6 @@ Q_DQ_AGENT_FINDINGS = dq_agent_findings_core() + r"""
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank
 | sort _color_rank, issue, entity
-"""
-
-Q_DQ_AGENT_PREVIEW = Q_DQ_AGENT_FINDINGS + r"""
-| where status="open"
-| head 8
-| table severity, issue, entity, likely_cause, confidence, suggested_fix, action, _color_rank
 """
 
 Q_HEC_TOTALS = r"""
@@ -1495,7 +1522,6 @@ def sc4s_edge() -> dict:
             "ds_edge_queue": ds("Edge queues and export errors", Q_EDGE_QUEUE),
             "ds_edge_logs": ds("Edge / ingest processor logs", Q_EDGE_LOGS),
             "ds_indexed": ds("Indexed events reaching indexers", Q_INDEXED_COMPARE),
-            "ds_ingest_actions": ds("Blocked ingestion queues", Q_INGEST_ACTIONS),
         },
         "visualizations": {
             "viz_header": md(
@@ -1514,7 +1540,6 @@ def sc4s_edge() -> dict:
             "viz_sc4s_errors": table("SC4S container / syslog issues", "ds_sc4s_errors", count=15),
             "viz_edge_tp": table("Edge Processor in vs out (filter efficiency)", "ds_edge_tp", count=15),
             "viz_edge_queue": table("Edge queue fill and export errors", "ds_edge_queue", count=15),
-            "viz_ingest": line("Blocked ingestion queues (metrics.log blocked=true)", "ds_ingest_actions", "blocked reports / 5m"),
             "viz_edge_logs": table("Edge / Ingest Processor _internal logs", "ds_edge_logs", count=15),
             "viz_footer": md(
                 "Edge metrics come from the `_metrics` index (`processor_events_in_total` and related counters, macro `exec_health_edge_mstats`); grant the viewing role access to `_metrics` on Splunk Cloud. "
@@ -1536,18 +1561,15 @@ def sc4s_edge() -> dict:
                 block("viz_edge_tp", 600, 530, 600, 300),
                 block("viz_sc4s_err_time", 0, 830, 600, 250),
                 block("viz_sc4s_errors", 600, 830, 600, 250),
-                block("viz_ingest", 0, 1080, 600, 260),
-                block("viz_edge_queue", 600, 1080, 600, 260),
-                block("viz_edge_logs", 0, 1340, 1200, 280),
-                block("viz_footer", 0, 1620, 1200, 120),
+                block("viz_edge_queue", 0, 1080, 600, 280),
+                block("viz_edge_logs", 600, 1080, 600, 280),
+                block("viz_footer", 0, 1360, 1200, 120),
             ]
         ),
     }
 
 
 def data_topology() -> dict:
-    src_out_n = single_number("Drop / burst buckets", "ds_topo_src_out_n", "outliers", "", None, 0)
-    src_out_n["options"]["underLabel"] = "2σ vs prior 24h"
     return {
         "title": "Data Topology",
         "description": "Click a data source for latest event, volume, trend, and drop/burst outliers.",
@@ -1582,19 +1604,9 @@ def data_topology() -> dict:
                 "ds_topo_paths",
                 "| stats dc(data_source) as sources, dc(ingest_path) as ingest_paths, dc(splunk_index) as indexes, sum(events) as events",
             ),
-            "ds_topo_methods": chain(
-                "Events by ingest path",
-                "ds_topo_paths",
-                "| stats sum(events) as events by ingest_path | sort 0 -events",
-            ),
             "ds_topo_src_stats": ds("Selected source latest and totals", Q_TOPO_SRC_STATS),
             "ds_topo_src_trend": ds("Selected source 24h trend", Q_TOPO_SRC_TREND, "-25h@m", "@m"),
             "ds_topo_src_outliers": ds("Selected source drop/burst outliers", Q_TOPO_SRC_OUTLIERS, "-25h@m", "@m"),
-            "ds_topo_src_out_n": chain(
-                "Selected source outlier count",
-                "ds_topo_src_outliers",
-                "| stats count as outliers",
-            ),
             "ds_tcpin": ds("Forwarder → indexer connections", Q_TCPIN_PATHS),
             "ds_tcpin_sankey": chain(
                 "Forwarder flow sankey",
@@ -1611,7 +1623,7 @@ def data_topology() -> dict:
                 "ds_tcpin",
                 "| stats dc(data_source) as forwarders, dc(receiver) as receivers, sum(kb) as kb",
             ),
-            "ds_hec_paths": ds("HEC tokens as sources", Q_HEC_PATHS),
+            "ds_top_indexes": ds("Top indexes by GB", Q_TOP_INDEXES),
             "ds_topo_link": chain(
                 "Indexed topology nodes only",
                 "ds_topo_paths",
@@ -1638,7 +1650,7 @@ def data_topology() -> dict:
                 )
             ),
             "viz_sankey": sankey("Volume flow (events) through ingest paths", "ds_topo_sankey"),
-            "viz_methods": column("Indexed events by ingest path", "ds_topo_methods", "events"),
+            "viz_top_indexes": table("Top indexes by license usage (GB)", "ds_top_indexes", count=15),
             "viz_table": drill_source(table("Top source → path → index flows — click data_source", "ds_topo_paths", count=20)),
             "viz_src_header": md(
                 "## Selected data source\n"
@@ -1648,19 +1660,15 @@ def data_topology() -> dict:
                 "`streamstats` mean ± `exec_health_sigma` (default 2). "
                 "**DROP** = sudden traffic loss. **BURST** = sudden spike. Empty panels mean nothing is selected yet."
             ),
-            "viz_src_total": single_number("Total events", "ds_topo_src_stats", "events", "", None, 0),
-            "viz_src_types": single_number("Sourcetypes", "ds_topo_src_stats", "sourcetypes", "", None, 0),
-            "viz_src_out_n": src_out_n,
             "viz_src_stats": table("First event, latest event, and totals", "ds_topo_src_stats", count=1),
             "viz_src_trend": line("Event trend vs 24-hour mean and 2σ bounds", "ds_topo_src_trend", "events / 15m"),
             "viz_src_outliers": table("Sudden drops and traffic bursts (2σ)", "ds_topo_src_outliers", count=20),
             "viz_tcpin_sankey": sankey("Forwarder → indexer volume (KB)", "ds_tcpin_sankey"),
-            "viz_hec": drill_source(table("HEC tokens as data sources — click data_source", "ds_hec_paths", count=15)),
             "viz_tcpin_table": drill_source(table("Forwarder connections (metrics.log tcpin) — click data_source", "ds_tcpin", count=15)),
             "viz_footer": md(
                 "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. "
                 "**Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. "
-                "HEC, SC4S, and Edge stay as their own paths. Source drill-down is `tstats` by `host`. "
+                "HEC, SC4S, and Edge stay as their own paths; per-token detail is on **HEC Token Performance**. Source drill-down is `tstats` by `host`. "
                 "Narrow `exec_health_idx` if the source list is too large."
             ),
         },
@@ -1673,19 +1681,15 @@ def data_topology() -> dict:
                 block("viz_fwds", 900, 90, 300, 140),
                 block("viz_link", 0, 230, 1200, 380),
                 block("viz_sankey", 0, 610, 700, 320),
-                block("viz_methods", 700, 610, 500, 320),
+                block("viz_top_indexes", 700, 610, 500, 320),
                 block("viz_table", 0, 930, 1200, 280),
                 block("viz_src_header", 0, 1210, 1200, 90),
-                block("viz_src_total", 0, 1300, 400, 140),
-                block("viz_src_types", 400, 1300, 400, 140),
-                block("viz_src_out_n", 800, 1300, 400, 140),
-                block("viz_src_stats", 0, 1440, 1200, 150),
-                block("viz_src_trend", 0, 1590, 1200, 280),
-                block("viz_src_outliers", 0, 1870, 1200, 260),
-                block("viz_tcpin_sankey", 0, 2130, 600, 300),
-                block("viz_hec", 600, 2130, 600, 300),
-                block("viz_tcpin_table", 0, 2430, 1200, 280),
-                block("viz_footer", 0, 2710, 1200, 110),
+                block("viz_src_stats", 0, 1300, 1200, 150),
+                block("viz_src_trend", 0, 1450, 1200, 280),
+                block("viz_src_outliers", 0, 1730, 1200, 260),
+                block("viz_tcpin_sankey", 0, 1990, 1200, 300),
+                block("viz_tcpin_table", 0, 2290, 1200, 280),
+                block("viz_footer", 0, 2570, 1200, 110),
             ],
         ),
     }
@@ -1696,8 +1700,8 @@ Q_DQ_AGENT_STATUS = r"""
 | lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
 | eval status=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
 | where status="open"
-| stats count as issues
-| eval agent_status=if(issues>0, "RED", "GREEN")
+| stats count as issues, count(eval(severity="RED")) as red_issues
+| eval agent_status=case(red_issues>0, "RED", issues>0, "YELLOW", 1=1, "GREEN")
 | appendpipe [ stats count | where count=0 | eval issues=0, agent_status="GREEN" ]
 """
 
@@ -2281,7 +2285,7 @@ def ai_provider_setup() -> dict:
     reason_table = table("Why this status", "ds_ai_reason", count=1)
     reason_table.pop("eventHandlers", None)
     reason_table["showLastUpdated"] = False
-    conn_reason_table = table("Connection test", "ds_ai_conn_reason", count=1)
+    conn_reason_table = table("Why this connection result", "ds_ai_conn_reason", count=1)
     conn_reason_table.pop("eventHandlers", None)
     conn_reason_table["showLastUpdated"] = False
     providers_table = table("Supported providers", "ds_ai_providers", count=10)
@@ -2414,7 +2418,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.37"
+APP_VERSION = "1.7.38"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2504,8 +2508,8 @@ def readme() -> dict:
             ),
             "viz_dashboards": md(
                 "## Dashboards\n"
-                f"- **{APP_LABEL}** — overall GREEN / YELLOW / RED, GB/day vs 7-day average, instance health, search-head load, silent hosts, data topology preview\n"
-                "- **Host Heartbeat & Ingestion Latency** — last indexed data vs last `_internal` heartbeat; 24-hour 2σ volume baseline\n"
+                f"- **{APP_LABEL}** — the summary page: overall GREEN / YELLOW / RED, a status per area that opens its dashboard, and the reasons behind each status\n"
+                "- **Host Heartbeat & Instance Health** — last indexed data vs last `_internal` heartbeat; ingestion latency; 24-hour 2σ volume baseline; splunkd health by feature; CPU/memory; blocked queues\n"
                 "- **HEC Token Performance** — events per token; ALERT if a ~100 eps token sits at 0 for 5 minutes\n"
                 "- **SC4S Syslog & Edge/Ingest Processors** — syslog sources, Edge in vs out, filter efficiency\n"
                 "- **Data Topology** — sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port → index; click a source for latest event, totals, 24h trend, and 2σ drop/burst outliers\n"
@@ -2745,7 +2749,7 @@ def main() -> None:
             executive_overview(),
         ),
         "host_heartbeat.xml": (
-            "Host Heartbeat & Ingestion Latency",
+            "Host Heartbeat & Instance Health",
             "Last data vs last heartbeat and 24-hour volume baselines.",
             host_heartbeat(),
         ),

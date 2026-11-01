@@ -1,10 +1,10 @@
 <dashboard version="2" theme="dark">
-  <label>Host Heartbeat &amp; Ingestion Latency</label>
+  <label>Host Heartbeat &amp; Instance Health</label>
   <description>Last data vs last heartbeat and 24-hour volume baselines.</description>
   <definition><![CDATA[
 {
-  "title": "Host Heartbeat & Ingestion Latency",
-  "description": "Fleet liveness right now: last indexed data vs _internal heartbeat, ingestion latency, and current 2-sigma volume status per host.",
+  "title": "Host Heartbeat & Instance Health",
+  "description": "Fleet liveness right now: last indexed data vs _internal heartbeat, ingestion latency, 2-sigma volume per host, plus splunkd health, CPU/memory, and blocked queues.",
   "defaults": {
     "dataSources": {
       "ds.search": {
@@ -135,6 +135,37 @@
           "earliest": "-25h@m",
           "latest": "@m"
         }
+      }
+    },
+    "ds_features": {
+      "type": "ds.search",
+      "name": "Splunkd health report by feature",
+      "options": {
+        "query": "search `exec_health_health_report`\n| eval health_val=lower(coalesce(color, \"unknown\"))\n| stats latest(health_val) as health_val by host, feature\n| eval score=case(health_val=\"green\", 2, health_val=\"yellow\", 1, health_val=\"red\", 0, 1=1, 1)\n| stats min(score) as score, count(eval(score<2)) as unhealthy_hosts by feature\n| eval status=case(score>=2, \"GREEN\", score>=1, \"YELLOW\", 1=1, \"RED\")\n| eval _color_rank=case(score<=0, 1, score<2, 2, 1=1, 3)\n| table feature, status, unhealthy_hosts, _color_rank\n| sort _color_rank, feature",
+        "refresh": "5m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-15m",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_introspection": {
+      "type": "ds.search",
+      "name": "Hostwide introspection",
+      "options": {
+        "query": "search index=_introspection sourcetype=splunk_resource_usage component=Hostwide\n| eval cpu_pct=coalesce('data.cpu_system_pct', 0)+coalesce('data.cpu_user_pct', 0)\n| eval mem_used_gb=round(coalesce('data.mem_used', 0)/1024, 2)\n| stats avg(cpu_pct) as avg_cpu_pct, max(cpu_pct) as max_cpu_pct, latest(mem_used_gb) as mem_used_gb by host\n| eval avg_cpu_pct=round(avg_cpu_pct, 1), max_cpu_pct=round(max_cpu_pct, 1)\n| eval _color_rank=case(max_cpu_pct>=90, 1, max_cpu_pct>=75, 2, 1=1, 3)\n| sort 0 -max_cpu_pct",
+        "refresh": "5m",
+        "refreshType": "delay"
+      }
+    },
+    "ds_ingest_actions": {
+      "type": "ds.search",
+      "name": "Blocked ingestion queues",
+      "options": {
+        "query": "search index=_internal source=*metrics.log group=queue blocked=true\n| timechart span=5m limit=10 count as blocked_reports by name",
+        "refresh": "5m",
+        "refreshType": "delay"
       }
     }
   },
@@ -357,6 +388,122 @@
         }
       ]
     },
+    "viz_features": {
+      "type": "splunk.table",
+      "title": "Splunkd health report by feature (last 15 minutes)",
+      "dataSources": {
+        "primary": "ds_features"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_intro": {
+      "type": "splunk.table",
+      "title": "Instance CPU and memory (_introspection)",
+      "dataSources": {
+        "primary": "ds_introspection"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
+    },
+    "viz_ingest": {
+      "type": "splunk.line",
+      "title": "Blocked ingestion queues (metrics.log blocked=true)",
+      "dataSources": {
+        "primary": "ds_ingest_actions"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#7B56DB",
+          "#009CEB",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B"
+        ],
+        "legendDisplay": "right",
+        "yAxisTitleText": "blocked reports / 5m",
+        "nullValueDisplay": "connect",
+        "lineWidth": 2,
+        "markerDisplay": "off",
+        "backgroundColor": "transparent"
+      }
+    },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
@@ -501,13 +648,61 @@
         "strokeColor": "#26304A",
         "strokeWidth": 1
       }
+    },
+    "bar_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_10": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_10": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 2
+      }
+    },
+    "card_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
+    },
+    "bar_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#009CEB",
+        "rx": 2
+      }
+    },
+    "card_12": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#151B2B",
+        "rx": 10,
+        "strokeColor": "#26304A",
+        "strokeWidth": 1
+      }
     }
   },
   "layout": {
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 1382,
+      "height": 1962,
       "display": "auto-scale",
       "backgroundColor": "#0B0F19"
     },
@@ -758,6 +953,96 @@
         "position": {
           "x": 6,
           "y": 1266,
+          "w": 588,
+          "h": 308
+        }
+      },
+      {
+        "item": "bar_9",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1266,
+          "w": 588,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_features",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 1274,
+          "w": 572,
+          "h": 294
+        }
+      },
+      {
+        "item": "card_10",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 1266,
+          "w": 588,
+          "h": 308
+        }
+      },
+      {
+        "item": "bar_10",
+        "type": "block",
+        "position": {
+          "x": 606,
+          "y": 1266,
+          "w": 588,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_intro",
+        "type": "block",
+        "position": {
+          "x": 614,
+          "y": 1274,
+          "w": 572,
+          "h": 294
+        }
+      },
+      {
+        "item": "card_11",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1586,
+          "w": 1188,
+          "h": 248
+        }
+      },
+      {
+        "item": "bar_11",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1586,
+          "w": 1188,
+          "h": 4
+        }
+      },
+      {
+        "item": "viz_ingest",
+        "type": "block",
+        "position": {
+          "x": 14,
+          "y": 1594,
+          "w": 1172,
+          "h": 234
+        }
+      },
+      {
+        "item": "card_12",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1846,
           "w": 1188,
           "h": 98
         }
@@ -767,7 +1052,7 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 1274,
+          "y": 1854,
           "w": 1172,
           "h": 84
         }

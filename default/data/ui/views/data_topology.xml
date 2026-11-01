@@ -61,14 +61,6 @@
         "query": "| stats dc(data_source) as sources, dc(ingest_path) as ingest_paths, dc(splunk_index) as indexes, sum(events) as events"
       }
     },
-    "ds_topo_methods": {
-      "type": "ds.chain",
-      "name": "Events by ingest path",
-      "options": {
-        "extend": "ds_topo_paths",
-        "query": "| stats sum(events) as events by ingest_path | sort 0 -events"
-      }
-    },
     "ds_topo_src_stats": {
       "type": "ds.search",
       "name": "Selected source latest and totals",
@@ -104,14 +96,6 @@
         }
       }
     },
-    "ds_topo_src_out_n": {
-      "type": "ds.chain",
-      "name": "Selected source outlier count",
-      "options": {
-        "extend": "ds_topo_src_outliers",
-        "query": "| stats count as outliers"
-      }
-    },
     "ds_tcpin": {
       "type": "ds.search",
       "name": "Forwarder \u2192 indexer connections",
@@ -137,11 +121,11 @@
         "query": "| stats dc(data_source) as forwarders, dc(receiver) as receivers, sum(kb) as kb"
       }
     },
-    "ds_hec_paths": {
+    "ds_top_indexes": {
       "type": "ds.search",
-      "name": "HEC tokens as sources",
+      "name": "Top indexes by GB",
       "options": {
-        "query": "search `exec_health_hec_metrics`\n| `exec_health_hec_normalize`\n| lookup hec_token_map token OUTPUT token_name\n| eval data_source=coalesce(token_name, token)\n| stats sum(hec_events) as events, sum(hec_bytes) as bytes by data_source\n| eval kb=round(bytes/1024, 1), ingest_path=\"HEC\", splunk_index=\"HTTP Event Collector\", _color_rank=3\n| sort 0 -events\n| head 40\n| table data_source, ingest_path, splunk_index, events, kb, _color_rank",
+        "query": "search `exec_health_license_usage`\n| eval GB=round(b/1024/1024/1024, 3)\n| stats sum(GB) as GB by idx\n| rename idx as index\n| sort 0 -GB\n| head 20\n| eval _color_rank=3",
         "refresh": "5m",
         "refreshType": "delay"
       }
@@ -296,27 +280,51 @@
         "backgroundColor": "transparent"
       }
     },
-    "viz_methods": {
-      "type": "splunk.column",
-      "title": "Indexed events by ingest path",
+    "viz_top_indexes": {
+      "type": "splunk.table",
+      "title": "Top indexes by license usage (GB)",
       "dataSources": {
-        "primary": "ds_topo_methods"
+        "primary": "ds_top_indexes"
       },
       "showLastUpdated": false,
       "showProgressBar": true,
       "options": {
-        "seriesColors": [
-          "#7B56DB",
-          "#009CEB",
-          "#00CDAF",
-          "#DD9900",
-          "#FF677B"
-        ],
-        "legendDisplay": "right",
-        "yAxisTitleText": "events",
-        "dataValuesDisplay": "off",
+        "count": 15,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
         "backgroundColor": "transparent"
-      }
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.linkToSearch",
+          "options": {
+            "type": "auto",
+            "newTab": true
+          }
+        }
+      ]
     },
     "viz_table": {
       "type": "splunk.table",
@@ -374,61 +382,6 @@
         "markdown": "## Selected data source\nClick a **data_source** above. First/latest event and totals follow the time picker; whether the host is alive right now is on **Host Heartbeat**. Trend and outliers use the last **24 hours** at 15-minute buckets vs that source's `streamstats` mean \u00b1 `exec_health_sigma` (default 2). **DROP** = sudden traffic loss. **BURST** = sudden spike. Empty panels mean nothing is selected yet.",
         "fontSize": "default",
         "backgroundColor": "transparent"
-      }
-    },
-    "viz_src_total": {
-      "type": "splunk.singlevalue",
-      "title": "Total events",
-      "dataSources": {
-        "primary": "ds_topo_src_stats"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": true,
-      "options": {
-        "majorValue": "> primary | seriesByName(\"events\") | lastPoint()",
-        "backgroundColor": "transparent",
-        "shouldUseThousandSeparators": true,
-        "numberPrecision": 0,
-        "majorFontSize": 32,
-        "sparklineDisplay": "off",
-        "trendDisplay": "off"
-      }
-    },
-    "viz_src_types": {
-      "type": "splunk.singlevalue",
-      "title": "Sourcetypes",
-      "dataSources": {
-        "primary": "ds_topo_src_stats"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": true,
-      "options": {
-        "majorValue": "> primary | seriesByName(\"sourcetypes\") | lastPoint()",
-        "backgroundColor": "transparent",
-        "shouldUseThousandSeparators": true,
-        "numberPrecision": 0,
-        "majorFontSize": 32,
-        "sparklineDisplay": "off",
-        "trendDisplay": "off"
-      }
-    },
-    "viz_src_out_n": {
-      "type": "splunk.singlevalue",
-      "title": "Drop / burst buckets",
-      "dataSources": {
-        "primary": "ds_topo_src_out_n"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": true,
-      "options": {
-        "majorValue": "> primary | seriesByName(\"outliers\") | lastPoint()",
-        "backgroundColor": "transparent",
-        "shouldUseThousandSeparators": true,
-        "numberPrecision": 0,
-        "majorFontSize": 32,
-        "sparklineDisplay": "off",
-        "trendDisplay": "off",
-        "underLabel": "2\u03c3 vs prior 24h"
       }
     },
     "viz_src_stats": {
@@ -568,56 +521,6 @@
         "backgroundColor": "transparent"
       }
     },
-    "viz_hec": {
-      "type": "splunk.table",
-      "title": "HEC tokens as data sources \u2014 click data_source",
-      "dataSources": {
-        "primary": "ds_hec_paths"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": true,
-      "options": {
-        "count": 15,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
-        },
-        "backgroundColor": "transparent"
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#5C1A1A"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#5C4A12"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#14301A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.setToken",
-          "options": {
-            "tokens": [
-              {
-                "token": "tok_data_source",
-                "key": "row.data_source.value"
-              }
-            ]
-          }
-        }
-      ]
-    },
     "viz_tcpin_table": {
       "type": "splunk.table",
       "title": "Forwarder connections (metrics.log tcpin) \u2014 click data_source",
@@ -671,7 +574,7 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. **Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. HEC, SC4S, and Edge stay as their own paths. Source drill-down is `tstats` by `host`. Narrow `exec_health_idx` if the source list is too large.",
+        "markdown": "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. **Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. HEC, SC4S, and Edge stay as their own paths; per-token detail is on **HEC Token Performance**. Source drill-down is `tstats` by `host`. Narrow `exec_health_idx` if the source list is too large.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -800,7 +703,7 @@
     "bar_8": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#009CEB",
+        "fillColor": "#7B56DB",
         "rx": 2
       }
     },
@@ -841,7 +744,7 @@
     "bar_11": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#00CDAF",
+        "fillColor": "#7B56DB",
         "rx": 2
       }
     },
@@ -857,7 +760,7 @@
     "bar_12": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#00CDAF",
+        "fillColor": "#009CEB",
         "rx": 2
       }
     },
@@ -873,7 +776,7 @@
     "bar_13": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#00CDAF",
+        "fillColor": "#7B56DB",
         "rx": 2
       }
     },
@@ -889,7 +792,7 @@
     "bar_14": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#7B56DB",
+        "fillColor": "#DD9900",
         "rx": 2
       }
     },
@@ -905,75 +808,11 @@
     "bar_15": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#009CEB",
+        "fillColor": "#7B56DB",
         "rx": 2
       }
     },
     "card_16": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
-        "strokeWidth": 1
-      }
-    },
-    "bar_16": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
-      }
-    },
-    "card_17": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
-        "strokeWidth": 1
-      }
-    },
-    "bar_17": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#DD9900",
-        "rx": 2
-      }
-    },
-    "card_18": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
-        "strokeWidth": 1
-      }
-    },
-    "bar_18": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
-      }
-    },
-    "card_19": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
-        "strokeWidth": 1
-      }
-    },
-    "bar_19": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
-      }
-    },
-    "card_20": {
       "type": "splunk.rectangle",
       "options": {
         "fillColor": "#151B2B",
@@ -987,7 +826,7 @@
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 2832,
+      "height": 2692,
       "display": "auto-scale",
       "backgroundColor": "#0B0F19"
     },
@@ -1223,7 +1062,7 @@
         }
       },
       {
-        "item": "viz_methods",
+        "item": "viz_top_indexes",
         "type": "block",
         "position": {
           "x": 714,
@@ -1288,8 +1127,8 @@
         "position": {
           "x": 6,
           "y": 1306,
-          "w": 388,
-          "h": 128
+          "w": 1188,
+          "h": 138
         }
       },
       {
@@ -1298,96 +1137,6 @@
         "position": {
           "x": 6,
           "y": 1306,
-          "w": 388,
-          "h": 4
-        }
-      },
-      {
-        "item": "viz_src_total",
-        "type": "block",
-        "position": {
-          "x": 14,
-          "y": 1314,
-          "w": 372,
-          "h": 114
-        }
-      },
-      {
-        "item": "card_12",
-        "type": "block",
-        "position": {
-          "x": 406,
-          "y": 1306,
-          "w": 388,
-          "h": 128
-        }
-      },
-      {
-        "item": "bar_12",
-        "type": "block",
-        "position": {
-          "x": 406,
-          "y": 1306,
-          "w": 388,
-          "h": 4
-        }
-      },
-      {
-        "item": "viz_src_types",
-        "type": "block",
-        "position": {
-          "x": 414,
-          "y": 1314,
-          "w": 372,
-          "h": 114
-        }
-      },
-      {
-        "item": "card_13",
-        "type": "block",
-        "position": {
-          "x": 806,
-          "y": 1306,
-          "w": 388,
-          "h": 128
-        }
-      },
-      {
-        "item": "bar_13",
-        "type": "block",
-        "position": {
-          "x": 806,
-          "y": 1306,
-          "w": 388,
-          "h": 4
-        }
-      },
-      {
-        "item": "viz_src_out_n",
-        "type": "block",
-        "position": {
-          "x": 814,
-          "y": 1314,
-          "w": 372,
-          "h": 114
-        }
-      },
-      {
-        "item": "card_14",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1446,
-          "w": 1188,
-          "h": 138
-        }
-      },
-      {
-        "item": "bar_14",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1446,
           "w": 1188,
           "h": 4
         }
@@ -1397,27 +1146,27 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 1454,
+          "y": 1314,
           "w": 1172,
           "h": 124
         }
       },
       {
-        "item": "card_15",
+        "item": "card_12",
         "type": "block",
         "position": {
           "x": 6,
-          "y": 1596,
+          "y": 1456,
           "w": 1188,
           "h": 268
         }
       },
       {
-        "item": "bar_15",
+        "item": "bar_12",
         "type": "block",
         "position": {
           "x": 6,
-          "y": 1596,
+          "y": 1456,
           "w": 1188,
           "h": 4
         }
@@ -1427,27 +1176,27 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 1604,
+          "y": 1464,
           "w": 1172,
           "h": 254
         }
       },
       {
-        "item": "card_16",
+        "item": "card_13",
         "type": "block",
         "position": {
           "x": 6,
-          "y": 1876,
+          "y": 1736,
           "w": 1188,
           "h": 248
         }
       },
       {
-        "item": "bar_16",
+        "item": "bar_13",
         "type": "block",
         "position": {
           "x": 6,
-          "y": 1876,
+          "y": 1736,
           "w": 1188,
           "h": 4
         }
@@ -1457,28 +1206,28 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 1884,
+          "y": 1744,
           "w": 1172,
           "h": 234
         }
       },
       {
-        "item": "card_17",
+        "item": "card_14",
         "type": "block",
         "position": {
           "x": 6,
-          "y": 2136,
-          "w": 588,
+          "y": 1996,
+          "w": 1188,
           "h": 288
         }
       },
       {
-        "item": "bar_17",
+        "item": "bar_14",
         "type": "block",
         "position": {
           "x": 6,
-          "y": 2136,
-          "w": 588,
+          "y": 1996,
+          "w": 1188,
           "h": 4
         }
       },
@@ -1487,57 +1236,27 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 2144,
-          "w": 572,
+          "y": 2004,
+          "w": 1172,
           "h": 274
         }
       },
       {
-        "item": "card_18",
-        "type": "block",
-        "position": {
-          "x": 606,
-          "y": 2136,
-          "w": 588,
-          "h": 288
-        }
-      },
-      {
-        "item": "bar_18",
-        "type": "block",
-        "position": {
-          "x": 606,
-          "y": 2136,
-          "w": 588,
-          "h": 4
-        }
-      },
-      {
-        "item": "viz_hec",
-        "type": "block",
-        "position": {
-          "x": 614,
-          "y": 2144,
-          "w": 572,
-          "h": 274
-        }
-      },
-      {
-        "item": "card_19",
+        "item": "card_15",
         "type": "block",
         "position": {
           "x": 6,
-          "y": 2436,
+          "y": 2296,
           "w": 1188,
           "h": 268
         }
       },
       {
-        "item": "bar_19",
+        "item": "bar_15",
         "type": "block",
         "position": {
           "x": 6,
-          "y": 2436,
+          "y": 2296,
           "w": 1188,
           "h": 4
         }
@@ -1547,17 +1266,17 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 2444,
+          "y": 2304,
           "w": 1172,
           "h": 254
         }
       },
       {
-        "item": "card_20",
+        "item": "card_16",
         "type": "block",
         "position": {
           "x": 6,
-          "y": 2716,
+          "y": 2576,
           "w": 1188,
           "h": 98
         }
@@ -1567,7 +1286,7 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 2724,
+          "y": 2584,
           "w": 1172,
           "h": 84
         }
