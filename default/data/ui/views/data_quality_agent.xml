@@ -116,7 +116,7 @@
       "name": "Agent status",
       "options": {
         "extend": "ds_dq_asked",
-        "query": "| eval _gate=\"$tok_decision$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision\n| eval status=case(rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| where status=\"open\"\n| stats count as issues\n| eval agent_status=if(issues>0, \"RED\", \"GREEN\")\n| appendpipe [ stats count | where count=0 | eval issues=0, agent_status=\"GREEN\" ]"
+        "query": "| eval _gate=\"$tok_decision$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision\n| eval status=case(rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| where status=\"open\"\n| stats count as issues, count(eval(severity=\"RED\")) as red_issues\n| eval agent_status=case(red_issues>0, \"RED\", issues>0, \"YELLOW\", 1=1, \"GREEN\")\n| appendpipe [ stats count | where count=0 | eval issues=0, agent_status=\"GREEN\" ]"
       }
     },
     "ds_dq_selected": {

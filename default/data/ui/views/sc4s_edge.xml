@@ -108,15 +108,6 @@
         "refresh": "5m",
         "refreshType": "delay"
       }
-    },
-    "ds_ingest_actions": {
-      "type": "ds.search",
-      "name": "Blocked ingestion queues",
-      "options": {
-        "query": "search index=_internal source=*metrics.log group=queue blocked=true\n| timechart span=5m limit=10 count as blocked_reports by name",
-        "refresh": "5m",
-        "refreshType": "delay"
-      }
     }
   },
   "visualizations": {
@@ -459,30 +450,6 @@
         }
       ]
     },
-    "viz_ingest": {
-      "type": "splunk.line",
-      "title": "Blocked ingestion queues (metrics.log blocked=true)",
-      "dataSources": {
-        "primary": "ds_ingest_actions"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": true,
-      "options": {
-        "seriesColors": [
-          "#7B56DB",
-          "#009CEB",
-          "#00CDAF",
-          "#DD9900",
-          "#FF677B"
-        ],
-        "legendDisplay": "right",
-        "yAxisTitleText": "blocked reports / 5m",
-        "nullValueDisplay": "connect",
-        "lineWidth": 2,
-        "markerDisplay": "off",
-        "backgroundColor": "transparent"
-      }
-    },
     "viz_edge_logs": {
       "type": "splunk.table",
       "title": "Edge / Ingest Processor _internal logs",
@@ -725,7 +692,7 @@
     "bar_12": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#009CEB",
+        "fillColor": "#7B56DB",
         "rx": 2
       }
     },
@@ -753,29 +720,13 @@
         "strokeColor": "#26304A",
         "strokeWidth": 1
       }
-    },
-    "bar_14": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
-      }
-    },
-    "card_15": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
-        "strokeWidth": 1
-      }
     }
   },
   "layout": {
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 1752,
+      "height": 1492,
       "display": "auto-scale",
       "backgroundColor": "#0B0F19"
     },
@@ -1117,7 +1068,7 @@
           "x": 6,
           "y": 1086,
           "w": 588,
-          "h": 248
+          "h": 268
         }
       },
       {
@@ -1131,13 +1082,13 @@
         }
       },
       {
-        "item": "viz_ingest",
+        "item": "viz_edge_queue",
         "type": "block",
         "position": {
           "x": 14,
           "y": 1094,
           "w": 572,
-          "h": 234
+          "h": 254
         }
       },
       {
@@ -1147,7 +1098,7 @@
           "x": 606,
           "y": 1086,
           "w": 588,
-          "h": 248
+          "h": 268
         }
       },
       {
@@ -1161,13 +1112,13 @@
         }
       },
       {
-        "item": "viz_edge_queue",
+        "item": "viz_edge_logs",
         "type": "block",
         "position": {
           "x": 614,
           "y": 1094,
           "w": 572,
-          "h": 234
+          "h": 254
         }
       },
       {
@@ -1175,37 +1126,7 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 1346,
-          "w": 1188,
-          "h": 268
-        }
-      },
-      {
-        "item": "bar_14",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1346,
-          "w": 1188,
-          "h": 4
-        }
-      },
-      {
-        "item": "viz_edge_logs",
-        "type": "block",
-        "position": {
-          "x": 14,
-          "y": 1354,
-          "w": 1172,
-          "h": 254
-        }
-      },
-      {
-        "item": "card_15",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1626,
+          "y": 1366,
           "w": 1188,
           "h": 108
         }
@@ -1215,7 +1136,7 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 1634,
+          "y": 1374,
           "w": 1172,
           "h": 94
         }

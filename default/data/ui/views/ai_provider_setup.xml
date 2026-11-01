@@ -476,7 +476,7 @@
     },
     "viz_conn_reason": {
       "type": "splunk.table",
-      "title": "Connection test",
+      "title": "Why this connection result",
       "dataSources": {
         "primary": "ds_ai_conn_reason"
       },
