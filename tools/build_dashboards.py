@@ -460,7 +460,7 @@ def studio_cards(definition: dict) -> dict:
                 item, bx + BUTTON_PAD_X, by + BUTTON_PAD_Y, bw - 2 * BUTTON_PAD_X, BUTTON_H - 2 * BUTTON_PAD_Y,
             ))
             continue
-        if item.startswith(HIDDEN_PREFIXES):
+        if item.startswith(HIDDEN_PREFIXES) or viz.get("hideWhenNoData"):
             structure.append(block(item, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - 2 * GUTTER))
             continue
         n += 1
@@ -1845,6 +1845,8 @@ Q_DQ_AI_ASK_BUTTON = r"""
 """
 
 # Writes a pending ASK row only after the ASK tile is clicked. Page load is a no-op.
+# Each reply is also appended to dq_agent_ai_suggestions (KV Store), which keeps every
+# reply and survives app updates. dq_agent_ai_requests keeps only the latest per finding.
 Q_DQ_AI_ASK_WRITE = r"""
 | makeresults
 | eval ask="$tok_ai_ask$", finding_id="$tok_finding_id$", entity="$tok_entity$", issue="$tok_issue$", ai_brief="$tok_ai_brief$", stanza="default"
@@ -1875,6 +1877,13 @@ Q_DQ_AI_ASK_WRITE = r"""
 | eval reply=if(ai_result="replied", ai_reply, "none")
 | table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply
 | appendpipe [
+    | where status="replied"
+    | eval suggested_at=requested_at, suggestion=reply
+    | table suggested_at, finding_id, entity, issue, provider, model, actor, suggestion
+    | outputlookup append=true override_if_empty=false dq_agent_ai_suggestions
+    | where 1=0
+]
+| appendpipe [
     | inputlookup append=true dq_agent_ai_requests
     | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id
     | outputlookup dq_agent_ai_requests
@@ -1882,6 +1891,31 @@ Q_DQ_AI_ASK_WRITE = r"""
 | where finding_id="$tok_finding_id$"
 | eval _color_rank=if(status="replied", 3, 1)
 | table requested_at, finding_id, provider, status, _color_rank
+"""
+
+Q_DQ_AI_LIST_BUTTON = r"""
+| makeresults
+| eval _pressed=if("$tok_ai_list$"="show", 1, 0)
+| eval button_label=if(_pressed=1, "HIDE AI SUGGESTIONS", "LIST AI SUGGESTIONS")
+| eval _click_action=if(_pressed=1, "hide", "show")
+| table button_label, _click_action, _pressed
+"""
+
+# Returns nothing until LIST is clicked, so the panel stays hidden.
+Q_DQ_AI_LIST = r"""
+| inputlookup dq_agent_ai_suggestions
+| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
+| eval decision=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+| sort 0 -suggested_at
+| table suggested_at, finding_id, entity, issue, suggestion, provider, model, decision
+| appendpipe [
+    | stats count
+    | where count=0
+    | eval suggestion="No AI suggestions saved yet. Select a row in the work queue to get one."
+    | fields - count
+]
+| eval _color_rank=3
+| where "$tok_ai_list$"="show"
 """
 
 Q_DQ_AI_SAVE_BUTTON = r"""
@@ -2149,6 +2183,19 @@ def data_quality_agent() -> dict:
     ask_msg_table = table("ASK result — waiting or failed", "ds_dq_ai_ask_status", count=1)
     ask_msg_table.pop("eventHandlers", None)
     ask_msg_table["showLastUpdated"] = False
+    ai_list_table = table("All AI suggestions — newest first", "ds_dq_ai_list", count=10)
+    ai_list_table.pop("eventHandlers", None)
+    ai_list_table["hideWhenNoData"] = True
+    ai_list_table["options"]["columnFormat"] = {
+        "suggested_at": {"width": 140},
+        "finding_id": {"width": 80},
+        "entity": {"width": 130},
+        "issue": {"width": 180},
+        "suggestion": {"width": 640},
+        "provider": {"width": 90},
+        "model": {"width": 140},
+        "decision": {"width": 90, "align": "center"},
+    }
     return {
         "title": "Derek+ Data Quality Agent",
         "description": "Click Select, then click APPROVE or DISMISS. That records the decision. Search does not open.",
@@ -2174,6 +2221,11 @@ def data_quality_agent() -> dict:
                 "type": "input.text",
                 "title": "Ask latch (set by ASK)",
                 "options": {"token": "tok_ai_ask", "defaultValue": "review"},
+            },
+            "input_ai_list": {
+                "type": "input.text",
+                "title": "List latch (set by LIST AI SUGGESTIONS)",
+                "options": {"token": "tok_ai_list", "defaultValue": "hide"},
             },
             "input_entity": {
                 "type": "input.text",
@@ -2214,6 +2266,8 @@ def data_quality_agent() -> dict:
             "ds_dq_ai_write": ds("Write ASK request", Q_DQ_AI_ASK_WRITE, "0", "now", refresh=None),
             "ds_dq_ai_ask_status": chain("ASK wait or fail", "ds_dq_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_ASK_STATUS.strip() + "\n]"),
             "ds_dq_ai_replies": chain("AI suggested fix", "ds_dq_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_REPLIES.strip() + "\n]"),
+            "ds_dq_ai_list_button": ds("List suggestions control", Q_DQ_AI_LIST_BUTTON, "0", "now", refresh=None),
+            "ds_dq_ai_list": chain("All AI suggestions", "ds_dq_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_LIST.strip() + "\n]"),
         },
         "visualizations": {
             "viz_header": md(
@@ -2248,9 +2302,12 @@ def data_quality_agent() -> dict:
             "viz_ai_ask_state": single_status("ASK status", "ds_dq_ai_ask_status", "ask_state", "ask_state"),
             "viz_ai_ask_msg": ask_msg_table,
             "viz_ai_replies": replies_table,
+            "viz_ai_list_button": decision_button("", "ds_dq_ai_list_button", token="tok_ai_list", fill="#7B56DB"),
+            "viz_ai_list": ai_list_table,
             "viz_footer": md(
                 "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. "
                 "Selecting a row asks the saved provider automatically; **ASK AGAIN** retries. Search does not open. "
+                "Every reply is saved; **LIST AI SUGGESTIONS** shows them all. "
                 "The API key stays in the AI provider lookup — never in this queue table."
             ),
         },
@@ -2271,6 +2328,8 @@ def data_quality_agent() -> dict:
                 block("viz_recorded", 0, 1130, 1200, 130),
                 block("viz_brief", 0, 1260, 1200, 130),
                 block("viz_footer", 0, 1390, 1200, 80),
+                block("viz_ai_list_button", 0, 1470, 400, 90),
+                block("viz_ai_list", 0, 1560, 1200, 460),
             ],
             extra_inputs=[
                 "input_ask",
@@ -2418,7 +2477,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.38"
+APP_VERSION = "1.7.39"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2467,6 +2526,7 @@ def about() -> dict:
                 "- No MLTK dependency; baselining uses `streamstats` and built-in `predict`\n"
                 "- Knowledge objects writable by `admin`, `power`, and `sc_admin`\n"
                 "- The Data Quality Agent records a decision only after a human clicks APPROVE or DISMISS AI provider, model, and key are saved from the setup page to KV Store so the key survives app updates; SAVE also runs a direct connection test against the provider\n"
+                "- Every AI reply is appended to KV Store collection `dq_agent_ai_suggestions` so the history survives app updates\n"
                 "- `commands.conf` marks `outputlookup` not-risky in this app so the approvals lookup can be written from the dashboard\n\n"
                 "Self-service Cloud install requires AppInspect **0 failures, 0 errors, 0 manual checks** "
                 "(`private_app` / `private_victoria` / `private_classic`). Install as **sc_admin** via "

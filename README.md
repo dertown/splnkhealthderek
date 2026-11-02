@@ -54,7 +54,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.38.spl`.
+3. Upload `dist/splunk_exec_health-1.7.39.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -92,6 +92,8 @@ The agent is a **search-head loop**. It ships with **LOCAL** AI mode (no outboun
 3. **Hypothesize** — playbooks in `lookups/dq_agent_playbooks.csv` (`likely_cause`, confidence, next Splunk Web path).
 4. **Propose** — suggested fix plus an `ai_brief` you can paste into Splunk AI Assistant or an approved model for a second opinion.
 5. **Act** — only a human. Click **APPROVE** or **DISMISS**. That writes one record per finding to KV Store collection `dq_agent_approvals` on this search head and nothing else. Decisions survive app updates.
+
+Every AI suggested fix is also saved to KV Store collection `dq_agent_ai_suggestions`, one record per reply, so the history survives app updates. Connection tests and failed calls are not saved. Click **LIST AI SUGGESTIONS** at the bottom of the agent page to show them all, newest first, and click it again to hide them.
 
 The agent **cannot** restart forwarders, edit `inputs.conf`, rotate HEC tokens, or change indexes. UF / HEC / index repairs stay runbooks.
 
@@ -187,5 +189,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.38.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.39.spl --included-tags private_app
 ```

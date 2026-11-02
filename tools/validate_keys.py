@@ -227,7 +227,7 @@ def check_collections() -> None:
         err("collections.conf", "missing; AI provider config needs KV Store so the API key survives app updates")
         return
     conf = parse_conf(path)
-    for required in ("dq_agent_ai_config", "dq_agent_approvals"):
+    for required in ("dq_agent_ai_config", "dq_agent_approvals", "dq_agent_ai_suggestions"):
         if required not in conf:
             err("collections.conf", f"missing [{required}] collection")
     for stanza, keys in conf.items():

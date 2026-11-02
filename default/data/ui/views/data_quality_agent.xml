@@ -58,6 +58,14 @@
         "defaultValue": "review"
       }
     },
+    "input_ai_list": {
+      "type": "input.text",
+      "title": "List latch (set by LIST AI SUGGESTIONS)",
+      "options": {
+        "token": "tok_ai_list",
+        "defaultValue": "hide"
+      }
+    },
     "input_entity": {
       "type": "input.text",
       "title": "Selected entity",
@@ -202,7 +210,7 @@
       "type": "ds.search",
       "name": "Write ASK request",
       "options": {
-        "query": "| makeresults\n| eval ask=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| where match(ask, \"^(ask|retry)\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS prev_status, requested_at AS prev_at\n| eval prev_age=coalesce(now()-strptime(coalesce(tostring(prev_at), \"\"), \"%Y-%m-%d %H:%M:%S\"), 99999)\n| where NOT (prev_status=\"replied\" AND prev_age<3600 AND ask=\"ask\")\n| lookup dq_agent_ai_providers provider OUTPUT default_endpoint\n| eval endpoint=if(endpoint=\"none\" OR isnull(endpoint) OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\")\n| eval entity=if(entity=\"\" OR isnull(entity), \"none\", entity)\n| eval issue=if(issue=\"\" OR isnull(issue), \"none\", issue)\n| eval ai_brief=if(ai_brief=\"\" OR isnull(ai_brief), \"none\", ai_brief)\n| eval is_ping=0\n| derekaiping\n| eval status=if(ai_result=\"replied\", \"replied\", \"failed\")\n| eval note=if(ai_result=\"replied\", \"ask_ai_provider\", \"ask failed: \".coalesce(ai_error, \"no reply\"))\n| eval reply=if(ai_result=\"replied\", ai_reply, \"none\")\n| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_requests\n    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id\n    | outputlookup dq_agent_ai_requests\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(status=\"replied\", 3, 1)\n| table requested_at, finding_id, provider, status, _color_rank",
+        "query": "| makeresults\n| eval ask=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| where match(ask, \"^(ask|retry)\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS prev_status, requested_at AS prev_at\n| eval prev_age=coalesce(now()-strptime(coalesce(tostring(prev_at), \"\"), \"%Y-%m-%d %H:%M:%S\"), 99999)\n| where NOT (prev_status=\"replied\" AND prev_age<3600 AND ask=\"ask\")\n| lookup dq_agent_ai_providers provider OUTPUT default_endpoint\n| eval endpoint=if(endpoint=\"none\" OR isnull(endpoint) OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\")\n| eval entity=if(entity=\"\" OR isnull(entity), \"none\", entity)\n| eval issue=if(issue=\"\" OR isnull(issue), \"none\", issue)\n| eval ai_brief=if(ai_brief=\"\" OR isnull(ai_brief), \"none\", ai_brief)\n| eval is_ping=0\n| derekaiping\n| eval status=if(ai_result=\"replied\", \"replied\", \"failed\")\n| eval note=if(ai_result=\"replied\", \"ask_ai_provider\", \"ask failed: \".coalesce(ai_error, \"no reply\"))\n| eval reply=if(ai_result=\"replied\", ai_reply, \"none\")\n| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply\n| appendpipe [\n    | where status=\"replied\"\n    | eval suggested_at=requested_at, suggestion=reply\n    | table suggested_at, finding_id, entity, issue, provider, model, actor, suggestion\n    | outputlookup append=true override_if_empty=false dq_agent_ai_suggestions\n    | where 1=0\n]\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_requests\n    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id\n    | outputlookup dq_agent_ai_requests\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(status=\"replied\", 3, 1)\n| table requested_at, finding_id, provider, status, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -223,6 +231,25 @@
       "options": {
         "extend": "ds_dq_ai_write",
         "query": "| where 1=0\n| append [\n| makeresults\n| eval _gate=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider, model, reply, note AS req_note\n| eval ai_suggested_fix=case(\n    picked=0, \"Select a row in the work queue. The AI suggested fix fills in here automatically.\",\n    req_status=\"replied\", reply,\n    req_status=\"failed\", \"The AI could not answer: \".coalesce(req_note, \"provider error\").\". Use the playbook fix above or click ASK AGAIN.\",\n    1=1, \"Asking the AI provider for a suggested fix... If no provider is set, use the playbook fix above.\")\n| eval from_ai=if(req_status=\"replied\", provider.\" / \".model, \"none\")\n| eval _color_rank=case(req_status=\"replied\", 3, req_status=\"failed\", 1, 1=1, 2)\n| table ai_suggested_fix, from_ai, requested_at, _color_rank\n]"
+      }
+    },
+    "ds_dq_ai_list_button": {
+      "type": "ds.search",
+      "name": "List suggestions control",
+      "options": {
+        "query": "| makeresults\n| eval _pressed=if(\"$tok_ai_list$\"=\"show\", 1, 0)\n| eval button_label=if(_pressed=1, \"HIDE AI SUGGESTIONS\", \"LIST AI SUGGESTIONS\")\n| eval _click_action=if(_pressed=1, \"hide\", \"show\")\n| table button_label, _click_action, _pressed",
+        "queryParameters": {
+          "earliest": "0",
+          "latest": "now"
+        }
+      }
+    },
+    "ds_dq_ai_list": {
+      "type": "ds.chain",
+      "name": "All AI suggestions",
+      "options": {
+        "extend": "ds_dq_ai_write",
+        "query": "| where 1=0\n| append [\n| inputlookup dq_agent_ai_suggestions\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision\n| eval decision=case(rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| sort 0 -suggested_at\n| table suggested_at, finding_id, entity, issue, suggestion, provider, model, decision\n| appendpipe [\n    | stats count\n    | where count=0\n    | eval suggestion=\"No AI suggestions saved yet. Select a row in the work queue to get one.\"\n    | fields - count\n]\n| eval _color_rank=3\n| where \"$tok_ai_list$\"=\"show\"\n]"
       }
     }
   },
@@ -1025,10 +1052,139 @@
         ]
       }
     },
+    "viz_ai_list_button": {
+      "type": "splunk.table",
+      "title": "",
+      "dataSources": {
+        "primary": "ds_dq_ai_list_button"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": false,
+      "options": {
+        "count": 1,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
+          "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
+          "headerBackgroundColor": "#7B56DB",
+          "headerColor": "#000000",
+          "align": "center"
+        },
+        "headerVisibility": "none",
+        "fontSize": "default",
+        "columnFormat": {
+          "button_label": {
+            "align": "center"
+          }
+        },
+        "backgroundColor": "#7B56DB"
+      },
+      "context": {
+        "btnFill": [
+          {
+            "value": "#7B56DB",
+            "to": 0.5
+          },
+          {
+            "value": "#000000",
+            "from": 0.5
+          }
+        ],
+        "btnText": [
+          {
+            "value": "#000000",
+            "to": 0.5
+          },
+          {
+            "value": "#7B56DB",
+            "from": 0.5
+          }
+        ]
+      },
+      "eventHandlers": [
+        {
+          "type": "drilldown.setToken",
+          "options": {
+            "tokens": [
+              {
+                "token": "tok_ai_list",
+                "key": "row._click_action.value"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "viz_ai_list": {
+      "type": "splunk.table",
+      "title": "All AI suggestions \u2014 newest first",
+      "dataSources": {
+        "primary": "ds_dq_ai_list"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 10,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+        },
+        "columnFormat": {
+          "suggested_at": {
+            "width": 140
+          },
+          "finding_id": {
+            "width": 80
+          },
+          "entity": {
+            "width": 130
+          },
+          "issue": {
+            "width": 180
+          },
+          "suggestion": {
+            "width": 640
+          },
+          "provider": {
+            "width": 90
+          },
+          "model": {
+            "width": 140
+          },
+          "decision": {
+            "width": 90,
+            "align": "center"
+          }
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#5C1A1A"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#5C4A12"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#14301A"
+          }
+        ]
+      },
+      "hideWhenNoData": true
+    },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. Selecting a row asks the saved provider automatically; **ASK AGAIN** retries. Search does not open. The API key stays in the AI provider lookup \u2014 never in this queue table.",
+        "markdown": "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. Selecting a row asks the saved provider automatically; **ASK AGAIN** retries. Search does not open. Every reply is saved; **LIST AI SUGGESTIONS** shows them all. The API key stays in the AI provider lookup \u2014 never in this queue table.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -1238,13 +1394,20 @@
         "strokeColor": "#26304A",
         "strokeWidth": 1
       }
+    },
+    "pill_16": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#7B56DB",
+        "rx": 8
+      }
     }
   },
   "layout": {
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 1482,
+      "height": 2032,
       "display": "auto-scale",
       "backgroundColor": "#0B0F19"
     },
@@ -1657,6 +1820,36 @@
           "y": 1404,
           "w": 1172,
           "h": 54
+        }
+      },
+      {
+        "item": "pill_16",
+        "type": "block",
+        "position": {
+          "x": 70,
+          "y": 1487,
+          "w": 260,
+          "h": 56
+        }
+      },
+      {
+        "item": "viz_ai_list_button",
+        "type": "block",
+        "position": {
+          "x": 78,
+          "y": 1491,
+          "w": 244,
+          "h": 48
+        }
+      },
+      {
+        "item": "viz_ai_list",
+        "type": "block",
+        "position": {
+          "x": 6,
+          "y": 1566,
+          "w": 1188,
+          "h": 448
         }
       }
     ],
