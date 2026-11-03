@@ -11,10 +11,24 @@ from xml.sax.saxutils import escape as xml_escape
 ROOT = Path(__file__).resolve().parents[1]
 VIEWS = ROOT / "default" / "data" / "ui" / "views"
 
-GREEN = "#53A051"
-YELLOW = "#F8BE34"
-RED = "#DC4E41"
-ACCENT = ["#7B56DB", "#009CEB", "#00CDAF", "#DD9900", "#FF677B"]
+# Palette follows the reference "mapping" screen: navy canvas, dark bordered cards,
+# blue KPI numbers and links, muted table headers, tinted status pills.
+GREEN = "#3FB950"
+YELLOW = "#E3B341"
+RED = "#F85149"
+BLUE = "#58A6FF"
+MUTED = "#8B949E"
+# Button looks from the reference screen: solid blue (dark label), solid green
+# (white label), and a dark outlined secondary button (light label).
+BTN_BLUE = BLUE
+BTN_GREEN = "#2EA043"
+BTN_SECONDARY = "#1B2438"
+BUTTON_STYLES = {
+    BTN_BLUE: {"ink": "#0B1220", "stroke": None},
+    BTN_GREEN: {"ink": "#FFFFFF", "stroke": None},
+    BTN_SECONDARY: {"ink": "#E6EDF3", "stroke": "#34405A"},
+}
+ACCENT = [BLUE, "#3FB950", "#E3B341", "#F85149", "#A371F7"]
 
 HEALTH_COLORS = [
     {"value": RED, "to": 0.5},
@@ -46,10 +60,23 @@ STATUS_COLORS = [
 
 # Row colors: 1=red/alert, 2=yellow, 3=green/ok
 ROW_COLORS = [
-    {"from": 0, "to": 1.5, "value": "#5C1A1A"},
-    {"from": 1.5, "to": 2.5, "value": "#5C4A12"},
-    {"from": 2.5, "to": 4, "value": "#14301A"},
+    {"from": 0, "to": 1.5, "value": "#2A1519"},
+    {"from": 1.5, "to": 2.5, "value": "#262011"},
+    {"from": 2.5, "to": 4, "value": "#151D2F"},
 ]
+
+# Status words render as tinted pills: bright text on a dark tint of the same hue.
+_PILL_WORDS = {
+    "red": ["RED", "ALERT", "HOST DOWN", "DATA SILENT", "HEARTBEAT ONLY", "HIGH", "CLOCK AHEAD", "FAILED", "failed", "FAIL", "MISCONFIG", "STALLED"],
+    "amber": ["YELLOW", "DELAYED", "WARMUP", "WATCH", "N/A", "open", "TESTING", "WAITING"],
+    "green": ["GREEN", "OK", "approved", "replied", "PASS", "LOCAL", "READY", "PROVIDER"],
+    "grey": ["dismissed", "IDLE", "SKIP", "WAIT"],
+}
+_PILL_INK = {"red": RED, "amber": YELLOW, "green": GREEN, "grey": MUTED}
+_PILL_TINT = {"red": "#3D1418", "amber": "#3A2E0C", "green": "#0F2D1A", "grey": "#222B3A"}
+PILL_TEXT = [{"match": w, "value": _PILL_INK[k]} for k, ws in _PILL_WORDS.items() for w in ws]
+PILL_BG = [{"match": w, "value": _PILL_TINT[k]} for k, ws in _PILL_WORDS.items() for w in ws]
+PILL_COLUMNS = ["severity", "status", "state", "baseline_state", "latency_state", "hec_state", "tile_status", "decision"]
 
 
 def model_dropdown_items() -> list[dict]:
@@ -146,8 +173,8 @@ def decision_button(title: str, ds_id: str, token: str = "tok_decision", fill: s
 
     The action lives in a hidden _ field so the label is the only visible column and
     fills the table; a second visible column forces Studio scrollbars in the pill.
-    Hidden _pressed (0/1) flips the button to its negative: fill with black text,
-    then black with fill-colored text once clicked. Studio has no hover state.
+    Hidden _pressed (0/1) flips the button to its negative: fill with its ink label,
+    then the ink color with a fill-colored label once clicked. Studio has no hover state.
     """
     viz = table(title, ds_id, count=1)
     viz["showLastUpdated"] = False
@@ -164,17 +191,18 @@ def decision_button(title: str, ds_id: str, token: str = "tok_decision", fill: s
     viz["options"]["fontSize"] = "default"
     viz["options"]["columnFormat"] = {"button_label": {"align": "center"}}
     if fill:
+        ink = BUTTON_STYLES.get(fill, {}).get("ink", BUTTON_INK)
         viz["options"]["backgroundColor"] = fill
         viz["options"]["tableFormat"] = {
             "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
             "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
             "headerBackgroundColor": fill,
-            "headerColor": BUTTON_INK,
+            "headerColor": ink,
             "align": "center",
         }
         viz["context"] = {
-            "btnFill": [{"value": fill, "to": 0.5}, {"value": BUTTON_INK, "from": 0.5}],
-            "btnText": [{"value": BUTTON_INK, "to": 0.5}, {"value": fill, "from": 0.5}],
+            "btnFill": [{"value": fill, "to": 0.5}, {"value": ink, "from": 0.5}],
+            "btnText": [{"value": ink, "to": 0.5}, {"value": fill, "from": 0.5}],
         }
     return viz
 
@@ -203,6 +231,7 @@ def single_number(title: str, ds_id: str, field: str, unit: str = "", spark: str
         "shouldUseThousandSeparators": True,
         "numberPrecision": precision,
         "majorFontSize": 32,
+        "majorColor": BLUE,
     }
     if unit:
         options["unit"] = unit
@@ -238,10 +267,19 @@ def table(title: str, ds_id: str, rank_field: str = "_color_rank", count: int = 
             "showRowNumbers": False,
             "showInternalFields": False,
             "tableFormat": {
-                "rowBackgroundColors": f"> table | seriesByName(\"{rank_field}\") | rangeValue(rowColors)"
+                "rowBackgroundColors": f"> table | seriesByName(\"{rank_field}\") | rangeValue(rowColors)",
+                "headerBackgroundColor": "transparent",
+                "headerColor": MUTED,
+            },
+            "columnFormat": {
+                col: {
+                    "rowColors": f"> table | seriesByName(\"{col}\") | matchValue(pillText)",
+                    "rowBackgroundColors": f"> table | seriesByName(\"{col}\") | matchValue(pillBg)",
+                }
+                for col in PILL_COLUMNS
             },
         },
-        "context": {"rowColors": ROW_COLORS},
+        "context": {"rowColors": ROW_COLORS, "pillText": PILL_TEXT, "pillBg": PILL_BG},
         "eventHandlers": [
             {
                 "type": "drilldown.linkToSearch",
@@ -333,8 +371,8 @@ def linkgraph(title: str, ds_id: str, field_order: list[str]) -> dict:
             # Must be a JSON array. A comma-separated string makes Dashboard Studio
             # throw "f.forEach is not a function" because getField() is an array.
             "fieldOrder": field_order,
-            "linkColor": "#009CEB",
-            "nodeHighlightColor": "#7B56DB",
+            "linkColor": BLUE,
+            "nodeHighlightColor": "#A371F7",
             "nodeWidth": 170,
             "nodeHeight": 22,
             "nodeSpacingX": 40,
@@ -377,22 +415,25 @@ def grid(structure: list, extra_inputs: list | None = None, include_time: bool =
 # and a thin colored accent bar per panel type. Panels keep their ids and data.
 # ---------------------------------------------------------------------------
 
-CANVAS = "#0B0F19"
-CARD_FILL = "#151B2B"
-CARD_LINE = "#26304A"
-HEADER_FILL = "#1B2342"
-ACCENT_KPI = "#00CDAF"
-ACCENT_TABLE = "#7B56DB"
-ACCENT_CHART = "#009CEB"
-ACCENT_GRAPH = "#DD9900"
+CANVAS = "#151D2F"
+CARD_FILL = "#0C121F"
+CARD_LINE = "#222C41"
+HEADER_FILL = "#0C121F"
+# Tables sit flat on the page like the reference screen: same fill as the canvas.
+TABLE_FILL = CANVAS
+ACCENT_BARS = False
+ACCENT_KPI = BLUE
+ACCENT_TABLE = BLUE
+ACCENT_CHART = BLUE
+ACCENT_GRAPH = BLUE
 GUTTER = 6
 BAR_H = 4
 # Buttons render as a compact rounded pill centered in their grid cell. The table
 # inside shows a single auto-width column; a fixed-width or second column makes
 # Studio add scrollbars that hide the label.
-BUTTON_W = 260
-BUTTON_H = 56
-BUTTON_RX = 8
+BUTTON_W = 200
+BUTTON_H = 52
+BUTTON_RX = 6
 BUTTON_PAD_X = 8
 BUTTON_PAD_Y = 4
 BUTTON_INK = "#000000"
@@ -403,7 +444,7 @@ TRANSPARENT_TYPES = (
 )
 
 
-def _rect(fill: str, stroke: str | None = None, rx: int = 10) -> dict:
+def _rect(fill: str, stroke: str | None = None, rx: int = 8) -> dict:
     options: dict = {"fillColor": fill, "rx": rx}
     if stroke:
         options["strokeColor"] = stroke
@@ -412,6 +453,8 @@ def _rect(fill: str, stroke: str | None = None, rx: int = 10) -> dict:
 
 
 def _accent_for(viz: dict) -> str | None:
+    if not ACCENT_BARS:
+        return None
     vtype = viz.get("type", "")
     if vtype == "splunk.singlevalue":
         return ACCENT_KPI
@@ -454,7 +497,8 @@ def studio_cards(definition: dict) -> dict:
             bx = x + (w - bw) // 2
             by = y + (h - BUTTON_H) // 2
             pill_id = f"pill_{n}"
-            vizzes[pill_id] = _rect(viz["options"].get("backgroundColor", ACCENT_TABLE), None, rx=BUTTON_RX)
+            pill_fill = viz["options"].get("backgroundColor", ACCENT_TABLE)
+            vizzes[pill_id] = _rect(pill_fill, BUTTON_STYLES.get(pill_fill, {}).get("stroke"), rx=BUTTON_RX)
             structure.append(block(pill_id, bx, by, bw, BUTTON_H))
             structure.append(block(
                 item, bx + BUTTON_PAD_X, by + BUTTON_PAD_Y, bw - 2 * BUTTON_PAD_X, BUTTON_H - 2 * BUTTON_PAD_Y,
@@ -466,11 +510,12 @@ def studio_cards(definition: dict) -> dict:
         n += 1
         header = item == "viz_header"
         card_id, bar_id = f"card_{n}", f"bar_{n}"
-        vizzes[card_id] = _rect(HEADER_FILL if header else CARD_FILL, CARD_LINE)
+        flat = viz.get("type") == "splunk.table"
+        vizzes[card_id] = _rect(TABLE_FILL if flat else (HEADER_FILL if header else CARD_FILL), CARD_LINE)
         structure.append(block(card_id, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - 2 * GUTTER))
-        accent = ACCENT_TABLE if header else _accent_for(viz)
+        accent = (ACCENT_TABLE if header else _accent_for(viz)) if ACCENT_BARS else None
         inset_left, inset_top = 14, 14
-        if header:
+        if header and accent:
             vizzes[bar_id] = _rect(accent, None, rx=3)
             structure.append(block(bar_id, x + GUTTER, y + GUTTER, 6, h - 2 * GUTTER))
             inset_left = 22
@@ -2294,15 +2339,15 @@ def data_quality_agent() -> dict:
             },
             "viz_findings": findings_table,
             "viz_selected": suggestion_table,
-            "viz_approve": decision_button("", "ds_dq_approve", fill=GREEN),
-            "viz_dismiss": decision_button("", "ds_dq_dismiss", fill=RED),
+            "viz_approve": decision_button("", "ds_dq_approve", fill=BTN_GREEN),
+            "viz_dismiss": decision_button("", "ds_dq_dismiss", fill=BTN_SECONDARY),
             "viz_recorded": recorded_table,
             "viz_brief": brief_table,
-            "viz_ai_ask": decision_button("", "ds_dq_ai_ready", token="tok_ai_ask", fill="#7B56DB"),
+            "viz_ai_ask": decision_button("", "ds_dq_ai_ready", token="tok_ai_ask", fill=BLUE),
             "viz_ai_ask_state": single_status("ASK status", "ds_dq_ai_ask_status", "ask_state", "ask_state"),
             "viz_ai_ask_msg": ask_msg_table,
             "viz_ai_replies": replies_table,
-            "viz_ai_list_button": decision_button("", "ds_dq_ai_list_button", token="tok_ai_list", fill="#7B56DB"),
+            "viz_ai_list_button": decision_button("", "ds_dq_ai_list_button", token="tok_ai_list", fill=BLUE),
             "viz_ai_list": ai_list_table,
             "viz_footer": md(
                 "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. "
@@ -2449,7 +2494,7 @@ def ai_provider_setup() -> dict:
             ),
             "viz_current": saved_table,
             "viz_providers": providers_table,
-            "viz_save": decision_button("", "ds_ai_save", token="tok_cfg_save", fill=GREEN),
+            "viz_save": decision_button("", "ds_ai_save", token="tok_cfg_save", fill=BTN_GREEN),
             "viz_footer": md(
                 "SAVE stores the key in KV Store collection `dq_agent_ai_config` on this search head. "
                 "App updates do not overwrite it. The install package does not ship a live API key. "
@@ -2477,7 +2522,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.39"
+APP_VERSION = "1.7.41"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 

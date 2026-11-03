@@ -68,70 +68,63 @@
     "card_1": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#1B2342",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_1": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 3
       }
     },
     "card_2": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
       }
     },
     "card_3": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
       }
     },
     "card_4": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
       }
     },
     "card_5": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
       }
     },
     "card_6": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
       }
     },
     "card_7": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
       }
     }
@@ -142,7 +135,7 @@
       "width": 1200,
       "height": 1052,
       "display": "auto-scale",
-      "backgroundColor": "#0B0F19"
+      "backgroundColor": "#151D2F"
     },
     "structure": [
       {
@@ -156,22 +149,12 @@
         }
       },
       {
-        "item": "bar_1",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 6,
-          "w": 6,
-          "h": 88
-        }
-      },
-      {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 22,
+          "x": 14,
           "y": 14,
-          "w": 1164,
+          "w": 1172,
           "h": 74
         }
       },

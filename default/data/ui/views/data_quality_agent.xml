@@ -280,51 +280,51 @@
         "statusColors": [
           {
             "match": "GREEN",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "YELLOW",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "RED",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "N/A",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "LOCAL",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "READY",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "PROVIDER",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "FAILED",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "MISCONFIG",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "WAITING",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "STALLED",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "REPLIED",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "IDLE",
@@ -336,11 +336,11 @@
           },
           {
             "match": "PASS",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "TESTING",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "SKIP",
@@ -348,7 +348,7 @@
           },
           {
             "match": "FAIL",
-            "value": "#DC4E41"
+            "value": "#F85149"
           }
         ]
       }
@@ -367,6 +367,7 @@
         "shouldUseThousandSeparators": true,
         "numberPrecision": 0,
         "majorFontSize": 32,
+        "majorColor": "#58A6FF",
         "sparklineDisplay": "off",
         "trendDisplay": "off"
       }
@@ -389,51 +390,51 @@
         "statusColors": [
           {
             "match": "GREEN",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "YELLOW",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "RED",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "N/A",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "LOCAL",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "READY",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "PROVIDER",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "FAILED",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "MISCONFIG",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "WAITING",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "STALLED",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "REPLIED",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "IDLE",
@@ -445,11 +446,11 @@
           },
           {
             "match": "PASS",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "TESTING",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "SKIP",
@@ -457,7 +458,7 @@
           },
           {
             "match": "FAIL",
-            "value": "#DC4E41"
+            "value": "#F85149"
           }
         ]
       },
@@ -485,9 +486,10 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)",
+          "headerBackgroundColor": "transparent",
+          "headerColor": "#8B949E"
         },
-        "headerVisibility": "fixed",
         "columnFormat": {
           "severity": {
             "width": 90,
@@ -518,6 +520,7 @@
             "width": 80
           }
         },
+        "headerVisibility": "fixed",
         "backgroundColor": "transparent"
       },
       "context": {
@@ -525,17 +528,277 @@
           {
             "from": 0,
             "to": 1.5,
-            "value": "#5C1A1A"
+            "value": "#2A1519"
           },
           {
             "from": 1.5,
             "to": 2.5,
-            "value": "#5C4A12"
+            "value": "#262011"
           },
           {
             "from": 2.5,
             "to": 4,
-            "value": "#14301A"
+            "value": "#151D2F"
+          }
+        ],
+        "pillText": [
+          {
+            "match": "RED",
+            "value": "#F85149"
+          },
+          {
+            "match": "ALERT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#F85149"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#F85149"
+          },
+          {
+            "match": "HIGH",
+            "value": "#F85149"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAILED",
+            "value": "#F85149"
+          },
+          {
+            "match": "failed",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAIL",
+            "value": "#F85149"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#F85149"
+          },
+          {
+            "match": "STALLED",
+            "value": "#F85149"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#E3B341"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WATCH",
+            "value": "#E3B341"
+          },
+          {
+            "match": "N/A",
+            "value": "#E3B341"
+          },
+          {
+            "match": "open",
+            "value": "#E3B341"
+          },
+          {
+            "match": "TESTING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "GREEN",
+            "value": "#3FB950"
+          },
+          {
+            "match": "OK",
+            "value": "#3FB950"
+          },
+          {
+            "match": "approved",
+            "value": "#3FB950"
+          },
+          {
+            "match": "replied",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PASS",
+            "value": "#3FB950"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#3FB950"
+          },
+          {
+            "match": "READY",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#3FB950"
+          },
+          {
+            "match": "dismissed",
+            "value": "#8B949E"
+          },
+          {
+            "match": "IDLE",
+            "value": "#8B949E"
+          },
+          {
+            "match": "SKIP",
+            "value": "#8B949E"
+          },
+          {
+            "match": "WAIT",
+            "value": "#8B949E"
+          }
+        ],
+        "pillBg": [
+          {
+            "match": "RED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "ALERT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#3D1418"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HIGH",
+            "value": "#3D1418"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAILED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "failed",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAIL",
+            "value": "#3D1418"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#3D1418"
+          },
+          {
+            "match": "STALLED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WATCH",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "N/A",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "open",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "TESTING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "GREEN",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "OK",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "approved",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "replied",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PASS",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "READY",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "dismissed",
+            "value": "#222B3A"
+          },
+          {
+            "match": "IDLE",
+            "value": "#222B3A"
+          },
+          {
+            "match": "SKIP",
+            "value": "#222B3A"
+          },
+          {
+            "match": "WAIT",
+            "value": "#222B3A"
           }
         ]
       },
@@ -586,7 +849,43 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)",
+          "headerBackgroundColor": "transparent",
+          "headerColor": "#8B949E"
+        },
+        "columnFormat": {
+          "severity": {
+            "rowColors": "> table | seriesByName(\"severity\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"severity\") | matchValue(pillBg)"
+          },
+          "status": {
+            "rowColors": "> table | seriesByName(\"status\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"status\") | matchValue(pillBg)"
+          },
+          "state": {
+            "rowColors": "> table | seriesByName(\"state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"state\") | matchValue(pillBg)"
+          },
+          "baseline_state": {
+            "rowColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillBg)"
+          },
+          "latency_state": {
+            "rowColors": "> table | seriesByName(\"latency_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"latency_state\") | matchValue(pillBg)"
+          },
+          "hec_state": {
+            "rowColors": "> table | seriesByName(\"hec_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"hec_state\") | matchValue(pillBg)"
+          },
+          "tile_status": {
+            "rowColors": "> table | seriesByName(\"tile_status\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"tile_status\") | matchValue(pillBg)"
+          },
+          "decision": {
+            "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          }
         },
         "backgroundColor": "transparent"
       },
@@ -595,17 +894,277 @@
           {
             "from": 0,
             "to": 1.5,
-            "value": "#5C1A1A"
+            "value": "#2A1519"
           },
           {
             "from": 1.5,
             "to": 2.5,
-            "value": "#5C4A12"
+            "value": "#262011"
           },
           {
             "from": 2.5,
             "to": 4,
-            "value": "#14301A"
+            "value": "#151D2F"
+          }
+        ],
+        "pillText": [
+          {
+            "match": "RED",
+            "value": "#F85149"
+          },
+          {
+            "match": "ALERT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#F85149"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#F85149"
+          },
+          {
+            "match": "HIGH",
+            "value": "#F85149"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAILED",
+            "value": "#F85149"
+          },
+          {
+            "match": "failed",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAIL",
+            "value": "#F85149"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#F85149"
+          },
+          {
+            "match": "STALLED",
+            "value": "#F85149"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#E3B341"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WATCH",
+            "value": "#E3B341"
+          },
+          {
+            "match": "N/A",
+            "value": "#E3B341"
+          },
+          {
+            "match": "open",
+            "value": "#E3B341"
+          },
+          {
+            "match": "TESTING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "GREEN",
+            "value": "#3FB950"
+          },
+          {
+            "match": "OK",
+            "value": "#3FB950"
+          },
+          {
+            "match": "approved",
+            "value": "#3FB950"
+          },
+          {
+            "match": "replied",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PASS",
+            "value": "#3FB950"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#3FB950"
+          },
+          {
+            "match": "READY",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#3FB950"
+          },
+          {
+            "match": "dismissed",
+            "value": "#8B949E"
+          },
+          {
+            "match": "IDLE",
+            "value": "#8B949E"
+          },
+          {
+            "match": "SKIP",
+            "value": "#8B949E"
+          },
+          {
+            "match": "WAIT",
+            "value": "#8B949E"
+          }
+        ],
+        "pillBg": [
+          {
+            "match": "RED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "ALERT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#3D1418"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HIGH",
+            "value": "#3D1418"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAILED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "failed",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAIL",
+            "value": "#3D1418"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#3D1418"
+          },
+          {
+            "match": "STALLED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WATCH",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "N/A",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "open",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "TESTING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "GREEN",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "OK",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "approved",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "replied",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PASS",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "READY",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "dismissed",
+            "value": "#222B3A"
+          },
+          {
+            "match": "IDLE",
+            "value": "#222B3A"
+          },
+          {
+            "match": "SKIP",
+            "value": "#222B3A"
+          },
+          {
+            "match": "WAIT",
+            "value": "#222B3A"
           }
         ]
       }
@@ -625,37 +1184,37 @@
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
           "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
-          "headerBackgroundColor": "#53A051",
-          "headerColor": "#000000",
+          "headerBackgroundColor": "#2EA043",
+          "headerColor": "#FFFFFF",
           "align": "center"
         },
-        "headerVisibility": "none",
-        "fontSize": "default",
         "columnFormat": {
           "button_label": {
             "align": "center"
           }
         },
-        "backgroundColor": "#53A051"
+        "headerVisibility": "none",
+        "fontSize": "default",
+        "backgroundColor": "#2EA043"
       },
       "context": {
         "btnFill": [
           {
-            "value": "#53A051",
+            "value": "#2EA043",
             "to": 0.5
           },
           {
-            "value": "#000000",
+            "value": "#FFFFFF",
             "from": 0.5
           }
         ],
         "btnText": [
           {
-            "value": "#000000",
+            "value": "#FFFFFF",
             "to": 0.5
           },
           {
-            "value": "#53A051",
+            "value": "#2EA043",
             "from": 0.5
           }
         ]
@@ -689,37 +1248,37 @@
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
           "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
-          "headerBackgroundColor": "#DC4E41",
-          "headerColor": "#000000",
+          "headerBackgroundColor": "#1B2438",
+          "headerColor": "#E6EDF3",
           "align": "center"
         },
-        "headerVisibility": "none",
-        "fontSize": "default",
         "columnFormat": {
           "button_label": {
             "align": "center"
           }
         },
-        "backgroundColor": "#DC4E41"
+        "headerVisibility": "none",
+        "fontSize": "default",
+        "backgroundColor": "#1B2438"
       },
       "context": {
         "btnFill": [
           {
-            "value": "#DC4E41",
+            "value": "#1B2438",
             "to": 0.5
           },
           {
-            "value": "#000000",
+            "value": "#E6EDF3",
             "from": 0.5
           }
         ],
         "btnText": [
           {
-            "value": "#000000",
+            "value": "#E6EDF3",
             "to": 0.5
           },
           {
-            "value": "#DC4E41",
+            "value": "#1B2438",
             "from": 0.5
           }
         ]
@@ -751,7 +1310,43 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)",
+          "headerBackgroundColor": "transparent",
+          "headerColor": "#8B949E"
+        },
+        "columnFormat": {
+          "severity": {
+            "rowColors": "> table | seriesByName(\"severity\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"severity\") | matchValue(pillBg)"
+          },
+          "status": {
+            "rowColors": "> table | seriesByName(\"status\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"status\") | matchValue(pillBg)"
+          },
+          "state": {
+            "rowColors": "> table | seriesByName(\"state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"state\") | matchValue(pillBg)"
+          },
+          "baseline_state": {
+            "rowColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillBg)"
+          },
+          "latency_state": {
+            "rowColors": "> table | seriesByName(\"latency_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"latency_state\") | matchValue(pillBg)"
+          },
+          "hec_state": {
+            "rowColors": "> table | seriesByName(\"hec_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"hec_state\") | matchValue(pillBg)"
+          },
+          "tile_status": {
+            "rowColors": "> table | seriesByName(\"tile_status\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"tile_status\") | matchValue(pillBg)"
+          },
+          "decision": {
+            "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          }
         },
         "backgroundColor": "transparent"
       },
@@ -760,17 +1355,277 @@
           {
             "from": 0,
             "to": 1.5,
-            "value": "#5C1A1A"
+            "value": "#2A1519"
           },
           {
             "from": 1.5,
             "to": 2.5,
-            "value": "#5C4A12"
+            "value": "#262011"
           },
           {
             "from": 2.5,
             "to": 4,
-            "value": "#14301A"
+            "value": "#151D2F"
+          }
+        ],
+        "pillText": [
+          {
+            "match": "RED",
+            "value": "#F85149"
+          },
+          {
+            "match": "ALERT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#F85149"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#F85149"
+          },
+          {
+            "match": "HIGH",
+            "value": "#F85149"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAILED",
+            "value": "#F85149"
+          },
+          {
+            "match": "failed",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAIL",
+            "value": "#F85149"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#F85149"
+          },
+          {
+            "match": "STALLED",
+            "value": "#F85149"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#E3B341"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WATCH",
+            "value": "#E3B341"
+          },
+          {
+            "match": "N/A",
+            "value": "#E3B341"
+          },
+          {
+            "match": "open",
+            "value": "#E3B341"
+          },
+          {
+            "match": "TESTING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "GREEN",
+            "value": "#3FB950"
+          },
+          {
+            "match": "OK",
+            "value": "#3FB950"
+          },
+          {
+            "match": "approved",
+            "value": "#3FB950"
+          },
+          {
+            "match": "replied",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PASS",
+            "value": "#3FB950"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#3FB950"
+          },
+          {
+            "match": "READY",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#3FB950"
+          },
+          {
+            "match": "dismissed",
+            "value": "#8B949E"
+          },
+          {
+            "match": "IDLE",
+            "value": "#8B949E"
+          },
+          {
+            "match": "SKIP",
+            "value": "#8B949E"
+          },
+          {
+            "match": "WAIT",
+            "value": "#8B949E"
+          }
+        ],
+        "pillBg": [
+          {
+            "match": "RED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "ALERT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#3D1418"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HIGH",
+            "value": "#3D1418"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAILED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "failed",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAIL",
+            "value": "#3D1418"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#3D1418"
+          },
+          {
+            "match": "STALLED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WATCH",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "N/A",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "open",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "TESTING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "GREEN",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "OK",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "approved",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "replied",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PASS",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "READY",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "dismissed",
+            "value": "#222B3A"
+          },
+          {
+            "match": "IDLE",
+            "value": "#222B3A"
+          },
+          {
+            "match": "SKIP",
+            "value": "#222B3A"
+          },
+          {
+            "match": "WAIT",
+            "value": "#222B3A"
           }
         ]
       }
@@ -788,7 +1643,43 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)",
+          "headerBackgroundColor": "transparent",
+          "headerColor": "#8B949E"
+        },
+        "columnFormat": {
+          "severity": {
+            "rowColors": "> table | seriesByName(\"severity\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"severity\") | matchValue(pillBg)"
+          },
+          "status": {
+            "rowColors": "> table | seriesByName(\"status\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"status\") | matchValue(pillBg)"
+          },
+          "state": {
+            "rowColors": "> table | seriesByName(\"state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"state\") | matchValue(pillBg)"
+          },
+          "baseline_state": {
+            "rowColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillBg)"
+          },
+          "latency_state": {
+            "rowColors": "> table | seriesByName(\"latency_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"latency_state\") | matchValue(pillBg)"
+          },
+          "hec_state": {
+            "rowColors": "> table | seriesByName(\"hec_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"hec_state\") | matchValue(pillBg)"
+          },
+          "tile_status": {
+            "rowColors": "> table | seriesByName(\"tile_status\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"tile_status\") | matchValue(pillBg)"
+          },
+          "decision": {
+            "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          }
         },
         "backgroundColor": "transparent"
       },
@@ -797,17 +1688,277 @@
           {
             "from": 0,
             "to": 1.5,
-            "value": "#5C1A1A"
+            "value": "#2A1519"
           },
           {
             "from": 1.5,
             "to": 2.5,
-            "value": "#5C4A12"
+            "value": "#262011"
           },
           {
             "from": 2.5,
             "to": 4,
-            "value": "#14301A"
+            "value": "#151D2F"
+          }
+        ],
+        "pillText": [
+          {
+            "match": "RED",
+            "value": "#F85149"
+          },
+          {
+            "match": "ALERT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#F85149"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#F85149"
+          },
+          {
+            "match": "HIGH",
+            "value": "#F85149"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAILED",
+            "value": "#F85149"
+          },
+          {
+            "match": "failed",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAIL",
+            "value": "#F85149"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#F85149"
+          },
+          {
+            "match": "STALLED",
+            "value": "#F85149"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#E3B341"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WATCH",
+            "value": "#E3B341"
+          },
+          {
+            "match": "N/A",
+            "value": "#E3B341"
+          },
+          {
+            "match": "open",
+            "value": "#E3B341"
+          },
+          {
+            "match": "TESTING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "GREEN",
+            "value": "#3FB950"
+          },
+          {
+            "match": "OK",
+            "value": "#3FB950"
+          },
+          {
+            "match": "approved",
+            "value": "#3FB950"
+          },
+          {
+            "match": "replied",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PASS",
+            "value": "#3FB950"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#3FB950"
+          },
+          {
+            "match": "READY",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#3FB950"
+          },
+          {
+            "match": "dismissed",
+            "value": "#8B949E"
+          },
+          {
+            "match": "IDLE",
+            "value": "#8B949E"
+          },
+          {
+            "match": "SKIP",
+            "value": "#8B949E"
+          },
+          {
+            "match": "WAIT",
+            "value": "#8B949E"
+          }
+        ],
+        "pillBg": [
+          {
+            "match": "RED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "ALERT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#3D1418"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HIGH",
+            "value": "#3D1418"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAILED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "failed",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAIL",
+            "value": "#3D1418"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#3D1418"
+          },
+          {
+            "match": "STALLED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WATCH",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "N/A",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "open",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "TESTING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "GREEN",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "OK",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "approved",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "replied",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PASS",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "READY",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "dismissed",
+            "value": "#222B3A"
+          },
+          {
+            "match": "IDLE",
+            "value": "#222B3A"
+          },
+          {
+            "match": "SKIP",
+            "value": "#222B3A"
+          },
+          {
+            "match": "WAIT",
+            "value": "#222B3A"
           }
         ]
       }
@@ -827,37 +1978,37 @@
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
           "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
-          "headerBackgroundColor": "#7B56DB",
-          "headerColor": "#000000",
+          "headerBackgroundColor": "#58A6FF",
+          "headerColor": "#0B1220",
           "align": "center"
         },
-        "headerVisibility": "none",
-        "fontSize": "default",
         "columnFormat": {
           "button_label": {
             "align": "center"
           }
         },
-        "backgroundColor": "#7B56DB"
+        "headerVisibility": "none",
+        "fontSize": "default",
+        "backgroundColor": "#58A6FF"
       },
       "context": {
         "btnFill": [
           {
-            "value": "#7B56DB",
+            "value": "#58A6FF",
             "to": 0.5
           },
           {
-            "value": "#000000",
+            "value": "#0B1220",
             "from": 0.5
           }
         ],
         "btnText": [
           {
-            "value": "#000000",
+            "value": "#0B1220",
             "to": 0.5
           },
           {
-            "value": "#7B56DB",
+            "value": "#58A6FF",
             "from": 0.5
           }
         ]
@@ -894,51 +2045,51 @@
         "statusColors": [
           {
             "match": "GREEN",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "YELLOW",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "RED",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "N/A",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "LOCAL",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "READY",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "PROVIDER",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "FAILED",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "MISCONFIG",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "WAITING",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "STALLED",
-            "value": "#DC4E41"
+            "value": "#F85149"
           },
           {
             "match": "REPLIED",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "IDLE",
@@ -950,11 +2101,11 @@
           },
           {
             "match": "PASS",
-            "value": "#53A051"
+            "value": "#3FB950"
           },
           {
             "match": "TESTING",
-            "value": "#F8BE34"
+            "value": "#E3B341"
           },
           {
             "match": "SKIP",
@@ -962,7 +2113,7 @@
           },
           {
             "match": "FAIL",
-            "value": "#DC4E41"
+            "value": "#F85149"
           }
         ]
       }
@@ -980,7 +2131,43 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)",
+          "headerBackgroundColor": "transparent",
+          "headerColor": "#8B949E"
+        },
+        "columnFormat": {
+          "severity": {
+            "rowColors": "> table | seriesByName(\"severity\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"severity\") | matchValue(pillBg)"
+          },
+          "status": {
+            "rowColors": "> table | seriesByName(\"status\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"status\") | matchValue(pillBg)"
+          },
+          "state": {
+            "rowColors": "> table | seriesByName(\"state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"state\") | matchValue(pillBg)"
+          },
+          "baseline_state": {
+            "rowColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillBg)"
+          },
+          "latency_state": {
+            "rowColors": "> table | seriesByName(\"latency_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"latency_state\") | matchValue(pillBg)"
+          },
+          "hec_state": {
+            "rowColors": "> table | seriesByName(\"hec_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"hec_state\") | matchValue(pillBg)"
+          },
+          "tile_status": {
+            "rowColors": "> table | seriesByName(\"tile_status\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"tile_status\") | matchValue(pillBg)"
+          },
+          "decision": {
+            "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          }
         },
         "backgroundColor": "transparent"
       },
@@ -989,17 +2176,277 @@
           {
             "from": 0,
             "to": 1.5,
-            "value": "#5C1A1A"
+            "value": "#2A1519"
           },
           {
             "from": 1.5,
             "to": 2.5,
-            "value": "#5C4A12"
+            "value": "#262011"
           },
           {
             "from": 2.5,
             "to": 4,
-            "value": "#14301A"
+            "value": "#151D2F"
+          }
+        ],
+        "pillText": [
+          {
+            "match": "RED",
+            "value": "#F85149"
+          },
+          {
+            "match": "ALERT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#F85149"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#F85149"
+          },
+          {
+            "match": "HIGH",
+            "value": "#F85149"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAILED",
+            "value": "#F85149"
+          },
+          {
+            "match": "failed",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAIL",
+            "value": "#F85149"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#F85149"
+          },
+          {
+            "match": "STALLED",
+            "value": "#F85149"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#E3B341"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WATCH",
+            "value": "#E3B341"
+          },
+          {
+            "match": "N/A",
+            "value": "#E3B341"
+          },
+          {
+            "match": "open",
+            "value": "#E3B341"
+          },
+          {
+            "match": "TESTING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "GREEN",
+            "value": "#3FB950"
+          },
+          {
+            "match": "OK",
+            "value": "#3FB950"
+          },
+          {
+            "match": "approved",
+            "value": "#3FB950"
+          },
+          {
+            "match": "replied",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PASS",
+            "value": "#3FB950"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#3FB950"
+          },
+          {
+            "match": "READY",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#3FB950"
+          },
+          {
+            "match": "dismissed",
+            "value": "#8B949E"
+          },
+          {
+            "match": "IDLE",
+            "value": "#8B949E"
+          },
+          {
+            "match": "SKIP",
+            "value": "#8B949E"
+          },
+          {
+            "match": "WAIT",
+            "value": "#8B949E"
+          }
+        ],
+        "pillBg": [
+          {
+            "match": "RED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "ALERT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#3D1418"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HIGH",
+            "value": "#3D1418"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAILED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "failed",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAIL",
+            "value": "#3D1418"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#3D1418"
+          },
+          {
+            "match": "STALLED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WATCH",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "N/A",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "open",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "TESTING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "GREEN",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "OK",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "approved",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "replied",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PASS",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "READY",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "dismissed",
+            "value": "#222B3A"
+          },
+          {
+            "match": "IDLE",
+            "value": "#222B3A"
+          },
+          {
+            "match": "SKIP",
+            "value": "#222B3A"
+          },
+          {
+            "match": "WAIT",
+            "value": "#222B3A"
           }
         ]
       }
@@ -1017,7 +2464,9 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)",
+          "headerBackgroundColor": "transparent",
+          "headerColor": "#8B949E"
         },
         "columnFormat": {
           "ai_suggested_fix": {
@@ -1037,17 +2486,277 @@
           {
             "from": 0,
             "to": 1.5,
-            "value": "#5C1A1A"
+            "value": "#2A1519"
           },
           {
             "from": 1.5,
             "to": 2.5,
-            "value": "#5C4A12"
+            "value": "#262011"
           },
           {
             "from": 2.5,
             "to": 4,
-            "value": "#14301A"
+            "value": "#151D2F"
+          }
+        ],
+        "pillText": [
+          {
+            "match": "RED",
+            "value": "#F85149"
+          },
+          {
+            "match": "ALERT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#F85149"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#F85149"
+          },
+          {
+            "match": "HIGH",
+            "value": "#F85149"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAILED",
+            "value": "#F85149"
+          },
+          {
+            "match": "failed",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAIL",
+            "value": "#F85149"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#F85149"
+          },
+          {
+            "match": "STALLED",
+            "value": "#F85149"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#E3B341"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WATCH",
+            "value": "#E3B341"
+          },
+          {
+            "match": "N/A",
+            "value": "#E3B341"
+          },
+          {
+            "match": "open",
+            "value": "#E3B341"
+          },
+          {
+            "match": "TESTING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "GREEN",
+            "value": "#3FB950"
+          },
+          {
+            "match": "OK",
+            "value": "#3FB950"
+          },
+          {
+            "match": "approved",
+            "value": "#3FB950"
+          },
+          {
+            "match": "replied",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PASS",
+            "value": "#3FB950"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#3FB950"
+          },
+          {
+            "match": "READY",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#3FB950"
+          },
+          {
+            "match": "dismissed",
+            "value": "#8B949E"
+          },
+          {
+            "match": "IDLE",
+            "value": "#8B949E"
+          },
+          {
+            "match": "SKIP",
+            "value": "#8B949E"
+          },
+          {
+            "match": "WAIT",
+            "value": "#8B949E"
+          }
+        ],
+        "pillBg": [
+          {
+            "match": "RED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "ALERT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#3D1418"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HIGH",
+            "value": "#3D1418"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAILED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "failed",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAIL",
+            "value": "#3D1418"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#3D1418"
+          },
+          {
+            "match": "STALLED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WATCH",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "N/A",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "open",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "TESTING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "GREEN",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "OK",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "approved",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "replied",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PASS",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "READY",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "dismissed",
+            "value": "#222B3A"
+          },
+          {
+            "match": "IDLE",
+            "value": "#222B3A"
+          },
+          {
+            "match": "SKIP",
+            "value": "#222B3A"
+          },
+          {
+            "match": "WAIT",
+            "value": "#222B3A"
           }
         ]
       }
@@ -1067,37 +2776,37 @@
         "tableFormat": {
           "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
           "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
-          "headerBackgroundColor": "#7B56DB",
-          "headerColor": "#000000",
+          "headerBackgroundColor": "#58A6FF",
+          "headerColor": "#0B1220",
           "align": "center"
         },
-        "headerVisibility": "none",
-        "fontSize": "default",
         "columnFormat": {
           "button_label": {
             "align": "center"
           }
         },
-        "backgroundColor": "#7B56DB"
+        "headerVisibility": "none",
+        "fontSize": "default",
+        "backgroundColor": "#58A6FF"
       },
       "context": {
         "btnFill": [
           {
-            "value": "#7B56DB",
+            "value": "#58A6FF",
             "to": 0.5
           },
           {
-            "value": "#000000",
+            "value": "#0B1220",
             "from": 0.5
           }
         ],
         "btnText": [
           {
-            "value": "#000000",
+            "value": "#0B1220",
             "to": 0.5
           },
           {
-            "value": "#7B56DB",
+            "value": "#58A6FF",
             "from": 0.5
           }
         ]
@@ -1129,7 +2838,9 @@
         "showRowNumbers": false,
         "showInternalFields": false,
         "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)"
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)",
+          "headerBackgroundColor": "transparent",
+          "headerColor": "#8B949E"
         },
         "columnFormat": {
           "suggested_at": {
@@ -1165,17 +2876,277 @@
           {
             "from": 0,
             "to": 1.5,
-            "value": "#5C1A1A"
+            "value": "#2A1519"
           },
           {
             "from": 1.5,
             "to": 2.5,
-            "value": "#5C4A12"
+            "value": "#262011"
           },
           {
             "from": 2.5,
             "to": 4,
-            "value": "#14301A"
+            "value": "#151D2F"
+          }
+        ],
+        "pillText": [
+          {
+            "match": "RED",
+            "value": "#F85149"
+          },
+          {
+            "match": "ALERT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#F85149"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#F85149"
+          },
+          {
+            "match": "HIGH",
+            "value": "#F85149"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAILED",
+            "value": "#F85149"
+          },
+          {
+            "match": "failed",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAIL",
+            "value": "#F85149"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#F85149"
+          },
+          {
+            "match": "STALLED",
+            "value": "#F85149"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#E3B341"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WATCH",
+            "value": "#E3B341"
+          },
+          {
+            "match": "N/A",
+            "value": "#E3B341"
+          },
+          {
+            "match": "open",
+            "value": "#E3B341"
+          },
+          {
+            "match": "TESTING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "GREEN",
+            "value": "#3FB950"
+          },
+          {
+            "match": "OK",
+            "value": "#3FB950"
+          },
+          {
+            "match": "approved",
+            "value": "#3FB950"
+          },
+          {
+            "match": "replied",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PASS",
+            "value": "#3FB950"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#3FB950"
+          },
+          {
+            "match": "READY",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#3FB950"
+          },
+          {
+            "match": "dismissed",
+            "value": "#8B949E"
+          },
+          {
+            "match": "IDLE",
+            "value": "#8B949E"
+          },
+          {
+            "match": "SKIP",
+            "value": "#8B949E"
+          },
+          {
+            "match": "WAIT",
+            "value": "#8B949E"
+          }
+        ],
+        "pillBg": [
+          {
+            "match": "RED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "ALERT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#3D1418"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HIGH",
+            "value": "#3D1418"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAILED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "failed",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAIL",
+            "value": "#3D1418"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#3D1418"
+          },
+          {
+            "match": "STALLED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WATCH",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "N/A",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "open",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "TESTING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "GREEN",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "OK",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "approved",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "replied",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PASS",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "READY",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "dismissed",
+            "value": "#222B3A"
+          },
+          {
+            "match": "IDLE",
+            "value": "#222B3A"
+          },
+          {
+            "match": "SKIP",
+            "value": "#222B3A"
+          },
+          {
+            "match": "WAIT",
+            "value": "#222B3A"
           }
         ]
       },
@@ -1192,214 +3163,139 @@
     "card_1": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#1B2342",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_1": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 3
       }
     },
     "card_2": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_2": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#00CDAF",
-        "rx": 2
       }
     },
     "card_3": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_3": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#00CDAF",
-        "rx": 2
       }
     },
     "card_4": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_4": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#00CDAF",
-        "rx": 2
       }
     },
     "card_5": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#151D2F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_5": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
       }
     },
     "card_6": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#151D2F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_6": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
       }
     },
     "card_7": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#151D2F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_7": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
       }
     },
     "card_8": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_8": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#00CDAF",
-        "rx": 2
       }
     },
     "card_9": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#151D2F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_9": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
       }
     },
     "pill_10": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#53A051",
-        "rx": 8
+        "fillColor": "#2EA043",
+        "rx": 6
       }
     },
     "pill_11": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#DC4E41",
-        "rx": 8
+        "fillColor": "#1B2438",
+        "rx": 6,
+        "strokeColor": "#34405A",
+        "strokeWidth": 1
       }
     },
     "pill_12": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#7B56DB",
-        "rx": 8
+        "fillColor": "#58A6FF",
+        "rx": 6
       }
     },
     "card_13": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#151D2F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_13": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
       }
     },
     "card_14": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#151D2F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
-      }
-    },
-    "bar_14": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#7B56DB",
-        "rx": 2
       }
     },
     "card_15": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151B2B",
-        "rx": 10,
-        "strokeColor": "#26304A",
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
         "strokeWidth": 1
       }
     },
     "pill_16": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#7B56DB",
-        "rx": 8
+        "fillColor": "#58A6FF",
+        "rx": 6
       }
     }
   },
@@ -1409,7 +3305,7 @@
       "width": 1200,
       "height": 2032,
       "display": "auto-scale",
-      "backgroundColor": "#0B0F19"
+      "backgroundColor": "#151D2F"
     },
     "structure": [
       {
@@ -1423,22 +3319,12 @@
         }
       },
       {
-        "item": "bar_1",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 6,
-          "w": 6,
-          "h": 78
-        }
-      },
-      {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 22,
+          "x": 14,
           "y": 14,
-          "w": 1164,
+          "w": 1172,
           "h": 64
         }
       },
@@ -1450,16 +3336,6 @@
           "y": 96,
           "w": 388,
           "h": 118
-        }
-      },
-      {
-        "item": "bar_2",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 96,
-          "w": 388,
-          "h": 4
         }
       },
       {
@@ -1483,16 +3359,6 @@
         }
       },
       {
-        "item": "bar_3",
-        "type": "block",
-        "position": {
-          "x": 406,
-          "y": 96,
-          "w": 388,
-          "h": 4
-        }
-      },
-      {
         "item": "viz_count",
         "type": "block",
         "position": {
@@ -1510,16 +3376,6 @@
           "y": 96,
           "w": 388,
           "h": 118
-        }
-      },
-      {
-        "item": "bar_4",
-        "type": "block",
-        "position": {
-          "x": 806,
-          "y": 96,
-          "w": 388,
-          "h": 4
         }
       },
       {
@@ -1543,16 +3399,6 @@
         }
       },
       {
-        "item": "bar_5",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 226,
-          "w": 1188,
-          "h": 4
-        }
-      },
-      {
         "item": "viz_findings",
         "type": "block",
         "position": {
@@ -1570,16 +3416,6 @@
           "y": 526,
           "w": 1188,
           "h": 208
-        }
-      },
-      {
-        "item": "bar_6",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 526,
-          "w": 1188,
-          "h": 4
         }
       },
       {
@@ -1603,16 +3439,6 @@
         }
       },
       {
-        "item": "bar_7",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 746,
-          "w": 1188,
-          "h": 4
-        }
-      },
-      {
         "item": "viz_ai_replies",
         "type": "block",
         "position": {
@@ -1630,16 +3456,6 @@
           "y": 916,
           "w": 268,
           "h": 118
-        }
-      },
-      {
-        "item": "bar_8",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 916,
-          "w": 268,
-          "h": 4
         }
       },
       {
@@ -1663,16 +3479,6 @@
         }
       },
       {
-        "item": "bar_9",
-        "type": "block",
-        "position": {
-          "x": 286,
-          "y": 916,
-          "w": 908,
-          "h": 4
-        }
-      },
-      {
         "item": "viz_ai_ask_msg",
         "type": "block",
         "position": {
@@ -1686,60 +3492,60 @@
         "item": "pill_10",
         "type": "block",
         "position": {
-          "x": 70,
-          "y": 1057,
-          "w": 260,
-          "h": 56
+          "x": 100,
+          "y": 1059,
+          "w": 200,
+          "h": 52
         }
       },
       {
         "item": "viz_approve",
         "type": "block",
         "position": {
-          "x": 78,
-          "y": 1061,
-          "w": 244,
-          "h": 48
+          "x": 108,
+          "y": 1063,
+          "w": 184,
+          "h": 44
         }
       },
       {
         "item": "pill_11",
         "type": "block",
         "position": {
-          "x": 470,
-          "y": 1057,
-          "w": 260,
-          "h": 56
+          "x": 500,
+          "y": 1059,
+          "w": 200,
+          "h": 52
         }
       },
       {
         "item": "viz_dismiss",
         "type": "block",
         "position": {
-          "x": 478,
-          "y": 1061,
-          "w": 244,
-          "h": 48
+          "x": 508,
+          "y": 1063,
+          "w": 184,
+          "h": 44
         }
       },
       {
         "item": "pill_12",
         "type": "block",
         "position": {
-          "x": 870,
-          "y": 1057,
-          "w": 260,
-          "h": 56
+          "x": 900,
+          "y": 1059,
+          "w": 200,
+          "h": 52
         }
       },
       {
         "item": "viz_ai_ask",
         "type": "block",
         "position": {
-          "x": 878,
-          "y": 1061,
-          "w": 244,
-          "h": 48
+          "x": 908,
+          "y": 1063,
+          "w": 184,
+          "h": 44
         }
       },
       {
@@ -1750,16 +3556,6 @@
           "y": 1136,
           "w": 1188,
           "h": 118
-        }
-      },
-      {
-        "item": "bar_13",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1136,
-          "w": 1188,
-          "h": 4
         }
       },
       {
@@ -1780,16 +3576,6 @@
           "y": 1266,
           "w": 1188,
           "h": 118
-        }
-      },
-      {
-        "item": "bar_14",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1266,
-          "w": 1188,
-          "h": 4
         }
       },
       {
@@ -1826,20 +3612,20 @@
         "item": "pill_16",
         "type": "block",
         "position": {
-          "x": 70,
-          "y": 1487,
-          "w": 260,
-          "h": 56
+          "x": 100,
+          "y": 1489,
+          "w": 200,
+          "h": 52
         }
       },
       {
         "item": "viz_ai_list_button",
         "type": "block",
         "position": {
-          "x": 78,
-          "y": 1491,
-          "w": 244,
-          "h": 48
+          "x": 108,
+          "y": 1493,
+          "w": 184,
+          "h": 44
         }
       },
       {
