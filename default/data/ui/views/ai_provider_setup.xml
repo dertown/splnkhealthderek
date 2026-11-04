@@ -486,6 +486,10 @@
           "decision": {
             "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          },
+          "recurring": {
+            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -587,6 +591,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "RECURRING",
             "value": "#E3B341"
           },
           {
@@ -717,6 +725,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "RECURRING",
             "value": "#3A2E0C"
           },
           {
@@ -819,6 +831,10 @@
           "decision": {
             "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          },
+          "recurring": {
+            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -920,6 +936,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "RECURRING",
             "value": "#E3B341"
           },
           {
@@ -1050,6 +1070,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "RECURRING",
             "value": "#3A2E0C"
           },
           {
@@ -1160,6 +1184,10 @@
           "decision": {
             "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          },
+          "recurring": {
+            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1261,6 +1289,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "RECURRING",
             "value": "#E3B341"
           },
           {
@@ -1391,6 +1423,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "RECURRING",
             "value": "#3A2E0C"
           },
           {
@@ -1493,6 +1529,10 @@
           "decision": {
             "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          },
+          "recurring": {
+            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1594,6 +1634,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "RECURRING",
             "value": "#E3B341"
           },
           {
@@ -1724,6 +1768,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "RECURRING",
             "value": "#3A2E0C"
           },
           {
@@ -1942,8 +1990,8 @@
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 967,
-      "display": "auto-scale",
+      "height": 1247,
+      "display": "fit-to-width",
       "backgroundColor": "#151D2F"
     },
     "structure": [
@@ -2023,7 +2071,7 @@
         "position": {
           "x": 6,
           "y": 191,
-          "w": 188,
+          "w": 588,
           "h": 128
         }
       },
@@ -2033,7 +2081,7 @@
         "position": {
           "x": 14,
           "y": 199,
-          "w": 172,
+          "w": 572,
           "h": 114
         }
       },
@@ -2041,9 +2089,9 @@
         "item": "card_4",
         "type": "block",
         "position": {
-          "x": 206,
+          "x": 606,
           "y": 191,
-          "w": 188,
+          "w": 588,
           "h": 128
         }
       },
@@ -2051,9 +2099,9 @@
         "item": "viz_conn",
         "type": "block",
         "position": {
-          "x": 214,
+          "x": 614,
           "y": 199,
-          "w": 172,
+          "w": 572,
           "h": 114
         }
       },
@@ -2061,9 +2109,9 @@
         "item": "card_5",
         "type": "block",
         "position": {
-          "x": 406,
-          "y": 191,
-          "w": 388,
+          "x": 6,
+          "y": 331,
+          "w": 1188,
           "h": 128
         }
       },
@@ -2071,9 +2119,9 @@
         "item": "viz_reason",
         "type": "block",
         "position": {
-          "x": 414,
-          "y": 199,
-          "w": 372,
+          "x": 14,
+          "y": 339,
+          "w": 1172,
           "h": 114
         }
       },
@@ -2081,9 +2129,9 @@
         "item": "card_6",
         "type": "block",
         "position": {
-          "x": 806,
-          "y": 191,
-          "w": 388,
+          "x": 6,
+          "y": 471,
+          "w": 1188,
           "h": 128
         }
       },
@@ -2091,9 +2139,9 @@
         "item": "viz_conn_reason",
         "type": "block",
         "position": {
-          "x": 814,
-          "y": 199,
-          "w": 372,
+          "x": 14,
+          "y": 479,
+          "w": 1172,
           "h": 114
         }
       },
@@ -2102,7 +2150,7 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 331,
+          "y": 611,
           "w": 1188,
           "h": 138
         }
@@ -2112,7 +2160,7 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 339,
+          "y": 619,
           "w": 1172,
           "h": 124
         }
@@ -2122,7 +2170,7 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 481,
+          "y": 761,
           "w": 1188,
           "h": 168
         }
@@ -2132,7 +2180,7 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 489,
+          "y": 769,
           "w": 1172,
           "h": 154
         }
@@ -2142,7 +2190,7 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 661,
+          "y": 941,
           "w": 1188,
           "h": 208
         }
@@ -2152,7 +2200,7 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 669,
+          "y": 949,
           "w": 1172,
           "h": 194
         }
@@ -2162,7 +2210,7 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 881,
+          "y": 1161,
           "w": 1188,
           "h": 68
         }
@@ -2172,7 +2220,7 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 889,
+          "y": 1169,
           "w": 1172,
           "h": 54
         }

@@ -68,7 +68,7 @@ ROW_COLORS = [
 # Status words render as tinted pills: bright text on a dark tint of the same hue.
 _PILL_WORDS = {
     "red": ["RED", "ALERT", "HOST DOWN", "DATA SILENT", "HEARTBEAT ONLY", "HIGH", "CLOCK AHEAD", "FAILED", "failed", "FAIL", "MISCONFIG", "STALLED"],
-    "amber": ["YELLOW", "DELAYED", "WARMUP", "WATCH", "N/A", "open", "TESTING", "WAITING"],
+    "amber": ["YELLOW", "DELAYED", "WARMUP", "WATCH", "N/A", "open", "TESTING", "WAITING", "RECURRING"],
     "green": ["GREEN", "OK", "approved", "replied", "PASS", "LOCAL", "READY", "PROVIDER"],
     "grey": ["dismissed", "IDLE", "SKIP", "WAIT"],
 }
@@ -76,7 +76,7 @@ _PILL_INK = {"red": RED, "amber": YELLOW, "green": GREEN, "grey": MUTED}
 _PILL_TINT = {"red": "#3D1418", "amber": "#3A2E0C", "green": "#0F2D1A", "grey": "#222B3A"}
 PILL_TEXT = [{"match": w, "value": _PILL_INK[k]} for k, ws in _PILL_WORDS.items() for w in ws]
 PILL_BG = [{"match": w, "value": _PILL_TINT[k]} for k, ws in _PILL_WORDS.items() for w in ws]
-PILL_COLUMNS = ["severity", "status", "state", "baseline_state", "latency_state", "hec_state", "tile_status", "decision"]
+PILL_COLUMNS = ["severity", "status", "state", "baseline_state", "latency_state", "hec_state", "tile_status", "decision", "recurring"]
 
 
 def model_dropdown_items() -> list[dict]:
@@ -292,6 +292,13 @@ def table(title: str, ds_id: str, rank_field: str = "_color_rank", count: int = 
     }
 
 
+def column_formats(viz: dict, formats: dict) -> None:
+    """Add width and alignment without losing a column's status pill colors."""
+    columns = viz["options"]["columnFormat"]
+    for col, fmt in formats.items():
+        columns[col] = columns.get(col, {}) | fmt
+
+
 def open_dashboard(viz: dict, dashboard: str) -> dict:
     """Clicking the panel opens another dashboard in this app."""
     viz["eventHandlers"] = [
@@ -426,6 +433,7 @@ ACCENT_KPI = BLUE
 ACCENT_TABLE = BLUE
 ACCENT_CHART = BLUE
 ACCENT_GRAPH = BLUE
+CANVAS_W = 1200
 GUTTER = 6
 BAR_H = 4
 # Buttons render as a compact rounded pill centered in their grid cell. The table
@@ -467,11 +475,56 @@ def _accent_for(viz: dict) -> str | None:
     return None
 
 
+def _is_button(viz: dict) -> bool:
+    return viz.get("type") == "splunk.table" and viz.get("options", {}).get("headerVisibility") == "none"
+
+
+def full_width_tables(structure: list, vizzes: dict) -> list:
+    """Give every table its own full-width row.
+
+    Whatever shared a row with a table stretches to fill the row it keeps, and the
+    rows below move down to make room. Buttons stay where they are.
+    """
+    rows: dict[int, list] = {}
+    for block_def in structure:
+        rows.setdefault(block_def["position"]["y"], []).append(block_def)
+    placed: list = []
+    shift = 0
+    for y in sorted(rows):
+        members = sorted(rows[y], key=lambda b: b["position"]["x"])
+        tables = [
+            b for b in members
+            if b.get("type") != "input"
+            and vizzes[b["item"]].get("type") == "splunk.table"
+            and not _is_button(vizzes[b["item"]])
+        ]
+        if not tables or all(b["position"]["w"] >= CANVAS_W for b in tables):
+            for b in members:
+                placed.append(b | {"position": b["position"] | {"y": y + shift}})
+            continue
+        top = y + shift
+        others = [b for b in members if b not in tables]
+        if others:
+            used = sum(b["position"]["w"] for b in others)
+            x = 0
+            for i, b in enumerate(others):
+                w = CANVAS_W - x if i == len(others) - 1 else b["position"]["w"] * CANVAS_W // used
+                placed.append(b | {"position": b["position"] | {"x": x, "y": top, "w": w}})
+                x += w
+            top += max(b["position"]["h"] for b in others)
+        for b in tables:
+            placed.append(b | {"position": b["position"] | {"x": 0, "y": top, "w": CANVAS_W}})
+            top += b["position"]["h"]
+        shift = top - y - max(b["position"]["h"] for b in members)
+    return placed
+
+
 def studio_cards(definition: dict) -> dict:
     layout = definition.get("layout", {})
     if layout.get("type") != "grid":
         return definition
     vizzes = definition.setdefault("visualizations", {})
+    layout["structure"] = full_width_tables(layout.get("structure", []), vizzes)
     for viz in vizzes.values():
         if viz.get("type") in TRANSPARENT_TYPES:
             viz.setdefault("options", {}).setdefault("backgroundColor", "transparent")
@@ -490,8 +543,7 @@ def studio_cards(definition: dict) -> dict:
             structure.append(block(item, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - GUTTER) | {"type": "input"})
             continue
         viz = vizzes[item]
-        is_button = viz.get("type") == "splunk.table" and viz.get("options", {}).get("headerVisibility") == "none"
-        if is_button:
+        if _is_button(viz):
             n += 1
             bw = min(BUTTON_W, w - 2 * GUTTER)
             bx = x + (w - bw) // 2
@@ -527,7 +579,7 @@ def studio_cards(definition: dict) -> dict:
 
     new_layout: dict = {
         "type": "absolute",
-        "options": {"width": 1200, "height": bottom + GUTTER * 2, "display": "auto-scale", "backgroundColor": CANVAS},
+        "options": {"width": CANVAS_W, "height": bottom + GUTTER * 2, "display": "fit-to-width", "backgroundColor": CANVAS},
         "structure": structure,
     }
     if layout.get("globalInputs"):
@@ -1381,11 +1433,19 @@ Q_HEC_STATE = hec_state_core() + r"""
 | sort _color_rank, token_label
 """
 
+# A decision closes a problem for 24 hours. A problem still firing after that is open
+# again and needs a new decision, which resets the clock. The findings search only
+# returns problems firing now, so this never reopens one that has gone away.
+DECISION_STATUS = r"""
+| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at
+| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, "%Y-%m-%d %H:%M:%S")>=86400, 1, 0)
+| eval status=case(reopened=1, "open", rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+""".rstrip()
+
 Q_DQ_AGENT_FINDINGS = dq_agent_findings_core() + r"""
 | eval finding_id=sha256(issue."|".entity)
 | lookup dq_agent_playbooks fix_type OUTPUT playbook_name, likely_cause, confidence, tool_plan, splunk_web_path
-| lookup dq_agent_approvals finding_id OUTPUT decision, decided_at, actor
-| eval status=case(decision="approve", "approved", decision="dismiss", "dismissed", 1=1, "open")
+""".rstrip() + DECISION_STATUS + r"""
 | eval action=if(status="open", "Review", "Resolved")
 | eval agent_thought="OBSERVE: "+issue+" on "+entity+". INVESTIGATE: "+coalesce(tool_plan, "learned baselines")+". TOOLS: fwdType="+coalesce(tool_fwdType, "n/a")+" conn="+coalesce(tool_conn, "n/a")+" err_component="+coalesce(tool_err_component, "none")+" err_count="+coalesce(tostring(tool_err_count), "0")+". HYPOTHESIZE: "+coalesce(likely_cause, "needs human review")+" (confidence "+coalesce(confidence, "n/a")+"). PROPOSE: "+suggested_fix+". ACT: wait for human APPROVE or DISMISS — never change Splunk unattended."
 | eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Reply with root cause, confidence, and step-by-step admin actions. Do not request secrets or HEC token values."
@@ -1742,8 +1802,7 @@ def data_topology() -> dict:
 
 Q_DQ_AGENT_STATUS = r"""
 | eval _gate="$tok_decision$"
-| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
-| eval status=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+""".rstrip() + DECISION_STATUS + r"""
 | where status="open"
 | stats count as issues, count(eval(severity="RED")) as red_issues
 | eval agent_status=case(red_issues>0, "RED", issues>0, "YELLOW", 1=1, "GREEN")
@@ -1791,8 +1850,9 @@ Q_DQ_RECORDED_READ = r"""
 | inputlookup dq_agent_approvals
 | eval _gate="$tok_decision$"
 | where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none" AND finding_id!="placeholder"
-| eval _color_rank=if(decision="approve" OR decision="dismiss", 3, 2)
-| table decided_at, finding_id, decision, actor, _color_rank
+| eval decision_state=if(now()-strptime(decided_at, "%Y-%m-%d %H:%M:%S")>=86400, "reopened: needs a new decision", "current")
+| eval _color_rank=case(decision_state!="current", 2, decision="approve" OR decision="dismiss", 3, 1=1, 2)
+| table decided_at, finding_id, decision, decision_state, actor, _color_rank
 """
 
 Q_DQ_AGENT_ASK = r"""
@@ -1801,16 +1861,29 @@ Q_DQ_AGENT_ASK = r"""
 | where q="all" OR q="" OR like(lower(issue." ".entity." ".coalesce(likely_cause, "")." ".suggested_fix." ".coalesce(fix_type, "")), "%".q."%")
 """
 
+# A problem is RECURRING when an AI suggestion for the same finding_id (issue + entity)
+# was saved at least 24 hours ago. Same-day retries of one incident do not count.
+RECUR_HISTORY = r"""
+| join type=left finding_id [
+    | inputlookup dq_agent_ai_suggestions
+    | where now()-strptime(suggested_at, "%Y-%m-%d %H:%M:%S")>=86400
+    | sort 0 -suggested_at
+    | stats first(suggestion) AS previous_suggestion, first(suggested_at) AS previous_at, last(suggested_at) AS first_suggested_at, count AS earlier_suggestions by finding_id
+]
+| eval recurring=if(isnotnull(first_suggested_at), "RECURRING", "no")
+""".rstrip()
+
 Q_DQ_QUEUE_VIEW = r"""
 | eval _gate="$tok_decision$"
-| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
-| eval status=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+""" .rstrip() + RECUR_HISTORY + r"""
+""".rstrip() + DECISION_STATUS + r"""
+| eval recurring=if(reopened=1, "RECURRING", recurring)
 | eval action=if(status="open", "Select", "Done")
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval fix=coalesce(suggested_fix, "")
 | eval fix=if(len(fix)>80, substr(fix,1,80)."...", fix)
-| eval _ai_brief=ai_brief, _reset_decision="review", _ai_auto="ask"
-| table finding_id, severity, issue, entity, fix, confidence, action, status, _ai_brief, _reset_decision, _ai_auto, _color_rank
+| eval _finding_id=finding_id, _ai_brief=ai_brief, _reset_decision="review", _ai_auto="ask"
+| table severity, issue, entity, fix, recurring, confidence, action, status, _finding_id, _ai_brief, _reset_decision, _ai_auto, _color_rank
 """
 
 Q_DQ_PICKER = r"""
@@ -1822,8 +1895,7 @@ Q_DQ_PICKER = r"""
 Q_DQ_SUGGESTION = r"""
 | where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none" AND finding_id!=""
 | eval _gate="$tok_decision$"
-| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
-| eval status=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+""".rstrip() + DECISION_STATUS + r"""
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval where_to_act=coalesce(splunk_web_path, "Open the matching dashboard in this app")
 | table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank
@@ -1915,16 +1987,21 @@ Q_DQ_AI_ASK_WRITE = r"""
 | eval entity=if(entity="" OR isnull(entity), "none", entity)
 | eval issue=if(issue="" OR isnull(issue), "none", issue)
 | eval ai_brief=if(ai_brief="" OR isnull(ai_brief), "none", ai_brief)
+""".rstrip() + RECUR_HISTORY + r"""
+| eval ai_brief=if(recurring="RECURRING", ai_brief." This problem is recurring. An AI suggestion for it was first saved at ".first_suggested_at.". Most recent earlier suggestion, from ".previous_at.": ".substr(previous_suggestion, 1, 1500)." Say why that fix may not have held and what to do differently.", ai_brief)
+""".rstrip() + DECISION_STATUS + r"""
+| eval ai_brief=if(reopened=1, ai_brief." A person recorded the decision ".rec_decision." on this problem at ".rec_decided_at." and it is still happening.", ai_brief)
+| eval recurring=if(reopened=1, "RECURRING", recurring)
 | eval is_ping=0
 | derekaiping
 | eval status=if(ai_result="replied", "replied", "failed")
 | eval note=if(ai_result="replied", "ask_ai_provider", "ask failed: ".coalesce(ai_error, "no reply"))
 | eval reply=if(ai_result="replied", ai_reply, "none")
-| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply
+| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply, recurring, first_suggested_at, earlier_suggestions, previous_suggestion
 | appendpipe [
     | where status="replied"
     | eval suggested_at=requested_at, suggestion=reply
-    | table suggested_at, finding_id, entity, issue, provider, model, actor, suggestion
+    | table suggested_at, finding_id, entity, issue, provider, model, actor, suggestion, recurring, first_suggested_at, earlier_suggestions, previous_suggestion
     | outputlookup append=true override_if_empty=false dq_agent_ai_suggestions
     | where 1=0
 ]
@@ -1951,8 +2028,9 @@ Q_DQ_AI_LIST = r"""
 | inputlookup dq_agent_ai_suggestions
 | lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision
 | eval decision=case(rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+| eval recurring=coalesce(recurring, "no"), from_ai=provider." / ".model
 | sort 0 -suggested_at
-| table suggested_at, finding_id, entity, issue, suggestion, provider, model, decision
+| table suggested_at, entity, issue, suggestion, recurring, first_suggested_at, from_ai, decision
 | appendpipe [
     | stats count
     | where count=0
@@ -2161,6 +2239,10 @@ Q_DQ_AI_REPLIES = r"""
 | eval _gate="$tok_ai_ask$", finding_id="$tok_finding_id$"
 | eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
 | lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider, model, reply, note AS req_note
+""".rstrip() + RECUR_HISTORY + r"""
+""".rstrip() + DECISION_STATUS + r"""
+| eval recurring=if(reopened=1, "RECURRING", recurring)
+| eval earlier_ai_suggestion=coalesce(previous_at.": ".previous_suggestion, "none")
 | eval ai_suggested_fix=case(
     picked=0, "Select a row in the work queue. The AI suggested fix fills in here automatically.",
     req_status="replied", reply,
@@ -2168,7 +2250,7 @@ Q_DQ_AI_REPLIES = r"""
     1=1, "Asking the AI provider for a suggested fix... If no provider is set, use the playbook fix above.")
 | eval from_ai=if(req_status="replied", provider." / ".model, "none")
 | eval _color_rank=case(req_status="replied", 3, req_status="failed", 1, 1=1, 2)
-| table ai_suggested_fix, from_ai, requested_at, _color_rank
+| table ai_suggested_fix, recurring, earlier_ai_suggestion, first_suggested_at, from_ai, requested_at, _color_rank
 """
 
 
@@ -2184,7 +2266,7 @@ def data_quality_agent() -> dict:
             "type": "drilldown.setToken",
             "options": {
                 "tokens": [
-                    {"token": "tok_finding_id", "key": "row.finding_id.value"},
+                    {"token": "tok_finding_id", "key": "row._finding_id.value"},
                     {"token": "tok_entity", "key": "row.entity.value"},
                     {"token": "tok_issue", "key": "row.issue.value"},
                     {"token": "tok_ai_brief", "key": "row._ai_brief.value"},
@@ -2195,16 +2277,16 @@ def data_quality_agent() -> dict:
         }
     ]
     findings_table["options"]["headerVisibility"] = "fixed"
-    findings_table["options"]["columnFormat"] = {
+    column_formats(findings_table, {
         "severity": {"width": 90, "align": "center"},
-        "issue": {"width": 220},
+        "issue": {"width": 250},
         "entity": {"width": 140},
-        "fix": {"width": 320},
+        "fix": {"width": 340},
+        "recurring": {"width": 110, "align": "center"},
         "confidence": {"width": 80, "align": "center"},
-        "action": {"width": 90, "align": "center"},
-        "status": {"width": 90, "align": "center"},
-        "finding_id": {"width": 80},
-    }
+        "action": {"width": 70, "align": "center"},
+        "status": {"width": 80, "align": "center"},
+    })
     suggestion_table = table(
         "2. This suggestion — why it fired and what to do",
         "ds_dq_selected",
@@ -2220,27 +2302,30 @@ def data_quality_agent() -> dict:
     replies_table = table("3. AI suggested fix — fills in when you select a row", "ds_dq_ai_replies", count=1)
     replies_table.pop("eventHandlers", None)
     replies_table["showLastUpdated"] = False
-    replies_table["options"]["columnFormat"] = {
-        "ai_suggested_fix": {"width": 800},
-        "from_ai": {"width": 160},
-        "requested_at": {"width": 140},
-    }
+    column_formats(replies_table, {
+        "ai_suggested_fix": {"width": 430},
+        "recurring": {"width": 100, "align": "center"},
+        "earlier_ai_suggestion": {"width": 310},
+        "first_suggested_at": {"width": 120},
+        "from_ai": {"width": 100},
+        "requested_at": {"width": 100},
+    })
     ask_msg_table = table("ASK result — waiting or failed", "ds_dq_ai_ask_status", count=1)
     ask_msg_table.pop("eventHandlers", None)
     ask_msg_table["showLastUpdated"] = False
     ai_list_table = table("All AI suggestions — newest first", "ds_dq_ai_list", count=10)
     ai_list_table.pop("eventHandlers", None)
     ai_list_table["hideWhenNoData"] = True
-    ai_list_table["options"]["columnFormat"] = {
-        "suggested_at": {"width": 140},
-        "finding_id": {"width": 80},
-        "entity": {"width": 130},
-        "issue": {"width": 180},
-        "suggestion": {"width": 640},
-        "provider": {"width": 90},
-        "model": {"width": 140},
-        "decision": {"width": 90, "align": "center"},
-    }
+    column_formats(ai_list_table, {
+        "suggested_at": {"width": 130},
+        "entity": {"width": 110},
+        "issue": {"width": 150},
+        "suggestion": {"width": 340},
+        "recurring": {"width": 100, "align": "center"},
+        "first_suggested_at": {"width": 130},
+        "from_ai": {"width": 120},
+        "decision": {"width": 80, "align": "center"},
+    })
     return {
         "title": "Derek+ Data Quality Agent",
         "description": "Click Select, then click APPROVE or DISMISS. That records the decision. Search does not open.",
@@ -2353,6 +2438,9 @@ def data_quality_agent() -> dict:
                 "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. "
                 "Selecting a row asks the saved provider automatically; **ASK AGAIN** retries. Search does not open. "
                 "Every reply is saved; **LIST AI SUGGESTIONS** shows them all. "
+                "**RECURRING** means an AI suggestion for the same issue and entity was saved at least 24 hours ago; "
+                "the earlier suggestion is shown with the new one and sent to the provider. "
+                "A decision closes a problem for 24 hours; one still happening after that reopens for a new decision. "
                 "The API key stays in the AI provider lookup — never in this queue table."
             ),
         },
@@ -2522,7 +2610,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.41"
+APP_VERSION = "1.7.43"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 

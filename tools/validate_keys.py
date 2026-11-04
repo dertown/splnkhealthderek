@@ -389,6 +389,7 @@ def check_search_refs(where: str, query: str, macros: dict, transforms: dict) ->
 # Dashboard Studio
 # ---------------------------------------------------------------------------
 
+MIN_TABLE_W = 1150
 DASH_TOP = {"title", "description", "defaults", "inputs", "dataSources", "visualizations",
             "layout", "applicationProperties", "expressions"}
 DS_KEYS = {"type", "name", "options", "meta"}
@@ -539,6 +540,12 @@ def check_dashboard(path: Path, macros: dict, transforms: dict) -> None:
         for name in CONTEXT_FN_RE.findall(json.dumps(inp.get("options", {}))):
             if name not in ctx:
                 err(loc, f"uses context '{name}' that is not defined")
+
+    for placed in dash.get("layout", {}).get("structure", []):
+        viz = vizzes.get(placed.get("item"), {})
+        if viz.get("type") == "splunk.table" and viz.get("options", {}).get("headerVisibility") != "none":
+            if placed.get("position", {}).get("w", 0) < MIN_TABLE_W:
+                err(where, f"table {placed['item']} must fill the page width (w >= {MIN_TABLE_W})")
 
     for viz_id, viz in vizzes.items():
         loc = f"{where} visualizations.{viz_id}"
