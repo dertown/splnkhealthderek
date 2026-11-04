@@ -135,6 +135,14 @@
         "query": "| eval _gate=\"$tok_cell$|$tok_row_status$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval _now_status=case(\n    \"$tok_row_status$\"!=\"open\" OR finding_id!=\"$tok_finding_id$\", null(),\n    \"$tok_cell$\"=\"approve\", \"approved\",\n    \"$tok_cell$\"=\"dismiss\", \"dismissed\")\n| eval status=coalesce(_now_status, status)\n| fields - _now_status\n| where status=\"open\"\n| stats count as issues, count(eval(severity=\"RED\")) as red_issues\n| eval agent_status=case(red_issues>0, \"RED\", issues>0, \"YELLOW\", 1=1, \"GREEN\")\n| appendpipe [ stats count | where count=0 | eval issues=0, agent_status=\"GREEN\" ]"
       }
     },
+    "ds_dq_config_sample": {
+      "type": "ds.chain",
+      "name": "Sample config",
+      "options": {
+        "extend": "ds_dq_asked",
+        "query": "| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\"\n| lookup dq_agent_config_samples fix_type OUTPUT conf_file, where_it_goes, cloud_note, sample, check_command, check_search\n| where isnotnull(sample)\n| eval safe_entity=replace(entity, \"[^A-Za-z0-9._:/ -]\", \"_\")\n| eval rows=\"File|\".conf_file.\"@@Goes in|\".where_it_goes.\"@@Splunk Cloud|\".cloud_note.\"@@Sample|\".replace(sample, \"@@\", \"@@Sample|\").\"@@Check on the host|\".check_command.\"@@Check in Splunk|\".check_search\n| eval rows=split(replace(rows, \"\\{\\{entity\\}\\}\", safe_entity), \"@@\")\n| mvexpand rows\n| rex field=rows \"^(?<part>[^|]*)\\|(?<text>.*)\"\n| where text!=\"none\"\n| table part, text\n| appendpipe [\n    | stats count\n    | where count=0\n    | eval part=\"Sample\", text=\"Select a row in the work queue to see a sample config for that problem.\"\n    | fields - count\n]\n| eval _color_rank=3"
+      }
+    },
     "ds_dq_selected": {
       "type": "ds.chain",
       "name": "Selected suggestion",
@@ -2825,6 +2833,380 @@
         ]
       }
     },
+    "viz_config_sample": {
+      "type": "splunk.table",
+      "dataSources": {
+        "primary": "ds_dq_config_sample"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "count": 20,
+        "showRowNumbers": false,
+        "showInternalFields": false,
+        "tableFormat": {
+          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)",
+          "headerBackgroundColor": "transparent",
+          "headerColor": "#8B949E"
+        },
+        "columnFormat": {
+          "severity": {
+            "rowColors": "> table | seriesByName(\"severity\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"severity\") | matchValue(pillBg)"
+          },
+          "status": {
+            "rowColors": "> table | seriesByName(\"status\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"status\") | matchValue(pillBg)"
+          },
+          "state": {
+            "rowColors": "> table | seriesByName(\"state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"state\") | matchValue(pillBg)"
+          },
+          "baseline_state": {
+            "rowColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillBg)"
+          },
+          "latency_state": {
+            "rowColors": "> table | seriesByName(\"latency_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"latency_state\") | matchValue(pillBg)"
+          },
+          "hec_state": {
+            "rowColors": "> table | seriesByName(\"hec_state\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"hec_state\") | matchValue(pillBg)"
+          },
+          "tile_status": {
+            "rowColors": "> table | seriesByName(\"tile_status\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"tile_status\") | matchValue(pillBg)"
+          },
+          "decision": {
+            "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          },
+          "recurring": {
+            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
+          },
+          "part": {
+            "width": 160
+          },
+          "text": {
+            "width": 1000
+          }
+        },
+        "backgroundColor": "transparent"
+      },
+      "context": {
+        "rowColors": [
+          {
+            "from": 0,
+            "to": 1.5,
+            "value": "#2A1519"
+          },
+          {
+            "from": 1.5,
+            "to": 2.5,
+            "value": "#262011"
+          },
+          {
+            "from": 2.5,
+            "to": 4,
+            "value": "#151D2F"
+          }
+        ],
+        "pillText": [
+          {
+            "match": "RED",
+            "value": "#F85149"
+          },
+          {
+            "match": "ALERT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#F85149"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#F85149"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#F85149"
+          },
+          {
+            "match": "HIGH",
+            "value": "#F85149"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAILED",
+            "value": "#F85149"
+          },
+          {
+            "match": "failed",
+            "value": "#F85149"
+          },
+          {
+            "match": "FAIL",
+            "value": "#F85149"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#F85149"
+          },
+          {
+            "match": "STALLED",
+            "value": "#F85149"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#E3B341"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WATCH",
+            "value": "#E3B341"
+          },
+          {
+            "match": "N/A",
+            "value": "#E3B341"
+          },
+          {
+            "match": "open",
+            "value": "#E3B341"
+          },
+          {
+            "match": "TESTING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "RECURRING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "GREEN",
+            "value": "#3FB950"
+          },
+          {
+            "match": "OK",
+            "value": "#3FB950"
+          },
+          {
+            "match": "approved",
+            "value": "#3FB950"
+          },
+          {
+            "match": "replied",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PASS",
+            "value": "#3FB950"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#3FB950"
+          },
+          {
+            "match": "READY",
+            "value": "#3FB950"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#3FB950"
+          },
+          {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
+            "match": "dismissed",
+            "value": "#8B949E"
+          },
+          {
+            "match": "IDLE",
+            "value": "#8B949E"
+          },
+          {
+            "match": "SKIP",
+            "value": "#8B949E"
+          },
+          {
+            "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
+            "value": "#8B949E"
+          }
+        ],
+        "pillBg": [
+          {
+            "match": "RED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "ALERT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HOST DOWN",
+            "value": "#3D1418"
+          },
+          {
+            "match": "DATA SILENT",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HEARTBEAT ONLY",
+            "value": "#3D1418"
+          },
+          {
+            "match": "HIGH",
+            "value": "#3D1418"
+          },
+          {
+            "match": "CLOCK AHEAD",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAILED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "failed",
+            "value": "#3D1418"
+          },
+          {
+            "match": "FAIL",
+            "value": "#3D1418"
+          },
+          {
+            "match": "MISCONFIG",
+            "value": "#3D1418"
+          },
+          {
+            "match": "STALLED",
+            "value": "#3D1418"
+          },
+          {
+            "match": "YELLOW",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "DELAYED",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WARMUP",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WATCH",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "N/A",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "open",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "TESTING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "RECURRING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "GREEN",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "OK",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "approved",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "replied",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PASS",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "LOCAL",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "READY",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "PROVIDER",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
+            "match": "dismissed",
+            "value": "#222B3A"
+          },
+          {
+            "match": "IDLE",
+            "value": "#222B3A"
+          },
+          {
+            "match": "SKIP",
+            "value": "#222B3A"
+          },
+          {
+            "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
+            "value": "#222B3A"
+          }
+        ]
+      }
+    },
     "viz_ai_list_button": {
       "type": "splunk.table",
       "title": "",
@@ -3284,7 +3666,7 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "Approve or Dismiss only records a decision. UF, HEC, and index repairs stay runbooks.Selecting a row asks the saved provider automatically; click the **Fix** cell in a row to ask again. Search does not open. Every reply is saved; **LIST AI SUGGESTIONS** shows them all. **RECURRING** means an AI suggestion for the same issue and entity was saved at least 24 hours ago; the earlier suggestion is shown with the new one and sent to the provider. A decision closes a problem for 24 hours; one still happening after that reopens for a new decision. The API key stays in the AI provider lookup \u2014 never in this queue table.",
+        "markdown": "Approve or Dismiss only records a decision. UF, HEC, and index repairs stay runbooks.Selecting a row asks the saved provider automatically; click the **Fix** cell in a row to ask again. Search does not open. Every reply is saved; **LIST AI SUGGESTIONS** shows them all. **RECURRING** means an AI suggestion for the same issue and entity was saved at least 24 hours ago; the earlier suggestion is shown with the new one and sent to the provider. A decision closes a problem for 24 hours; one still happening after that reopens for a new decision. Sample configs are templates to adapt by hand; the app never applies them. The API key stays in the AI provider lookup \u2014 never in this queue table.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -3364,29 +3746,29 @@
         "backgroundColor": "transparent"
       }
     },
-    "card_8": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
-      }
-    },
-    "rule_9": {
+    "rule_8": {
       "type": "splunk.rectangle",
       "options": {
         "fillColor": "#222C41",
         "rx": 0
       }
     },
-    "cap_9": {
+    "cap_8": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "ASK RESULT \u2014 waiting or failed",
+        "markdown": "SAMPLE CONFIG \u2014 replace anything in angle brackets; nothing is applied",
         "fontSize": "small",
         "fontColor": "#8B949E",
         "backgroundColor": "transparent"
+      }
+    },
+    "card_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#0C121F",
+        "rx": 8,
+        "strokeColor": "#222C41",
+        "strokeWidth": 1
       }
     },
     "rule_10": {
@@ -3399,7 +3781,7 @@
     "cap_10": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "RECORDED DECISION",
+        "markdown": "ASK RESULT \u2014 waiting or failed",
         "fontSize": "small",
         "fontColor": "#8B949E",
         "backgroundColor": "transparent"
@@ -3415,13 +3797,29 @@
     "cap_11": {
       "type": "splunk.markdown",
       "options": {
+        "markdown": "RECORDED DECISION",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_12": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_12": {
+      "type": "splunk.markdown",
+      "options": {
         "markdown": "OPTIONAL \u2014 briefing to paste into Splunk AI Assistant",
         "fontSize": "small",
         "fontColor": "#8B949E",
         "backgroundColor": "transparent"
       }
     },
-    "pill_13": {
+    "pill_14": {
       "type": "splunk.rectangle",
       "options": {
         "fillColor": "#58A6FF",
@@ -3433,7 +3831,7 @@
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 2072,
+      "height": 2452,
       "display": "fit-to-width",
       "backgroundColor": "#151D2F"
     },
@@ -3599,11 +3997,41 @@
         }
       },
       {
-        "item": "card_8",
+        "item": "rule_8",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 916,
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_8",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 920,
+          "w": 1176,
+          "h": 24
+        }
+      },
+      {
+        "item": "viz_config_sample",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 944,
+          "w": 1176,
+          "h": 340
+        }
+      },
+      {
+        "item": "card_9",
         "type": "block",
         "position": {
           "x": 6,
-          "y": 916,
+          "y": 1296,
           "w": 1188,
           "h": 118
         }
@@ -3613,39 +4041,9 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 924,
+          "y": 1304,
           "w": 1172,
           "h": 104
-        }
-      },
-      {
-        "item": "rule_9",
-        "type": "block",
-        "position": {
-          "x": 12,
-          "y": 1046,
-          "w": 1176,
-          "h": 1
-        }
-      },
-      {
-        "item": "cap_9",
-        "type": "block",
-        "position": {
-          "x": 12,
-          "y": 1050,
-          "w": 1176,
-          "h": 24
-        }
-      },
-      {
-        "item": "viz_ai_ask_msg",
-        "type": "block",
-        "position": {
-          "x": 12,
-          "y": 1074,
-          "w": 1176,
-          "h": 90
         }
       },
       {
@@ -3653,7 +4051,7 @@
         "type": "block",
         "position": {
           "x": 12,
-          "y": 1176,
+          "y": 1426,
           "w": 1176,
           "h": 1
         }
@@ -3663,17 +4061,17 @@
         "type": "block",
         "position": {
           "x": 12,
-          "y": 1180,
+          "y": 1430,
           "w": 1176,
           "h": 24
         }
       },
       {
-        "item": "viz_recorded",
+        "item": "viz_ai_ask_msg",
         "type": "block",
         "position": {
           "x": 12,
-          "y": 1204,
+          "y": 1454,
           "w": 1176,
           "h": 90
         }
@@ -3683,7 +4081,7 @@
         "type": "block",
         "position": {
           "x": 12,
-          "y": 1306,
+          "y": 1556,
           "w": 1176,
           "h": 1
         }
@@ -3693,7 +4091,37 @@
         "type": "block",
         "position": {
           "x": 12,
-          "y": 1310,
+          "y": 1560,
+          "w": 1176,
+          "h": 24
+        }
+      },
+      {
+        "item": "viz_recorded",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1584,
+          "w": 1176,
+          "h": 90
+        }
+      },
+      {
+        "item": "rule_12",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1686,
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_12",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1690,
           "w": 1176,
           "h": 24
         }
@@ -3703,7 +4131,7 @@
         "type": "block",
         "position": {
           "x": 12,
-          "y": 1334,
+          "y": 1714,
           "w": 1176,
           "h": 90
         }
@@ -3713,17 +4141,17 @@
         "type": "block",
         "position": {
           "x": 12,
-          "y": 1436,
+          "y": 1816,
           "w": 1176,
           "h": 68
         }
       },
       {
-        "item": "pill_13",
+        "item": "pill_14",
         "type": "block",
         "position": {
           "x": 100,
-          "y": 1529,
+          "y": 1909,
           "w": 200,
           "h": 52
         }
@@ -3733,7 +4161,7 @@
         "type": "block",
         "position": {
           "x": 108,
-          "y": 1533,
+          "y": 1913,
           "w": 184,
           "h": 44
         }
@@ -3743,7 +4171,7 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 1606,
+          "y": 1986,
           "w": 1188,
           "h": 448
         }

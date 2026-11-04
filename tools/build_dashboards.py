@@ -1926,6 +1926,29 @@ Q_DQ_SUGGESTION = r"""
 | table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank
 """
 
+# One table row per line so the sample reads top to bottom. Samples are templates that
+# a human adapts; nothing here writes config. The entity comes from event data, so it
+# is reduced to safe characters before it goes into a template.
+Q_DQ_CONFIG_SAMPLE = r"""
+| where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none"
+| lookup dq_agent_config_samples fix_type OUTPUT conf_file, where_it_goes, cloud_note, sample, check_command, check_search
+| where isnotnull(sample)
+| eval safe_entity=replace(entity, "[^A-Za-z0-9._:/ -]", "_")
+| eval rows="File|".conf_file."@@Goes in|".where_it_goes."@@Splunk Cloud|".cloud_note."@@Sample|".replace(sample, "@@", "@@Sample|")."@@Check on the host|".check_command."@@Check in Splunk|".check_search
+| eval rows=split(replace(rows, "\{\{entity\}\}", safe_entity), "@@")
+| mvexpand rows
+| rex field=rows "^(?<part>[^|]*)\|(?<text>.*)"
+| where text!="none"
+| table part, text
+| appendpipe [
+    | stats count
+    | where count=0
+    | eval part="Sample", text="Select a row in the work queue to see a sample config for that problem."
+    | fields - count
+]
+| eval _color_rank=3
+"""
+
 Q_DQ_AI_CFG_ROW = r"""
 | makeresults
 | eval stanza="default", mode="off", provider="none", model="none", endpoint="none", api_key="none", inbox_index="_internal", inbox_sourcetype="derek_health_ai_unconfigured", updated_by="system", updated_at="0", note="seed", _seed=1
@@ -2324,6 +2347,10 @@ def data_quality_agent() -> dict:
     ask_msg_table = table("ASK RESULT — waiting or failed", "ds_dq_ai_ask_status", count=1)
     ask_msg_table.pop("eventHandlers", None)
     ask_msg_table["showLastUpdated"] = False
+    sample_table = table("SAMPLE CONFIG — replace anything in angle brackets; nothing is applied", "ds_dq_config_sample", count=20)
+    sample_table.pop("eventHandlers", None)
+    sample_table["showLastUpdated"] = False
+    column_formats(sample_table, {"part": {"width": 160}, "text": {"width": 1000}})
     ai_list_table = table("ALL AI SUGGESTIONS — newest first", "ds_dq_ai_list", count=10)
     ai_list_table.pop("eventHandlers", None)
     ai_list_table["hideWhenNoData"] = True
@@ -2394,6 +2421,7 @@ def data_quality_agent() -> dict:
             "ds_dq_asked": chain("Asked findings", "ds_dq_findings", Q_DQ_AGENT_ASK),
             "ds_dq_queue": chain("Work queue", "ds_dq_asked", Q_DQ_QUEUE_VIEW),
             "ds_dq_status": chain("Agent status", "ds_dq_asked", Q_DQ_AGENT_STATUS),
+            "ds_dq_config_sample": chain("Sample config", "ds_dq_asked", Q_DQ_CONFIG_SAMPLE),
             "ds_dq_selected": chain("Selected suggestion", "ds_dq_asked", Q_DQ_SUGGESTION),
             "ds_dq_brief": chain(
                 "AI briefing",
@@ -2441,6 +2469,7 @@ def data_quality_agent() -> dict:
             "viz_ai_ask_state": single_status("ASK status", "ds_dq_ai_ask_status", "ask_state", "ask_state"),
             "viz_ai_ask_msg": ask_msg_table,
             "viz_ai_replies": replies_table,
+            "viz_config_sample": sample_table,
             "viz_ai_list_button": decision_button("", "ds_dq_ai_list_button", token="tok_ai_list", fill=BLUE),
             "viz_ai_list": ai_list_table,
             "viz_footer": md(
@@ -2450,6 +2479,7 @@ def data_quality_agent() -> dict:
                 "**RECURRING** means an AI suggestion for the same issue and entity was saved at least 24 hours ago; "
                 "the earlier suggestion is shown with the new one and sent to the provider. "
                 "A decision closes a problem for 24 hours; one still happening after that reopens for a new decision. "
+                "Sample configs are templates to adapt by hand; the app never applies them. "
                 "The API key stays in the AI provider lookup — never in this queue table."
             ),
         },
@@ -2462,13 +2492,14 @@ def data_quality_agent() -> dict:
                 block("viz_findings", 0, 220, 1200, 300),
                 block("viz_selected", 0, 520, 1200, 220),
                 block("viz_ai_replies", 0, 740, 1200, 170),
-                block("viz_ai_ask_state", 0, 910, 280, 130),
-                block("viz_ai_ask_msg", 280, 910, 920, 130),
-                block("viz_recorded", 0, 1040, 1200, 130),
-                block("viz_brief", 0, 1170, 1200, 130),
-                block("viz_footer", 0, 1300, 1200, 80),
-                block("viz_ai_list_button", 0, 1380, 400, 90),
-                block("viz_ai_list", 0, 1470, 1200, 460),
+                block("viz_config_sample", 0, 910, 1200, 380),
+                block("viz_ai_ask_state", 0, 1290, 280, 130),
+                block("viz_ai_ask_msg", 280, 1290, 920, 130),
+                block("viz_recorded", 0, 1420, 1200, 130),
+                block("viz_brief", 0, 1550, 1200, 130),
+                block("viz_footer", 0, 1680, 1200, 80),
+                block("viz_ai_list_button", 0, 1760, 400, 90),
+                block("viz_ai_list", 0, 1850, 1200, 460),
             ],
             extra_inputs=[
                 "input_ask",
@@ -2616,7 +2647,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.47"
+APP_VERSION = "1.7.48"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 

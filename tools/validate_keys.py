@@ -221,6 +221,44 @@ def check_transforms() -> dict:
 COLLECTION_KEYS = {"enforceTypes", "replicate", "profilingEnabled", "profilingAllowed"}
 
 
+SAMPLE_COLUMNS = ["fix_type", "conf_file", "where_it_goes", "cloud_note", "sample", "check_command", "check_search"]
+GUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+SECRET_LINE_RE = re.compile(r"(token|password|pass4SymmKey|sslPassword|api_key)\s*=\s*([^@\s]+)", re.I)
+
+
+def check_config_samples() -> None:
+    """Every playbook has one sample, and samples carry placeholders, never secrets."""
+    where = "dq_agent_config_samples.csv"
+    path = ROOT / "lookups" / where
+    if not path.is_file():
+        err(where, "missing")
+        return
+    with path.open(newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        rows = list(reader)
+        if reader.fieldnames != SAMPLE_COLUMNS:
+            err(where, f"columns must be {SAMPLE_COLUMNS}")
+            return
+    with (ROOT / "lookups" / "dq_agent_playbooks.csv").open(newline="", encoding="utf-8") as fh:
+        playbooks = {row["fix_type"] for row in csv.DictReader(fh)}
+    seen = [row["fix_type"] for row in rows]
+    for fix_type in sorted(playbooks - set(seen)):
+        err(where, f"no sample for fix_type {fix_type}")
+    for fix_type in sorted(set(seen) - playbooks):
+        err(where, f"fix_type {fix_type} is not in dq_agent_playbooks.csv")
+    for fix_type in sorted({f for f in seen if seen.count(f) > 1}):
+        err(where, f"fix_type {fix_type} has more than one row")
+    for row in rows:
+        for col in SAMPLE_COLUMNS:
+            if not row[col].strip():
+                err(where, f"{row['fix_type']}: {col} is empty")
+            if GUID_RE.search(row[col]):
+                err(where, f"{row['fix_type']}: {col} contains what looks like a real token")
+        for _, value in SECRET_LINE_RE.findall(row["sample"]):
+            if not (value.startswith("<") and value.endswith(">")):
+                err(where, f"{row['fix_type']}: secret value must be a <PLACEHOLDER>, found {value!r}")
+
+
 def check_collections() -> None:
     path = DEFAULT / "collections.conf"
     if not path.is_file():
@@ -668,6 +706,7 @@ def main() -> int:
     saved = check_savedsearches()
     check_commands_conf()
     check_collections()
+    check_config_samples()
     check_meta()
     check_manifest(app_conf)
     check_nav()
