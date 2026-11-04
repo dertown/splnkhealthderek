@@ -121,15 +121,6 @@
         "query": "| stats dc(data_source) as forwarders, dc(receiver) as receivers, sum(kb) as kb"
       }
     },
-    "ds_top_indexes": {
-      "type": "ds.search",
-      "name": "Top indexes by GB",
-      "options": {
-        "query": "search `exec_health_license_usage`\n| eval GB=round(b/1024/1024/1024, 3)\n| stats sum(GB) as GB by idx\n| rename idx as index\n| sort 0 -GB\n| head 20\n| eval _color_rank=3",
-        "refresh": "5m",
-        "refreshType": "delay"
-      }
-    },
     "ds_topo_link": {
       "type": "ds.chain",
       "name": "Indexed topology nodes only",
@@ -143,7 +134,7 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Data topology\nHow servers and data sources reach Splunk: **data source \u2192 ingest path \u2192 index**, plus **forwarder \u2192 indexer** from `_internal` `tcpin_connections`. **Click a data_source** in the graph or table for latest event, totals, 24-hour trend, and sudden drops or bursts. Search does not open.",
+        "markdown": "# Data topology\nHow servers and data sources reach Splunk: **data source \u2192 ingest path \u2192 index**, plus **forwarder \u2192 indexer** from `_internal` `tcpin_connections`. **Click a data_source** in the flow diagram or the forwarder table for latest event, totals, 24-hour trend, and sudden drops or bursts. Search does not open.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -226,7 +217,6 @@
     },
     "viz_link": {
       "type": "splunk.linkgraph",
-      "title": "Sources \u2192 ingest path \u2192 Splunk index",
       "dataSources": {
         "primary": "ds_topo_link"
       },
@@ -265,7 +255,6 @@
     },
     "viz_sankey": {
       "type": "splunk.sankey",
-      "title": "Volume flow (events) through ingest paths",
       "dataSources": {
         "primary": "ds_topo_sankey"
       },
@@ -284,718 +273,6 @@
         "backgroundColor": "transparent"
       }
     },
-    "viz_top_indexes": {
-      "type": "splunk.table",
-      "title": "Top indexes by license usage (GB)",
-      "dataSources": {
-        "primary": "ds_top_indexes"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": true,
-      "options": {
-        "count": 15,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)",
-          "headerBackgroundColor": "transparent",
-          "headerColor": "#8B949E"
-        },
-        "columnFormat": {
-          "severity": {
-            "rowColors": "> table | seriesByName(\"severity\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"severity\") | matchValue(pillBg)"
-          },
-          "status": {
-            "rowColors": "> table | seriesByName(\"status\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"status\") | matchValue(pillBg)"
-          },
-          "state": {
-            "rowColors": "> table | seriesByName(\"state\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"state\") | matchValue(pillBg)"
-          },
-          "baseline_state": {
-            "rowColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillBg)"
-          },
-          "latency_state": {
-            "rowColors": "> table | seriesByName(\"latency_state\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"latency_state\") | matchValue(pillBg)"
-          },
-          "hec_state": {
-            "rowColors": "> table | seriesByName(\"hec_state\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"hec_state\") | matchValue(pillBg)"
-          },
-          "tile_status": {
-            "rowColors": "> table | seriesByName(\"tile_status\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"tile_status\") | matchValue(pillBg)"
-          },
-          "decision": {
-            "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
-          },
-          "recurring": {
-            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
-          }
-        },
-        "backgroundColor": "transparent"
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#2A1519"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#262011"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#151D2F"
-          }
-        ],
-        "pillText": [
-          {
-            "match": "RED",
-            "value": "#F85149"
-          },
-          {
-            "match": "ALERT",
-            "value": "#F85149"
-          },
-          {
-            "match": "HOST DOWN",
-            "value": "#F85149"
-          },
-          {
-            "match": "DATA SILENT",
-            "value": "#F85149"
-          },
-          {
-            "match": "HEARTBEAT ONLY",
-            "value": "#F85149"
-          },
-          {
-            "match": "HIGH",
-            "value": "#F85149"
-          },
-          {
-            "match": "CLOCK AHEAD",
-            "value": "#F85149"
-          },
-          {
-            "match": "FAILED",
-            "value": "#F85149"
-          },
-          {
-            "match": "failed",
-            "value": "#F85149"
-          },
-          {
-            "match": "FAIL",
-            "value": "#F85149"
-          },
-          {
-            "match": "MISCONFIG",
-            "value": "#F85149"
-          },
-          {
-            "match": "STALLED",
-            "value": "#F85149"
-          },
-          {
-            "match": "YELLOW",
-            "value": "#E3B341"
-          },
-          {
-            "match": "DELAYED",
-            "value": "#E3B341"
-          },
-          {
-            "match": "WARMUP",
-            "value": "#E3B341"
-          },
-          {
-            "match": "WATCH",
-            "value": "#E3B341"
-          },
-          {
-            "match": "N/A",
-            "value": "#E3B341"
-          },
-          {
-            "match": "open",
-            "value": "#E3B341"
-          },
-          {
-            "match": "TESTING",
-            "value": "#E3B341"
-          },
-          {
-            "match": "WAITING",
-            "value": "#E3B341"
-          },
-          {
-            "match": "RECURRING",
-            "value": "#E3B341"
-          },
-          {
-            "match": "GREEN",
-            "value": "#3FB950"
-          },
-          {
-            "match": "OK",
-            "value": "#3FB950"
-          },
-          {
-            "match": "approved",
-            "value": "#3FB950"
-          },
-          {
-            "match": "replied",
-            "value": "#3FB950"
-          },
-          {
-            "match": "PASS",
-            "value": "#3FB950"
-          },
-          {
-            "match": "LOCAL",
-            "value": "#3FB950"
-          },
-          {
-            "match": "READY",
-            "value": "#3FB950"
-          },
-          {
-            "match": "PROVIDER",
-            "value": "#3FB950"
-          },
-          {
-            "match": "dismissed",
-            "value": "#8B949E"
-          },
-          {
-            "match": "IDLE",
-            "value": "#8B949E"
-          },
-          {
-            "match": "SKIP",
-            "value": "#8B949E"
-          },
-          {
-            "match": "WAIT",
-            "value": "#8B949E"
-          }
-        ],
-        "pillBg": [
-          {
-            "match": "RED",
-            "value": "#3D1418"
-          },
-          {
-            "match": "ALERT",
-            "value": "#3D1418"
-          },
-          {
-            "match": "HOST DOWN",
-            "value": "#3D1418"
-          },
-          {
-            "match": "DATA SILENT",
-            "value": "#3D1418"
-          },
-          {
-            "match": "HEARTBEAT ONLY",
-            "value": "#3D1418"
-          },
-          {
-            "match": "HIGH",
-            "value": "#3D1418"
-          },
-          {
-            "match": "CLOCK AHEAD",
-            "value": "#3D1418"
-          },
-          {
-            "match": "FAILED",
-            "value": "#3D1418"
-          },
-          {
-            "match": "failed",
-            "value": "#3D1418"
-          },
-          {
-            "match": "FAIL",
-            "value": "#3D1418"
-          },
-          {
-            "match": "MISCONFIG",
-            "value": "#3D1418"
-          },
-          {
-            "match": "STALLED",
-            "value": "#3D1418"
-          },
-          {
-            "match": "YELLOW",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "DELAYED",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "WARMUP",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "WATCH",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "N/A",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "open",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "TESTING",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "WAITING",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "RECURRING",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "GREEN",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "OK",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "approved",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "replied",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "PASS",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "LOCAL",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "READY",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "PROVIDER",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "dismissed",
-            "value": "#222B3A"
-          },
-          {
-            "match": "IDLE",
-            "value": "#222B3A"
-          },
-          {
-            "match": "SKIP",
-            "value": "#222B3A"
-          },
-          {
-            "match": "WAIT",
-            "value": "#222B3A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.linkToSearch",
-          "options": {
-            "type": "auto",
-            "newTab": true
-          }
-        }
-      ]
-    },
-    "viz_table": {
-      "type": "splunk.table",
-      "title": "Top source \u2192 path \u2192 index flows \u2014 click data_source",
-      "dataSources": {
-        "primary": "ds_topo_paths"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": true,
-      "options": {
-        "count": 20,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_color_rank\") | rangeValue(rowColors)",
-          "headerBackgroundColor": "transparent",
-          "headerColor": "#8B949E"
-        },
-        "columnFormat": {
-          "severity": {
-            "rowColors": "> table | seriesByName(\"severity\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"severity\") | matchValue(pillBg)"
-          },
-          "status": {
-            "rowColors": "> table | seriesByName(\"status\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"status\") | matchValue(pillBg)"
-          },
-          "state": {
-            "rowColors": "> table | seriesByName(\"state\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"state\") | matchValue(pillBg)"
-          },
-          "baseline_state": {
-            "rowColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"baseline_state\") | matchValue(pillBg)"
-          },
-          "latency_state": {
-            "rowColors": "> table | seriesByName(\"latency_state\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"latency_state\") | matchValue(pillBg)"
-          },
-          "hec_state": {
-            "rowColors": "> table | seriesByName(\"hec_state\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"hec_state\") | matchValue(pillBg)"
-          },
-          "tile_status": {
-            "rowColors": "> table | seriesByName(\"tile_status\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"tile_status\") | matchValue(pillBg)"
-          },
-          "decision": {
-            "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
-          },
-          "recurring": {
-            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
-            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
-          }
-        },
-        "backgroundColor": "transparent"
-      },
-      "context": {
-        "rowColors": [
-          {
-            "from": 0,
-            "to": 1.5,
-            "value": "#2A1519"
-          },
-          {
-            "from": 1.5,
-            "to": 2.5,
-            "value": "#262011"
-          },
-          {
-            "from": 2.5,
-            "to": 4,
-            "value": "#151D2F"
-          }
-        ],
-        "pillText": [
-          {
-            "match": "RED",
-            "value": "#F85149"
-          },
-          {
-            "match": "ALERT",
-            "value": "#F85149"
-          },
-          {
-            "match": "HOST DOWN",
-            "value": "#F85149"
-          },
-          {
-            "match": "DATA SILENT",
-            "value": "#F85149"
-          },
-          {
-            "match": "HEARTBEAT ONLY",
-            "value": "#F85149"
-          },
-          {
-            "match": "HIGH",
-            "value": "#F85149"
-          },
-          {
-            "match": "CLOCK AHEAD",
-            "value": "#F85149"
-          },
-          {
-            "match": "FAILED",
-            "value": "#F85149"
-          },
-          {
-            "match": "failed",
-            "value": "#F85149"
-          },
-          {
-            "match": "FAIL",
-            "value": "#F85149"
-          },
-          {
-            "match": "MISCONFIG",
-            "value": "#F85149"
-          },
-          {
-            "match": "STALLED",
-            "value": "#F85149"
-          },
-          {
-            "match": "YELLOW",
-            "value": "#E3B341"
-          },
-          {
-            "match": "DELAYED",
-            "value": "#E3B341"
-          },
-          {
-            "match": "WARMUP",
-            "value": "#E3B341"
-          },
-          {
-            "match": "WATCH",
-            "value": "#E3B341"
-          },
-          {
-            "match": "N/A",
-            "value": "#E3B341"
-          },
-          {
-            "match": "open",
-            "value": "#E3B341"
-          },
-          {
-            "match": "TESTING",
-            "value": "#E3B341"
-          },
-          {
-            "match": "WAITING",
-            "value": "#E3B341"
-          },
-          {
-            "match": "RECURRING",
-            "value": "#E3B341"
-          },
-          {
-            "match": "GREEN",
-            "value": "#3FB950"
-          },
-          {
-            "match": "OK",
-            "value": "#3FB950"
-          },
-          {
-            "match": "approved",
-            "value": "#3FB950"
-          },
-          {
-            "match": "replied",
-            "value": "#3FB950"
-          },
-          {
-            "match": "PASS",
-            "value": "#3FB950"
-          },
-          {
-            "match": "LOCAL",
-            "value": "#3FB950"
-          },
-          {
-            "match": "READY",
-            "value": "#3FB950"
-          },
-          {
-            "match": "PROVIDER",
-            "value": "#3FB950"
-          },
-          {
-            "match": "dismissed",
-            "value": "#8B949E"
-          },
-          {
-            "match": "IDLE",
-            "value": "#8B949E"
-          },
-          {
-            "match": "SKIP",
-            "value": "#8B949E"
-          },
-          {
-            "match": "WAIT",
-            "value": "#8B949E"
-          }
-        ],
-        "pillBg": [
-          {
-            "match": "RED",
-            "value": "#3D1418"
-          },
-          {
-            "match": "ALERT",
-            "value": "#3D1418"
-          },
-          {
-            "match": "HOST DOWN",
-            "value": "#3D1418"
-          },
-          {
-            "match": "DATA SILENT",
-            "value": "#3D1418"
-          },
-          {
-            "match": "HEARTBEAT ONLY",
-            "value": "#3D1418"
-          },
-          {
-            "match": "HIGH",
-            "value": "#3D1418"
-          },
-          {
-            "match": "CLOCK AHEAD",
-            "value": "#3D1418"
-          },
-          {
-            "match": "FAILED",
-            "value": "#3D1418"
-          },
-          {
-            "match": "failed",
-            "value": "#3D1418"
-          },
-          {
-            "match": "FAIL",
-            "value": "#3D1418"
-          },
-          {
-            "match": "MISCONFIG",
-            "value": "#3D1418"
-          },
-          {
-            "match": "STALLED",
-            "value": "#3D1418"
-          },
-          {
-            "match": "YELLOW",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "DELAYED",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "WARMUP",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "WATCH",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "N/A",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "open",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "TESTING",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "WAITING",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "RECURRING",
-            "value": "#3A2E0C"
-          },
-          {
-            "match": "GREEN",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "OK",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "approved",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "replied",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "PASS",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "LOCAL",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "READY",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "PROVIDER",
-            "value": "#0F2D1A"
-          },
-          {
-            "match": "dismissed",
-            "value": "#222B3A"
-          },
-          {
-            "match": "IDLE",
-            "value": "#222B3A"
-          },
-          {
-            "match": "SKIP",
-            "value": "#222B3A"
-          },
-          {
-            "match": "WAIT",
-            "value": "#222B3A"
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.setToken",
-          "options": {
-            "tokens": [
-              {
-                "token": "tok_data_source",
-                "key": "row.data_source.value"
-              }
-            ]
-          }
-        }
-      ]
-    },
     "viz_src_header": {
       "type": "splunk.markdown",
       "options": {
@@ -1006,7 +283,6 @@
     },
     "viz_src_stats": {
       "type": "splunk.table",
-      "title": "First event, latest event, and totals",
       "dataSources": {
         "primary": "ds_topo_src_stats"
       },
@@ -1057,6 +333,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1197,6 +481,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1210,6 +498,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -1331,6 +623,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -1344,6 +640,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -1360,7 +660,6 @@
     },
     "viz_src_trend": {
       "type": "splunk.line",
-      "title": "Event trend vs 24-hour mean and 2\u03c3 bounds",
       "dataSources": {
         "primary": "ds_topo_src_trend"
       },
@@ -1384,7 +683,6 @@
     },
     "viz_src_outliers": {
       "type": "splunk.table",
-      "title": "Sudden drops and traffic bursts (2\u03c3)",
       "dataSources": {
         "primary": "ds_topo_src_outliers"
       },
@@ -1435,6 +733,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1575,6 +881,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1588,6 +898,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -1709,6 +1023,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -1722,6 +1040,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -1738,7 +1060,6 @@
     },
     "viz_tcpin_sankey": {
       "type": "splunk.sankey",
-      "title": "Forwarder \u2192 indexer volume (KB)",
       "dataSources": {
         "primary": "ds_tcpin_sankey"
       },
@@ -1759,7 +1080,6 @@
     },
     "viz_tcpin_table": {
       "type": "splunk.table",
-      "title": "Forwarder connections (metrics.log tcpin) \u2014 click data_source",
       "dataSources": {
         "primary": "ds_tcpin"
       },
@@ -1810,6 +1130,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1950,6 +1278,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1963,6 +1295,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -2084,6 +1420,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -2097,6 +1437,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -2121,15 +1465,6 @@
         "markdown": "Ingest path: **Windows UF** / **Linux UF** / **HF** from `tcpin_connections` `fwdType` plus Windows vs Linux sourcetype. **Other** uses **TCP:port** or **UDP:port** from `source` (for example `udp:514`) or from `_internal` `udpin_connections` / raw TCP. HEC, SC4S, and Edge stay as their own paths; per-token detail is on **HEC Token Performance**. Source drill-down is `tstats` by `host`. Narrow `exec_health_idx` if the source list is too large.",
         "fontSize": "default",
         "backgroundColor": "transparent"
-      }
-    },
-    "card_1": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
       }
     },
     "card_2": {
@@ -2168,103 +1503,116 @@
         "strokeWidth": 1
       }
     },
-    "card_6": {
+    "rule_6": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_7": {
-      "type": "splunk.rectangle",
+    "cap_6": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Top source \u2192 path \u2192 index flows \u2014 click data_source",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_8": {
+    "rule_7": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_9": {
-      "type": "splunk.rectangle",
+    "cap_7": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Volume flow (events) through ingest paths",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_10": {
+    "rule_9": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_11": {
-      "type": "splunk.rectangle",
+    "cap_9": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "First event, latest event, and totals",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_12": {
+    "rule_10": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_13": {
-      "type": "splunk.rectangle",
+    "cap_10": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Event trend vs 24-hour mean and 2\u03c3 bounds",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_14": {
+    "rule_11": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_15": {
-      "type": "splunk.rectangle",
+    "cap_11": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Sudden drops and traffic bursts (2\u03c3)",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_16": {
+    "rule_12": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_12": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Forwarder \u2192 indexer volume (KB)",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_13": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_13": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Forwarder connections (metrics.log tcpin) \u2014 click data_source",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     }
   },
@@ -2272,29 +1620,19 @@
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 3012,
+      "height": 2452,
       "display": "fit-to-width",
       "backgroundColor": "#151D2F"
     },
     "structure": [
       {
-        "item": "card_1",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 6,
-          "w": 1188,
-          "h": 78
-        }
-      },
-      {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 14,
-          "w": 1172,
-          "h": 64
+          "x": 12,
+          "y": 6,
+          "w": 1176,
+          "h": 78
         }
       },
       {
@@ -2378,223 +1716,233 @@
         }
       },
       {
-        "item": "card_6",
+        "item": "rule_6",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 236,
-          "w": 1188,
-          "h": 368
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_6",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 240,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_link",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 244,
-          "w": 1172,
-          "h": 354
+          "x": 12,
+          "y": 264,
+          "w": 1176,
+          "h": 380
         }
       },
       {
-        "item": "card_7",
+        "item": "rule_7",
         "type": "block",
         "position": {
-          "x": 6,
-          "y": 616,
-          "w": 1188,
-          "h": 308
+          "x": 12,
+          "y": 656,
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_7",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 660,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_sankey",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 624,
-          "w": 1172,
-          "h": 294
-        }
-      },
-      {
-        "item": "card_8",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 936,
-          "w": 1188,
-          "h": 308
-        }
-      },
-      {
-        "item": "viz_top_indexes",
-        "type": "block",
-        "position": {
-          "x": 14,
-          "y": 944,
-          "w": 1172,
-          "h": 294
-        }
-      },
-      {
-        "item": "card_9",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1256,
-          "w": 1188,
-          "h": 268
-        }
-      },
-      {
-        "item": "viz_table",
-        "type": "block",
-        "position": {
-          "x": 14,
-          "y": 1264,
-          "w": 1172,
-          "h": 254
-        }
-      },
-      {
-        "item": "card_10",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1536,
-          "w": 1188,
-          "h": 78
+          "x": 12,
+          "y": 684,
+          "w": 1176,
+          "h": 280
         }
       },
       {
         "item": "viz_src_header",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1544,
-          "w": 1172,
-          "h": 64
+          "x": 12,
+          "y": 976,
+          "w": 1176,
+          "h": 78
         }
       },
       {
-        "item": "card_11",
+        "item": "rule_9",
         "type": "block",
         "position": {
-          "x": 6,
-          "y": 1626,
-          "w": 1188,
-          "h": 138
+          "x": 12,
+          "y": 1066,
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_9",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1070,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_src_stats",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1634,
-          "w": 1172,
-          "h": 124
+          "x": 12,
+          "y": 1094,
+          "w": 1176,
+          "h": 110
         }
       },
       {
-        "item": "card_12",
+        "item": "rule_10",
         "type": "block",
         "position": {
-          "x": 6,
-          "y": 1776,
-          "w": 1188,
-          "h": 268
+          "x": 12,
+          "y": 1216,
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_10",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1220,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_src_trend",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1784,
-          "w": 1172,
-          "h": 254
+          "x": 12,
+          "y": 1244,
+          "w": 1176,
+          "h": 240
         }
       },
       {
-        "item": "card_13",
+        "item": "rule_11",
         "type": "block",
         "position": {
-          "x": 6,
-          "y": 2056,
-          "w": 1188,
-          "h": 248
+          "x": 12,
+          "y": 1496,
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_11",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1500,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_src_outliers",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 2064,
-          "w": 1172,
-          "h": 234
+          "x": 12,
+          "y": 1524,
+          "w": 1176,
+          "h": 220
         }
       },
       {
-        "item": "card_14",
+        "item": "rule_12",
         "type": "block",
         "position": {
-          "x": 6,
-          "y": 2316,
-          "w": 1188,
-          "h": 288
+          "x": 12,
+          "y": 1756,
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_12",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1760,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_tcpin_sankey",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 2324,
-          "w": 1172,
-          "h": 274
+          "x": 12,
+          "y": 1784,
+          "w": 1176,
+          "h": 260
         }
       },
       {
-        "item": "card_15",
+        "item": "rule_13",
         "type": "block",
         "position": {
-          "x": 6,
-          "y": 2616,
-          "w": 1188,
-          "h": 268
+          "x": 12,
+          "y": 2056,
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_13",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 2060,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_tcpin_table",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 2624,
-          "w": 1172,
-          "h": 254
-        }
-      },
-      {
-        "item": "card_16",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 2896,
-          "w": 1188,
-          "h": 98
+          "x": 12,
+          "y": 2084,
+          "w": 1176,
+          "h": 240
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 2904,
-          "w": 1172,
-          "h": 84
+          "x": 12,
+          "y": 2336,
+          "w": 1176,
+          "h": 98
         }
       }
     ],

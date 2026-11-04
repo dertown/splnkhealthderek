@@ -28,7 +28,7 @@
     "viz_identity": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "## App identity\n- **Display name:** Splunk Health Derek+\n- **App id:** `splunk_exec_health`\n- **Version:** 1.7.43\n- **Author:** SplunkHealth\n- **License:** Apache License 2.0 (`LICENSE` in the app package)\n- **UI:** Dashboard Studio (dark theme)\n- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\nThe folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`.",
+        "markdown": "## App identity\n- **Display name:** Splunk Health Derek+\n- **App id:** `splunk_exec_health`\n- **Version:** 1.7.47\n- **Author:** SplunkHealth\n- **License:** Apache License 2.0 (`LICENSE` in the app package)\n- **UI:** Dashboard Studio (dark theme)\n- **Platforms:** Splunk Cloud (Victoria and Classic) and Splunk Enterprise\n\nThe folder name must stay `splunk_exec_health`. Splunk app ids cannot contain spaces or `+`.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -48,51 +48,6 @@
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
-    },
-    "card_1": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
-      }
-    },
-    "card_2": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
-      }
-    },
-    "card_3": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
-      }
-    },
-    "card_4": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
-      }
-    },
-    "card_5": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
-      }
     }
   },
   "layout": {
@@ -105,52 +60,22 @@
     },
     "structure": [
       {
-        "item": "card_1",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 6,
-          "w": 1188,
-          "h": 88
-        }
-      },
-      {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 14,
-          "w": 1172,
-          "h": 74
-        }
-      },
-      {
-        "item": "card_2",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 106,
-          "w": 588,
-          "h": 368
+          "x": 12,
+          "y": 6,
+          "w": 1176,
+          "h": 88
         }
       },
       {
         "item": "viz_what",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 114,
-          "w": 572,
-          "h": 354
-        }
-      },
-      {
-        "item": "card_3",
-        "type": "block",
-        "position": {
-          "x": 606,
+          "x": 12,
           "y": 106,
-          "w": 588,
+          "w": 576,
           "h": 368
         }
       },
@@ -158,39 +83,19 @@
         "item": "viz_identity",
         "type": "block",
         "position": {
-          "x": 614,
-          "y": 114,
-          "w": 572,
-          "h": 354
-        }
-      },
-      {
-        "item": "card_4",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 486,
-          "w": 588,
-          "h": 268
+          "x": 612,
+          "y": 106,
+          "w": 576,
+          "h": 368
         }
       },
       {
         "item": "viz_cloud",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 494,
-          "w": 572,
-          "h": 254
-        }
-      },
-      {
-        "item": "card_5",
-        "type": "block",
-        "position": {
-          "x": 606,
+          "x": 12,
           "y": 486,
-          "w": 588,
+          "w": 576,
           "h": 268
         }
       },
@@ -198,10 +103,10 @@
         "item": "viz_security",
         "type": "block",
         "position": {
-          "x": 614,
-          "y": 494,
-          "w": 572,
-          "h": 254
+          "x": 612,
+          "y": 486,
+          "w": 576,
+          "h": 268
         }
       }
     ]

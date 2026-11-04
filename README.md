@@ -12,11 +12,11 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 
 | View | Purpose |
 | --- | --- |
-| **Splunk Health Derek+** | The summary page: overall GREEN / YELLOW / RED, a status per area that opens its dashboard, the reasons behind each status, open agent findings, and GB/day vs 7-day MA |
+| **Splunk Health Derek+** | The summary page: overall GREEN / YELLOW / RED, a status per area that opens its dashboard, the reasons behind each status, open agent findings, GB/day vs 7-day MA, and a pie of the top indexes by license usage |
 | **Host Heartbeat & Instance Health** | Fleet-wide, right-now liveness: last indexed data vs last `_internal` heartbeat, ingestion latency (`_indextime` − `_time`, last 15m), current volume vs 24-hour 2σ baseline per host, plus splunkd health by feature, CPU/memory, and blocked queues |
 | **HEC Token Performance** | Events per HEC token, 1-hour rolling window, flag if a ~100 eps token sits at 0 for 5+ minutes |
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
-| **Data Topology** | Link graph and Sankey of data sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port / HEC / SC4S → index, top indexes by license usage, plus forwarder → indexer. Click a source for its first/latest event, totals, 24h trend, and 2σ drop/burst outliers (history of one source; liveness stays on Host Heartbeat) |
+| **Data Topology** | Link graph and Sankey of data sources → Windows UF / Linux UF / HF / Other TCP:port / Other UDP:port / HEC / SC4S → index, plus forwarder → indexer. Click a source for its first/latest event, totals, 24h trend, and 2σ drop/burst outliers (history of one source; liveness stays on Host Heartbeat) |
 | **Derek+ Data Quality Agent** | Agentic loop over health tiles and learned ingest bounds (instance features, silent hosts, search CPU, HEC, SC4S, Edge). A human must click APPROVE or DISMISS before anything is recorded. |
 | **AI provider setup** | Set AI provider, model, and key in the UI, then SAVE to the search-head config lookup |
 
@@ -54,7 +54,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.43.spl`.
+3. Upload `dist/splunk_exec_health-1.7.47.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -103,10 +103,10 @@ The agent **cannot** restart forwarders, edit `inputs.conf`, rotate HEC tokens, 
 
 To work a suggestion:
 
-1. Filter if you want (or leave `all`) and click **Select** on a work-queue row.
+1. Filter if you want (or leave `all`) and click a work-queue row, then **Approve** or **Dismiss** in that row.
 2. Read **This suggestion** — likely cause, suggested fix, and where to act.
-3. Click **APPROVE** or **DISMISS**. The recorded decision panel fills and the queue row turns green. Search does not open. This app sets `outputlookup` `is_risky = false` in `default/commands.conf` so Splunk Cloud will run that write on the dashboard.
-4. If an AI provider is saved, selecting a row asks it automatically and fills **AI suggested fix** under the playbook fix. **ASK AGAIN** retries. Search does not open.
+3. Click **Approve** or **Dismiss** in the row. The recorded decision panel fills and the queue row turns green. Search does not open. This app sets `outputlookup` `is_risky = false` in `default/commands.conf` so Splunk Cloud will run that write on the dashboard.
+4. If an AI provider is saved, selecting a row asks it automatically and fills **AI suggested fix** under the playbook fix. clicking the **Fix** cell in a row asks again. Search does not open.
 
 Enable **Exec Health - Data quality agent report** if you want open findings emailed. Never put HEC token secrets or webhook URLs in the lookups. The AI key is entered on **AI provider setup** only.
 
@@ -193,5 +193,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.43.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.47.spl --included-tags private_app
 ```

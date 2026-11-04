@@ -179,7 +179,6 @@
     },
     "viz_time": {
       "type": "splunk.area",
-      "title": "HEC events by token",
       "dataSources": {
         "primary": "ds_hec_time"
       },
@@ -202,7 +201,6 @@
     },
     "viz_state": {
       "type": "splunk.table",
-      "title": "Token: last 5 minutes vs previous hour",
       "dataSources": {
         "primary": "ds_hec_state"
       },
@@ -253,6 +251,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -393,6 +399,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -406,6 +416,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -527,6 +541,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -540,6 +558,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -556,7 +578,6 @@
     },
     "viz_errors": {
       "type": "splunk.line",
-      "title": "HttpInputDataHandler errors / warnings",
       "dataSources": {
         "primary": "ds_hec_errors"
       },
@@ -580,7 +601,6 @@
     },
     "viz_handler": {
       "type": "splunk.table",
-      "title": "Failed HEC requests by token (HttpInputDataHandler)",
       "dataSources": {
         "primary": "ds_hec_handler"
       },
@@ -631,6 +651,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -771,6 +799,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -784,6 +816,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -905,6 +941,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -918,6 +958,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -938,15 +982,6 @@
         "markdown": "Populate `hec_token_map.csv` with `token,token_name,owner`, where `token` is the HEC input name exactly as it appears in `data.token_name`. Never store the HEC token **value** (the secret) in the lookup.",
         "fontSize": "default",
         "backgroundColor": "transparent"
-      }
-    },
-    "card_1": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
       }
     },
     "card_2": {
@@ -985,49 +1020,68 @@
         "strokeWidth": 1
       }
     },
-    "card_6": {
+    "rule_6": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_7": {
-      "type": "splunk.rectangle",
+    "cap_6": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "HEC events by token",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_8": {
+    "rule_7": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_9": {
-      "type": "splunk.rectangle",
+    "cap_7": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Token: last 5 minutes vs previous hour",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_10": {
+    "rule_8": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_8": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "HttpInputDataHandler errors / warnings",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_9": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_9": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Failed HEC requests by token (HttpInputDataHandler)",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     }
   },
@@ -1041,23 +1095,13 @@
     },
     "structure": [
       {
-        "item": "card_1",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 6,
-          "w": 1188,
-          "h": 98
-        }
-      },
-      {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 14,
-          "w": 1172,
-          "h": 84
+          "x": 12,
+          "y": 6,
+          "w": 1176,
+          "h": 98
         }
       },
       {
@@ -1141,103 +1185,133 @@
         }
       },
       {
-        "item": "card_6",
+        "item": "rule_6",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 266,
-          "w": 1188,
-          "h": 288
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_6",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 270,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_time",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 274,
-          "w": 1172,
-          "h": 274
+          "x": 12,
+          "y": 294,
+          "w": 1176,
+          "h": 260
         }
       },
       {
-        "item": "card_7",
+        "item": "rule_7",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 566,
-          "w": 1188,
-          "h": 308
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_7",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 570,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_state",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 574,
-          "w": 1172,
-          "h": 294
+          "x": 12,
+          "y": 594,
+          "w": 1176,
+          "h": 280
         }
       },
       {
-        "item": "card_8",
+        "item": "rule_8",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 886,
-          "w": 1188,
-          "h": 268
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_8",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 890,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_errors",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 894,
-          "w": 1172,
-          "h": 254
+          "x": 12,
+          "y": 914,
+          "w": 1176,
+          "h": 240
         }
       },
       {
-        "item": "card_9",
+        "item": "rule_9",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 1166,
-          "w": 1188,
-          "h": 268
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_9",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1170,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_handler",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1174,
-          "w": 1172,
-          "h": 254
-        }
-      },
-      {
-        "item": "card_10",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1446,
-          "w": 1188,
-          "h": 78
+          "x": 12,
+          "y": 1194,
+          "w": 1176,
+          "h": 240
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1454,
-          "w": 1172,
-          "h": 64
+          "x": 12,
+          "y": 1446,
+          "w": 1176,
+          "h": 78
         }
       }
     ],

@@ -439,7 +439,6 @@
     },
     "viz_reason": {
       "type": "splunk.table",
-      "title": "Why this status",
       "dataSources": {
         "primary": "ds_ai_reason"
       },
@@ -490,6 +489,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -630,6 +637,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -643,6 +654,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -764,6 +779,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -778,13 +797,16 @@
           {
             "match": "WAIT",
             "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
+            "value": "#222B3A"
           }
         ]
       }
     },
     "viz_conn_reason": {
       "type": "splunk.table",
-      "title": "Why this connection result",
       "dataSources": {
         "primary": "ds_ai_conn_reason"
       },
@@ -835,6 +857,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -975,6 +1005,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -988,6 +1022,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -1109,6 +1147,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -1122,6 +1164,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -1137,7 +1183,6 @@
     },
     "viz_current": {
       "type": "splunk.table",
-      "title": "Saved settings (key is stored, not displayed)",
       "dataSources": {
         "primary": "ds_ai_saved"
       },
@@ -1188,6 +1233,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1328,6 +1381,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1341,6 +1398,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -1462,6 +1523,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -1476,13 +1541,16 @@
           {
             "match": "WAIT",
             "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
+            "value": "#222B3A"
           }
         ]
       }
     },
     "viz_providers": {
       "type": "splunk.table",
-      "title": "Supported providers",
       "dataSources": {
         "primary": "ds_ai_providers"
       },
@@ -1533,6 +1601,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1673,6 +1749,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1686,6 +1766,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -1807,6 +1891,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -1820,6 +1908,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -1897,15 +1989,6 @@
         "backgroundColor": "transparent"
       }
     },
-    "card_1": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
-      }
-    },
     "pill_2": {
       "type": "splunk.rectangle",
       "options": {
@@ -1931,58 +2014,68 @@
         "strokeWidth": 1
       }
     },
-    "card_5": {
+    "rule_5": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_6": {
-      "type": "splunk.rectangle",
+    "cap_5": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Why this status",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_7": {
+    "rule_6": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_8": {
-      "type": "splunk.rectangle",
+    "cap_6": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Why this connection result",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_9": {
+    "rule_8": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_10": {
+    "cap_8": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Saved settings (key is stored, not displayed)",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_9": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_9": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Supported providers",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     }
   },
@@ -1996,23 +2089,13 @@
     },
     "structure": [
       {
-        "item": "card_1",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 6,
-          "w": 1188,
-          "h": 78
-        }
-      },
-      {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 14,
-          "w": 1172,
-          "h": 64
+          "x": 12,
+          "y": 6,
+          "w": 1176,
+          "h": 78
         }
       },
       {
@@ -2106,123 +2189,143 @@
         }
       },
       {
-        "item": "card_5",
+        "item": "rule_5",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 331,
-          "w": 1188,
-          "h": 128
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_5",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 335,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_reason",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 339,
-          "w": 1172,
-          "h": 114
+          "x": 12,
+          "y": 359,
+          "w": 1176,
+          "h": 100
         }
       },
       {
-        "item": "card_6",
+        "item": "rule_6",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 471,
-          "w": 1188,
-          "h": 128
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_6",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 475,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_conn_reason",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 479,
-          "w": 1172,
-          "h": 114
-        }
-      },
-      {
-        "item": "card_7",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 611,
-          "w": 1188,
-          "h": 138
+          "x": 12,
+          "y": 499,
+          "w": 1176,
+          "h": 100
         }
       },
       {
         "item": "viz_steps",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 619,
-          "w": 1172,
-          "h": 124
+          "x": 12,
+          "y": 611,
+          "w": 1176,
+          "h": 138
         }
       },
       {
-        "item": "card_8",
+        "item": "rule_8",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 761,
-          "w": 1188,
-          "h": 168
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_8",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 765,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_current",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 769,
-          "w": 1172,
-          "h": 154
+          "x": 12,
+          "y": 789,
+          "w": 1176,
+          "h": 140
         }
       },
       {
-        "item": "card_9",
+        "item": "rule_9",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 941,
-          "w": 1188,
-          "h": 208
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_9",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 945,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_providers",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 949,
-          "w": 1172,
-          "h": 194
-        }
-      },
-      {
-        "item": "card_10",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1161,
-          "w": 1188,
-          "h": 68
+          "x": 12,
+          "y": 969,
+          "w": 1176,
+          "h": 180
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1169,
-          "w": 1172,
-          "h": 54
+          "x": 12,
+          "y": 1161,
+          "w": 1176,
+          "h": 68
         }
       }
     ]

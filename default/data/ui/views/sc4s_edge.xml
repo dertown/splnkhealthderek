@@ -201,7 +201,6 @@
     },
     "viz_sc4s_time": {
       "type": "splunk.area",
-      "title": "SC4S / syslog events by sourcetype",
       "dataSources": {
         "primary": "ds_sc4s_time"
       },
@@ -224,7 +223,6 @@
     },
     "viz_indexed": {
       "type": "splunk.line",
-      "title": "Events reaching indexers (tstats)",
       "dataSources": {
         "primary": "ds_indexed"
       },
@@ -248,7 +246,6 @@
     },
     "viz_sc4s_hosts": {
       "type": "splunk.table",
-      "title": "Events per source (host)",
       "dataSources": {
         "primary": "ds_sc4s_hosts"
       },
@@ -299,6 +296,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -439,6 +444,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -452,6 +461,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -573,6 +586,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -586,6 +603,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -602,7 +623,6 @@
     },
     "viz_sc4s_err_time": {
       "type": "splunk.line",
-      "title": "SC4S error / warn rate",
       "dataSources": {
         "primary": "ds_sc4s_err_time"
       },
@@ -626,7 +646,6 @@
     },
     "viz_sc4s_errors": {
       "type": "splunk.table",
-      "title": "SC4S container / syslog issues",
       "dataSources": {
         "primary": "ds_sc4s_errors"
       },
@@ -677,6 +696,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -817,6 +844,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -830,6 +861,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -951,6 +986,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -964,6 +1003,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -980,7 +1023,6 @@
     },
     "viz_edge_tp": {
       "type": "splunk.table",
-      "title": "Edge Processor in vs out (filter efficiency)",
       "dataSources": {
         "primary": "ds_edge_tp"
       },
@@ -1031,6 +1073,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1171,6 +1221,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1184,6 +1238,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -1305,6 +1363,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -1318,6 +1380,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -1334,7 +1400,6 @@
     },
     "viz_edge_queue": {
       "type": "splunk.table",
-      "title": "Edge queue fill and export errors",
       "dataSources": {
         "primary": "ds_edge_queue"
       },
@@ -1385,6 +1450,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1525,6 +1598,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1538,6 +1615,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -1659,6 +1740,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -1672,6 +1757,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -1688,7 +1777,6 @@
     },
     "viz_edge_logs": {
       "type": "splunk.table",
-      "title": "Edge / Ingest Processor _internal logs",
       "dataSources": {
         "primary": "ds_edge_logs"
       },
@@ -1739,6 +1827,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1879,6 +1975,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1892,6 +1992,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -2013,6 +2117,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -2026,6 +2134,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -2046,15 +2158,6 @@
         "markdown": "Edge metrics come from the `_metrics` index (`processor_events_in_total` and related counters, macro `exec_health_edge_mstats`); grant the viewing role access to `_metrics` on Splunk Cloud. If those panels are empty or error, Edge Processor is not writing metrics to this stack \u2014 use `_internal` logs instead. **Filter efficiency** = `(events_in - events_out) / events_in`. High values mean pipelines are dropping or routing away from indexers. SC4S error scans use macro `exec_health_sc4s_idx` (default `*`). Narrow it on Cloud to avoid expensive `index=*` event searches.",
         "fontSize": "default",
         "backgroundColor": "transparent"
-      }
-    },
-    "card_1": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
       }
     },
     "card_2": {
@@ -2093,85 +2196,132 @@
         "strokeWidth": 1
       }
     },
-    "card_6": {
+    "rule_6": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_7": {
-      "type": "splunk.rectangle",
+    "cap_6": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "SC4S / syslog events by sourcetype",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_8": {
+    "rule_7": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_9": {
-      "type": "splunk.rectangle",
+    "cap_7": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Events reaching indexers (tstats)",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_10": {
+    "rule_8": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_11": {
-      "type": "splunk.rectangle",
+    "cap_8": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Events per source (host)",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_12": {
+    "rule_9": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_13": {
-      "type": "splunk.rectangle",
+    "cap_9": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Edge Processor in vs out (filter efficiency)",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_14": {
+    "rule_10": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_10": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "SC4S error / warn rate",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_11": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_11": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "SC4S container / syslog issues",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_12": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_12": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Edge queue fill and export errors",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_13": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_13": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Edge / Ingest Processor _internal logs",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     }
   },
@@ -2185,23 +2335,13 @@
     },
     "structure": [
       {
-        "item": "card_1",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 6,
-          "w": 1188,
-          "h": 88
-        }
-      },
-      {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 14,
-          "w": 1172,
-          "h": 74
+          "x": 12,
+          "y": 6,
+          "w": 1176,
+          "h": 88
         }
       },
       {
@@ -2285,183 +2425,253 @@
         }
       },
       {
-        "item": "card_6",
+        "item": "rule_6",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 256,
-          "w": 588,
-          "h": 268
+          "w": 576,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_6",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 260,
+          "w": 576,
+          "h": 24
         }
       },
       {
         "item": "viz_sc4s_time",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 264,
-          "w": 572,
-          "h": 254
+          "x": 12,
+          "y": 284,
+          "w": 576,
+          "h": 240
         }
       },
       {
-        "item": "card_7",
+        "item": "rule_7",
         "type": "block",
         "position": {
-          "x": 606,
+          "x": 612,
           "y": 256,
-          "w": 588,
-          "h": 268
+          "w": 576,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_7",
+        "type": "block",
+        "position": {
+          "x": 612,
+          "y": 260,
+          "w": 576,
+          "h": 24
         }
       },
       {
         "item": "viz_indexed",
         "type": "block",
         "position": {
-          "x": 614,
-          "y": 264,
-          "w": 572,
-          "h": 254
+          "x": 612,
+          "y": 284,
+          "w": 576,
+          "h": 240
         }
       },
       {
-        "item": "card_8",
+        "item": "rule_8",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 536,
-          "w": 1188,
-          "h": 288
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_8",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 540,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_sc4s_hosts",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 544,
-          "w": 1172,
-          "h": 274
+          "x": 12,
+          "y": 564,
+          "w": 1176,
+          "h": 260
         }
       },
       {
-        "item": "card_9",
+        "item": "rule_9",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 836,
-          "w": 1188,
-          "h": 288
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_9",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 840,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_edge_tp",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 844,
-          "w": 1172,
-          "h": 274
+          "x": 12,
+          "y": 864,
+          "w": 1176,
+          "h": 260
         }
       },
       {
-        "item": "card_10",
+        "item": "rule_10",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 1136,
-          "w": 1188,
-          "h": 238
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_10",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1140,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_sc4s_err_time",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1144,
-          "w": 1172,
-          "h": 224
+          "x": 12,
+          "y": 1164,
+          "w": 1176,
+          "h": 210
         }
       },
       {
-        "item": "card_11",
+        "item": "rule_11",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 1386,
-          "w": 1188,
-          "h": 238
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_11",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1390,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_sc4s_errors",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1394,
-          "w": 1172,
-          "h": 224
+          "x": 12,
+          "y": 1414,
+          "w": 1176,
+          "h": 210
         }
       },
       {
-        "item": "card_12",
+        "item": "rule_12",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 1636,
-          "w": 1188,
-          "h": 268
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_12",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1640,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_edge_queue",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1644,
-          "w": 1172,
-          "h": 254
+          "x": 12,
+          "y": 1664,
+          "w": 1176,
+          "h": 240
         }
       },
       {
-        "item": "card_13",
+        "item": "rule_13",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 1916,
-          "w": 1188,
-          "h": 268
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_13",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1920,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_edge_logs",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1924,
-          "w": 1172,
-          "h": 254
-        }
-      },
-      {
-        "item": "card_14",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 2196,
-          "w": 1188,
-          "h": 108
+          "x": 12,
+          "y": 1944,
+          "w": 1176,
+          "h": 240
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 2204,
-          "w": 1172,
-          "h": 94
+          "x": 12,
+          "y": 2196,
+          "w": 1176,
+          "h": 108
         }
       }
     ],

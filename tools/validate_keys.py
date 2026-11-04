@@ -420,6 +420,9 @@ VIZ_OPTIONS = {
     "splunk.line": COMMON_CHART | {"nullValueDisplay", "lineWidth", "markerDisplay", "lineDashStyle"},
     "splunk.area": COMMON_CHART | {"nullValueDisplay", "areaOpacity"},
     "splunk.column": COMMON_CHART | {"columnSpacing", "seriesSpacing"},
+    "splunk.pie": {"backgroundColor", "collapseExcludeZero", "collapseLabel", "collapseThreshold",
+                   "labelDisplay", "legendDisplay", "resultLimit", "seriesColors",
+                   "seriesColorsByField", "showDonutHole"},
     "splunk.rectangle": {"fillColor", "fillOpacity", "strokeColor", "strokeWidth", "rx"},
     "splunk.markdown": {"markdown", "fontColor", "backgroundColor", "fontSize", "fontFamily"},
     "splunk.linkgraph": {"backgroundColor", "fieldOrder", "linkColor", "linkWidth", "nodeColor",
@@ -440,12 +443,13 @@ ENUMS = {
     "unitPosition": {"before", "after"},
     "dataValuesDisplay": {"off", "all", "minmax"},
     "colorMode": {"categorical", "dynamic"},
+    "labelDisplay": {"values", "valuesAndPercentage", "off"},
 }
 MARKDOWN_FONT = {"extraSmall", "small", "default", "large", "extraLarge"}
 HANDLERS = {
     "drilldown.linkToSearch": ({"type", "newTab", "query", "earliest", "latest"}, {"type": {"auto", "custom"}}),
     "drilldown.linkToDashboard": ({"app", "dashboard", "newTab", "tokens"}, {}),
-    "drilldown.setToken": ({"tokens"}, {}),
+    "drilldown.setToken": ({"tokens", "fields"}, {}),
     "drilldown.customUrl": ({"url", "newTab"}, {}),
     "drilldown.linkToReport": ({"app", "report", "newTab"}, {}),
 }
@@ -458,6 +462,8 @@ INPUT_OPTIONS = {
 }
 LAYOUT_KEYS = {"type", "structure", "globalInputs", "options", "tabs", "layoutDefinitions"}
 BLOCK_KEYS = {"item", "type", "position"}
+# Predefined click tokens Dashboard Studio supports (name2/value2 are classic-dashboard only).
+TOKEN_KEY_RE = re.compile(r"^(name|value|row\.[A-Za-z0-9_]+\.value)$")
 TOKEN_RE = re.compile(r"\$([A-Za-z0-9_]+)(?:\.[A-Za-z0-9_]+)?\$")
 CONTEXT_FN_RE = re.compile(r"(?:matchValue|rangeValue|prepend|gradient|pick)\(([A-Za-z0-9_]+)\)")
 
@@ -589,6 +595,11 @@ def check_dashboard(path: Path, macros: dict, transforms: dict) -> None:
                     err(loc, f"{htype}: unknown option '{key}'")
                 if key in enums and value not in enums[key]:
                     err(loc, f"{htype}: {key}={value!r} not in {sorted(enums[key])}")
+            if htype == "drilldown.setToken":
+                for tk in handler.get("options", {}).get("tokens", []):
+                    key = tk.get("key")
+                    if key is not None and not TOKEN_KEY_RE.match(key):
+                        err(loc, f"setToken key {key!r} is not one of name, value, row.<field>.value")
             if htype == "drilldown.linkToDashboard":
                 target = handler.get("options", {}).get("dashboard")
                 if target and not (VIEWS / f"{target}.xml").is_file():

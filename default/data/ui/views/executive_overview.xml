@@ -98,6 +98,19 @@
           "latest": "now"
         }
       }
+    },
+    "ds_top_indexes": {
+      "type": "ds.search",
+      "name": "Top indexes by GB (7 days)",
+      "options": {
+        "query": "search `exec_health_license_usage`\n| eval GB=round(b/1024/1024/1024, 3)\n| stats sum(GB) as GB by idx\n| rename idx as index\n| sort 0 -GB\n| head 10\n| table index, GB",
+        "refresh": "15m",
+        "refreshType": "delay",
+        "queryParameters": {
+          "earliest": "-7d@d",
+          "latest": "@d"
+        }
+      }
     }
   },
   "visualizations": {
@@ -732,7 +745,6 @@
     },
     "viz_areas": {
       "type": "splunk.table",
-      "title": "Status by area, worst first",
       "dataSources": {
         "primary": "ds_areas"
       },
@@ -783,6 +795,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -923,6 +943,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -936,6 +960,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -1057,6 +1085,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -1071,13 +1103,16 @@
           {
             "match": "WAIT",
             "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
+            "value": "#222B3A"
           }
         ]
       }
     },
     "viz_ingest_chart": {
       "type": "splunk.line",
-      "title": "Daily ingestion vs 7-day moving average",
       "dataSources": {
         "primary": "ds_license_daily"
       },
@@ -1099,21 +1134,40 @@
         "backgroundColor": "transparent"
       }
     },
+    "viz_top_indexes": {
+      "type": "splunk.pie",
+      "dataSources": {
+        "primary": "ds_top_indexes"
+      },
+      "showLastUpdated": false,
+      "showProgressBar": true,
+      "options": {
+        "seriesColors": [
+          "#58A6FF",
+          "#3FB950",
+          "#E3B341",
+          "#F85149",
+          "#A371F7",
+          "#00CDAF",
+          "#DD9900",
+          "#FF677B",
+          "#009CEB",
+          "#7B56DB"
+        ],
+        "legendDisplay": "right",
+        "labelDisplay": "valuesAndPercentage",
+        "showDonutHole": true,
+        "collapseThreshold": 0.03,
+        "collapseLabel": "other",
+        "backgroundColor": "transparent"
+      }
+    },
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
         "markdown": "Every status comes from the same searches as the dashboard it opens. Agent findings are not counted in Overall health: they are built from these same signals, and dismissing a finding should not turn the system green. Ingestion latency is on **Host Heartbeat** only, because it needs a raw event search. Tune `exec_health_*` macros in Settings > Advanced search > Search macros. Saved alerts ship **disabled**; enable them after configuring email in Splunk (do not put webhook URLs or passwords in this app).",
         "fontSize": "default",
         "backgroundColor": "transparent"
-      }
-    },
-    "card_1": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
       }
     },
     "card_2": {
@@ -1197,31 +1251,52 @@
         "strokeWidth": 1
       }
     },
-    "card_11": {
+    "rule_11": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_12": {
-      "type": "splunk.rectangle",
+    "cap_11": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "Status by area, worst first",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_13": {
+    "rule_12": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_12": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Daily ingestion vs 7-day moving average",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_13": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_13": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "Top indexes by license usage (GB, last 7 days)",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     }
   },
@@ -1235,23 +1310,13 @@
     },
     "structure": [
       {
-        "item": "card_1",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 6,
-          "w": 1188,
-          "h": 78
-        }
-      },
-      {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 14,
-          "w": 1172,
-          "h": 64
+          "x": 12,
+          "y": 6,
+          "w": 1176,
+          "h": 78
         }
       },
       {
@@ -1435,63 +1500,103 @@
         }
       },
       {
-        "item": "card_11",
+        "item": "rule_11",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 436,
-          "w": 1188,
-          "h": 268
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_11",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 440,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_areas",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 444,
-          "w": 1172,
-          "h": 254
+          "x": 12,
+          "y": 464,
+          "w": 1176,
+          "h": 240
         }
       },
       {
-        "item": "card_12",
+        "item": "rule_12",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 716,
-          "w": 1188,
-          "h": 288
+          "w": 676,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_12",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 720,
+          "w": 676,
+          "h": 24
         }
       },
       {
         "item": "viz_ingest_chart",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 724,
-          "w": 1172,
-          "h": 274
+          "x": 12,
+          "y": 744,
+          "w": 676,
+          "h": 260
         }
       },
       {
-        "item": "card_13",
+        "item": "rule_13",
         "type": "block",
         "position": {
-          "x": 6,
-          "y": 1016,
-          "w": 1188,
-          "h": 98
+          "x": 712,
+          "y": 716,
+          "w": 476,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_13",
+        "type": "block",
+        "position": {
+          "x": 712,
+          "y": 720,
+          "w": 476,
+          "h": 24
+        }
+      },
+      {
+        "item": "viz_top_indexes",
+        "type": "block",
+        "position": {
+          "x": 712,
+          "y": 744,
+          "w": 476,
+          "h": 260
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1024,
-          "w": 1172,
-          "h": 84
+          "x": 12,
+          "y": 1016,
+          "w": 1176,
+          "h": 98
         }
       }
     ]

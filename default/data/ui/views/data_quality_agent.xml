@@ -1,10 +1,10 @@
 <dashboard version="2" theme="dark">
   <label>Derek+ Data Quality Agent</label>
-  <description>Click Select, then APPROVE or DISMISS to record the decision. Search does not open.</description>
+  <description>Click a queue row, then Approve or Dismiss in that row to record the decision. Search does not open.</description>
   <definition><![CDATA[
 {
   "title": "Derek+ Data Quality Agent",
-  "description": "Click Select, then click APPROVE or DISMISS. That records the decision. Search does not open.",
+  "description": "Click Approve or Dismiss in a queue row to record the decision. Search does not open.",
   "defaults": {
     "dataSources": {
       "ds.search": {
@@ -36,18 +36,10 @@
     },
     "input_finding": {
       "type": "input.text",
-      "title": "Selected suggestion (click Select in the queue)",
+      "title": "Selected suggestion (click a queue row)",
       "options": {
         "token": "tok_finding_id",
         "defaultValue": "none"
-      }
-    },
-    "input_decision": {
-      "type": "input.text",
-      "title": "Decision latch (set by APPROVE or DISMISS)",
-      "options": {
-        "token": "tok_decision",
-        "defaultValue": "review"
       }
     },
     "input_ai_ask": {
@@ -64,6 +56,22 @@
       "options": {
         "token": "tok_ai_list",
         "defaultValue": "hide"
+      }
+    },
+    "input_cell": {
+      "type": "input.text",
+      "title": "Clicked column (set by clicking a queue row)",
+      "options": {
+        "token": "tok_cell",
+        "defaultValue": "none"
+      }
+    },
+    "input_row_status": {
+      "type": "input.text",
+      "title": "Selected row status",
+      "options": {
+        "token": "tok_row_status",
+        "defaultValue": "none"
       }
     },
     "input_entity": {
@@ -116,7 +124,7 @@
       "name": "Work queue",
       "options": {
         "extend": "ds_dq_asked",
-        "query": "| eval _gate=\"$tok_decision$\"\n| join type=left finding_id [\n    | inputlookup dq_agent_ai_suggestions\n    | where now()-strptime(suggested_at, \"%Y-%m-%d %H:%M:%S\")>=86400\n    | sort 0 -suggested_at\n    | stats first(suggestion) AS previous_suggestion, first(suggested_at) AS previous_at, last(suggested_at) AS first_suggested_at, count AS earlier_suggestions by finding_id\n]\n| eval recurring=if(isnotnull(first_suggested_at), \"RECURRING\", \"no\")\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval recurring=if(reopened=1, \"RECURRING\", recurring)\n| eval action=if(status=\"open\", \"Select\", \"Done\")\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| eval fix=coalesce(suggested_fix, \"\")\n| eval fix=if(len(fix)>80, substr(fix,1,80).\"...\", fix)\n| eval _finding_id=finding_id, _ai_brief=ai_brief, _reset_decision=\"review\", _ai_auto=\"ask\"\n| table severity, issue, entity, fix, recurring, confidence, action, status, _finding_id, _ai_brief, _reset_decision, _ai_auto, _color_rank"
+        "query": "| eval _gate=\"$tok_cell$|$tok_row_status$\"\n| join type=left finding_id [\n    | inputlookup dq_agent_ai_suggestions\n    | where now()-strptime(suggested_at, \"%Y-%m-%d %H:%M:%S\")>=86400\n    | sort 0 -suggested_at\n    | stats first(suggestion) AS previous_suggestion, first(suggested_at) AS previous_at, last(suggested_at) AS first_suggested_at, count AS earlier_suggestions by finding_id\n]\n| eval recurring=if(isnotnull(first_suggested_at), \"RECURRING\", \"no\")\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval _now_status=case(\n    \"$tok_row_status$\"!=\"open\" OR finding_id!=\"$tok_finding_id$\", null(),\n    \"$tok_cell$\"=\"approve\", \"approved\",\n    \"$tok_cell$\"=\"dismiss\", \"dismissed\")\n| eval status=coalesce(_now_status, status)\n| fields - _now_status\n| eval recurring=if(reopened=1, \"RECURRING\", recurring)\n| eval approve=if(status=\"open\", \"Approve\", \"\u2014\"), dismiss=if(status=\"open\", \"Dismiss\", \"\u2014\")\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| eval fix=coalesce(suggested_fix, \"\")\n| eval fix=if(len(fix)>80, substr(fix,1,80).\"...\", fix)\n| eval _finding_id=finding_id, _ai_brief=ai_brief, _ai_auto=\"ask\"\n| table severity, issue, entity, fix, recurring, confidence, status, approve, dismiss, _finding_id, _ai_brief, _ai_auto, _color_rank"
       }
     },
     "ds_dq_status": {
@@ -124,7 +132,7 @@
       "name": "Agent status",
       "options": {
         "extend": "ds_dq_asked",
-        "query": "| eval _gate=\"$tok_decision$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| where status=\"open\"\n| stats count as issues, count(eval(severity=\"RED\")) as red_issues\n| eval agent_status=case(red_issues>0, \"RED\", issues>0, \"YELLOW\", 1=1, \"GREEN\")\n| appendpipe [ stats count | where count=0 | eval issues=0, agent_status=\"GREEN\" ]"
+        "query": "| eval _gate=\"$tok_cell$|$tok_row_status$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval _now_status=case(\n    \"$tok_row_status$\"!=\"open\" OR finding_id!=\"$tok_finding_id$\", null(),\n    \"$tok_cell$\"=\"approve\", \"approved\",\n    \"$tok_cell$\"=\"dismiss\", \"dismissed\")\n| eval status=coalesce(_now_status, status)\n| fields - _now_status\n| where status=\"open\"\n| stats count as issues, count(eval(severity=\"RED\")) as red_issues\n| eval agent_status=case(red_issues>0, \"RED\", issues>0, \"YELLOW\", 1=1, \"GREEN\")\n| appendpipe [ stats count | where count=0 | eval issues=0, agent_status=\"GREEN\" ]"
       }
     },
     "ds_dq_selected": {
@@ -132,7 +140,7 @@
       "name": "Selected suggestion",
       "options": {
         "extend": "ds_dq_asked",
-        "query": "| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\" AND finding_id!=\"\"\n| eval _gate=\"$tok_decision$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| eval where_to_act=coalesce(splunk_web_path, \"Open the matching dashboard in this app\")\n| table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank"
+        "query": "| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\" AND finding_id!=\"\"\n| eval _gate=\"$tok_cell$|$tok_row_status$\"\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval _now_status=case(\n    \"$tok_row_status$\"!=\"open\" OR finding_id!=\"$tok_finding_id$\", null(),\n    \"$tok_cell$\"=\"approve\", \"approved\",\n    \"$tok_cell$\"=\"dismiss\", \"dismissed\")\n| eval status=coalesce(_now_status, status)\n| fields - _now_status\n| eval _color_rank=case(status!=\"open\", 3, severity=\"RED\", 1, severity=\"YELLOW\", 2, 1=1, 3)\n| eval where_to_act=coalesce(splunk_web_path, \"Open the matching dashboard in this app\")\n| table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank"
       }
     },
     "ds_dq_brief": {
@@ -143,33 +151,11 @@
         "query": "| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\"\n| table ai_brief"
       }
     },
-    "ds_dq_approve": {
-      "type": "ds.search",
-      "name": "Approve control",
-      "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval _pressed=if(picked=1 AND \"$tok_decision$\"=\"approve\", 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", _pressed=1, \"APPROVED\", 1=1, \"APPROVE\")\n| eval _click_action=\"approve\"\n| table button_label, _click_action, _pressed",
-        "queryParameters": {
-          "earliest": "0",
-          "latest": "now"
-        }
-      }
-    },
-    "ds_dq_dismiss": {
-      "type": "ds.search",
-      "name": "Dismiss control",
-      "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\", 1, 0)\n| eval _pressed=if(picked=1 AND \"$tok_decision$\"=\"dismiss\", 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", _pressed=1, \"DISMISSED\", 1=1, \"DISMISS\")\n| eval _click_action=\"dismiss\"\n| table button_label, _click_action, _pressed",
-        "queryParameters": {
-          "earliest": "0",
-          "latest": "now"
-        }
-      }
-    },
     "ds_dq_save": {
       "type": "ds.search",
       "name": "Write agent decision",
       "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", decision=\"$tok_decision$\"\n| where (decision=\"approve\" OR decision=\"dismiss\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\"\n| eval actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\", entity=\"none\"\n| eval _key=finding_id\n| table _key, finding_id, decision, actor, decided_at, note, entity\n| appendpipe [\n    | outputlookup append=true dq_agent_approvals\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank",
+        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", cell=\"$tok_cell$\", row_status=\"$tok_row_status$\"\n| eval decision=case(cell=\"approve\" OR cell=\"dismiss\", cell)\n| where isnotnull(decision) AND row_status=\"open\" AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\"\n| eval actor=\"human_dashboard\", decided_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\"), note=\"human_in_the_loop\", entity=\"none\"\n| eval _key=finding_id\n| table _key, finding_id, decision, actor, decided_at, note, entity\n| appendpipe [\n    | outputlookup append=true dq_agent_approvals\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(decision=\"approve\" OR decision=\"dismiss\", 3, 2)\n| table decided_at, finding_id, decision, actor, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -181,7 +167,7 @@
       "name": "Recorded decision",
       "options": {
         "extend": "ds_dq_save",
-        "query": "| where 1=0\n| append [\n| inputlookup dq_agent_approvals\n| eval _gate=\"$tok_decision$\"\n| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\" AND finding_id!=\"placeholder\"\n| eval decision_state=if(now()-strptime(decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, \"reopened: needs a new decision\", \"current\")\n| eval _color_rank=case(decision_state!=\"current\", 2, decision=\"approve\" OR decision=\"dismiss\", 3, 1=1, 2)\n| table decided_at, finding_id, decision, decision_state, actor, _color_rank\n]"
+        "query": "| where 1=0\n| append [\n| inputlookup dq_agent_approvals\n| eval _gate=\"$tok_cell$|$tok_row_status$\"\n| where finding_id=\"$tok_finding_id$\" AND \"$tok_finding_id$\"!=\"none\" AND finding_id!=\"placeholder\"\n| eval decision_state=if(now()-strptime(decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, \"reopened: needs a new decision\", \"current\")\n| eval _color_rank=case(decision_state!=\"current\", 2, decision=\"approve\" OR decision=\"dismiss\", 3, 1=1, 2)\n| table decided_at, finding_id, decision, decision_state, actor, _color_rank\n]"
       }
     },
     "ds_dq_ai_status": {
@@ -195,22 +181,11 @@
         }
       }
     },
-    "ds_dq_ai_ready": {
-      "type": "ds.search",
-      "name": "Ask AI control",
-      "options": {
-        "query": "| makeresults\n| eval finding_id=\"$tok_finding_id$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1, 1, 0)\n| eval _pressed=if(picked=1 AND configured=1 AND match(\"$tok_ai_ask$\", \"^retry\"), 1, 0)\n| eval button_label=case(picked=0, \"PICK A ROW FIRST\", configured=0, \"OPEN AI SETUP FIRST\", _pressed=1, \"ASKED\", 1=1, \"ASK AGAIN\")\n| eval _click_action=\"retry\".tostring(now())\n| table button_label, _click_action, _pressed",
-        "queryParameters": {
-          "earliest": "0",
-          "latest": "now"
-        }
-      }
-    },
     "ds_dq_ai_write": {
       "type": "ds.search",
       "name": "Write ASK request",
       "options": {
-        "query": "| makeresults\n| eval ask=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| where match(ask, \"^(ask|retry)\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS prev_status, requested_at AS prev_at\n| eval prev_age=coalesce(now()-strptime(coalesce(tostring(prev_at), \"\"), \"%Y-%m-%d %H:%M:%S\"), 99999)\n| where NOT (prev_status=\"replied\" AND prev_age<3600 AND ask=\"ask\")\n| lookup dq_agent_ai_providers provider OUTPUT default_endpoint\n| eval endpoint=if(endpoint=\"none\" OR isnull(endpoint) OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\")\n| eval entity=if(entity=\"\" OR isnull(entity), \"none\", entity)\n| eval issue=if(issue=\"\" OR isnull(issue), \"none\", issue)\n| eval ai_brief=if(ai_brief=\"\" OR isnull(ai_brief), \"none\", ai_brief)\n| join type=left finding_id [\n    | inputlookup dq_agent_ai_suggestions\n    | where now()-strptime(suggested_at, \"%Y-%m-%d %H:%M:%S\")>=86400\n    | sort 0 -suggested_at\n    | stats first(suggestion) AS previous_suggestion, first(suggested_at) AS previous_at, last(suggested_at) AS first_suggested_at, count AS earlier_suggestions by finding_id\n]\n| eval recurring=if(isnotnull(first_suggested_at), \"RECURRING\", \"no\")\n| eval ai_brief=if(recurring=\"RECURRING\", ai_brief.\" This problem is recurring. An AI suggestion for it was first saved at \".first_suggested_at.\". Most recent earlier suggestion, from \".previous_at.\": \".substr(previous_suggestion, 1, 1500).\" Say why that fix may not have held and what to do differently.\", ai_brief)\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval ai_brief=if(reopened=1, ai_brief.\" A person recorded the decision \".rec_decision.\" on this problem at \".rec_decided_at.\" and it is still happening.\", ai_brief)\n| eval recurring=if(reopened=1, \"RECURRING\", recurring)\n| eval is_ping=0\n| derekaiping\n| eval status=if(ai_result=\"replied\", \"replied\", \"failed\")\n| eval note=if(ai_result=\"replied\", \"ask_ai_provider\", \"ask failed: \".coalesce(ai_error, \"no reply\"))\n| eval reply=if(ai_result=\"replied\", ai_reply, \"none\")\n| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply, recurring, first_suggested_at, earlier_suggestions, previous_suggestion\n| appendpipe [\n    | where status=\"replied\"\n    | eval suggested_at=requested_at, suggestion=reply\n    | table suggested_at, finding_id, entity, issue, provider, model, actor, suggestion, recurring, first_suggested_at, earlier_suggestions, previous_suggestion\n    | outputlookup append=true override_if_empty=false dq_agent_ai_suggestions\n    | where 1=0\n]\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_requests\n    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id\n    | outputlookup dq_agent_ai_requests\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(status=\"replied\", 3, 1)\n| table requested_at, finding_id, provider, status, _color_rank",
+        "query": "| makeresults\n| eval ask=\"$tok_ai_ask$\", cell=\"$tok_cell$\", finding_id=\"$tok_finding_id$\", entity=\"$tok_entity$\", issue=\"$tok_issue$\", ai_brief=\"$tok_ai_brief$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval endpoint=if(used_ui=0, \"`exec_health_ai_endpoint`\", coalesce(endpoint, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| where match(ask, \"^(ask|retry)\") AND finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\" AND mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS prev_status, requested_at AS prev_at\n| eval prev_age=coalesce(now()-strptime(coalesce(tostring(prev_at), \"\"), \"%Y-%m-%d %H:%M:%S\"), 99999)\n| where NOT (prev_status=\"replied\" AND prev_age<3600 AND cell!=\"fix\")\n| lookup dq_agent_ai_providers provider OUTPUT default_endpoint\n| eval endpoint=if(endpoint=\"none\" OR isnull(endpoint) OR endpoint=\"\", coalesce(default_endpoint, \"none\"), endpoint)\n| eval endpoint=if(provider=\"anthropic\" AND NOT match(lower(coalesce(endpoint, \"\")), \"anthropic\"), \"https://api.anthropic.com/v1/messages\", endpoint)\n| eval model=if(provider=\"anthropic\" AND (NOT match(lower(coalesce(model, \"\")), \"^claude\") OR lower(coalesce(model, \"\"))=\"claude-opus-4\" OR match(lower(coalesce(model, \"\")), \"^claude-3-\")), \"claude-haiku-5-5\", model)\n| eval actor=\"human_dashboard\", requested_at=strftime(now(), \"%Y-%m-%d %H:%M:%S\")\n| eval entity=if(entity=\"\" OR isnull(entity), \"none\", entity)\n| eval issue=if(issue=\"\" OR isnull(issue), \"none\", issue)\n| eval ai_brief=if(ai_brief=\"\" OR isnull(ai_brief), \"none\", ai_brief)\n| join type=left finding_id [\n    | inputlookup dq_agent_ai_suggestions\n    | where now()-strptime(suggested_at, \"%Y-%m-%d %H:%M:%S\")>=86400\n    | sort 0 -suggested_at\n    | stats first(suggestion) AS previous_suggestion, first(suggested_at) AS previous_at, last(suggested_at) AS first_suggested_at, count AS earlier_suggestions by finding_id\n]\n| eval recurring=if(isnotnull(first_suggested_at), \"RECURRING\", \"no\")\n| eval ai_brief=if(recurring=\"RECURRING\", ai_brief.\" This problem is recurring. An AI suggestion for it was first saved at \".first_suggested_at.\". Most recent earlier suggestion, from \".previous_at.\": \".substr(previous_suggestion, 1, 1500).\" Say why that fix may not have held and what to do differently.\", ai_brief)\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval ai_brief=if(reopened=1, ai_brief.\" A person recorded the decision \".rec_decision.\" on this problem at \".rec_decided_at.\" and it is still happening.\", ai_brief)\n| eval recurring=if(reopened=1, \"RECURRING\", recurring)\n| eval is_ping=0\n| derekaiping\n| eval status=if(ai_result=\"replied\", \"replied\", \"failed\")\n| eval note=if(ai_result=\"replied\", \"ask_ai_provider\", \"ask failed: \".coalesce(ai_error, \"no reply\"))\n| eval reply=if(ai_result=\"replied\", ai_reply, \"none\")\n| table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply, recurring, first_suggested_at, earlier_suggestions, previous_suggestion\n| appendpipe [\n    | where status=\"replied\"\n    | eval suggested_at=requested_at, suggestion=reply\n    | table suggested_at, finding_id, entity, issue, provider, model, actor, suggestion, recurring, first_suggested_at, earlier_suggestions, previous_suggestion\n    | outputlookup append=true override_if_empty=false dq_agent_ai_suggestions\n    | where 1=0\n]\n| appendpipe [\n    | inputlookup append=true dq_agent_ai_requests\n    | stats latest(entity) as entity, latest(issue) as issue, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(status) as status, latest(actor) as actor, latest(requested_at) as requested_at, latest(note) as note, latest(ai_brief) as ai_brief, latest(reply) as reply by finding_id\n    | outputlookup dq_agent_ai_requests\n]\n| where finding_id=\"$tok_finding_id$\"\n| eval _color_rank=if(status=\"replied\", 3, 1)\n| table requested_at, finding_id, provider, status, _color_rank",
         "queryParameters": {
           "earliest": "0",
           "latest": "now"
@@ -222,7 +197,7 @@
       "name": "ASK wait or fail",
       "options": {
         "extend": "ds_dq_ai_write",
-        "query": "| where 1=0\n| append [\n| makeresults\n| eval finding_id=\"$tok_finding_id$\", ask=\"$tok_ai_ask$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, api_key, endpoint, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1 AND isnotnull(model) AND model!=\"none\" AND model!=\"\", 1, 0)\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider AS req_provider, note AS req_note\n| eval wait_sec=now()-strptime(coalesce(tostring(requested_at), \"\"), \"%Y-%m-%d %H:%M:%S\")\n| eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())\n| eval ask_state=case(\n    picked=0, \"IDLE\",\n    mode!=\"provider\", \"IDLE\",\n    match(ask, \"^(ask|retry)\") AND configured=0, \"FAILED\",\n    req_status=\"failed\" OR req_status=\"error\", \"FAILED\",\n    req_status=\"done\" OR req_status=\"replied\", \"REPLIED\",\n    req_status=\"pending\" AND wait_min>=15, \"STALLED\",\n    req_status=\"pending\", \"WAITING\",\n    match(ask, \"^(ask|retry)\") AND configured=1 AND (isnull(req_status) OR req_status=\"\" OR req_status=\"none\"), \"WAITING\",\n    1=1, \"IDLE\")\n| eval ask_message=case(\n    ask_state=\"IDLE\" AND picked=0, \"Select a row in the work queue. The AI suggested fix fills in automatically.\",\n    ask_state=\"IDLE\" AND mode!=\"provider\", \"AI provider is off, so the playbook fix above is the suggestion. Open AI provider setup and SAVE a provider to get an AI suggested fix automatically.\",\n    ask_state=\"IDLE\", \"No AI request yet for this suggestion.\",\n    ask_state=\"FAILED\" AND configured=0, \"ASK failed: AI provider is not ready. Open AI provider setup and SAVE provider, model, and key.\",\n    ask_state=\"FAILED\", \"ASK failed: \".coalesce(req_note, \"the provider returned an error.\"),\n    ask_state=\"WAITING\", \"Asking \".coalesce(req_provider, provider, \"the provider\")+\" for a suggested fix...\",\n    ask_state=\"STALLED\", \"Still waiting after \".tostring(wait_min).\" minutes. Click ASK AGAIN.\",\n    ask_state=\"REPLIED\", \"Provider replied. See the replies table below.\",\n    1=1, \"ASK status unknown.\")\n| eval _color_rank=case(ask_state=\"FAILED\" OR ask_state=\"STALLED\", 1, ask_state=\"WAITING\", 2, ask_state=\"REPLIED\", 3, 1=1, 3)\n| table ask_state, ask_message, _color_rank\n]"
+        "query": "| where 1=0\n| append [\n| makeresults\n| eval finding_id=\"$tok_finding_id$\", ask=\"$tok_ai_ask$\", stanza=\"default\"\n| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, api_key, endpoint, updated_at\n| eval _updated=coalesce(tostring(updated_at), \"0\")\n| eval used_ui=if(_updated=\"0\" OR _updated=\"\", 0, 1)\n| eval mode=if(used_ui=0, \"`exec_health_ai_mode`\", coalesce(mode, \"off\"))\n| eval provider=if(used_ui=0, \"`exec_health_ai_provider`\", coalesce(provider, \"none\"))\n| eval model=if(used_ui=0, \"`exec_health_ai_model`\", coalesce(model, \"none\"))\n| eval key_ok=if(isnotnull(api_key) AND api_key!=\"\" AND api_key!=\"none\", 1, 0)\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| eval configured=if(mode=\"provider\" AND provider!=\"none\" AND provider!=\"\" AND key_ok=1 AND isnotnull(model) AND model!=\"none\" AND model!=\"\", 1, 0)\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider AS req_provider, note AS req_note\n| eval wait_sec=now()-strptime(coalesce(tostring(requested_at), \"\"), \"%Y-%m-%d %H:%M:%S\")\n| eval wait_min=if(isnotnull(wait_sec), round(wait_sec/60, 0), null())\n| eval ask_state=case(\n    picked=0, \"IDLE\",\n    mode!=\"provider\", \"IDLE\",\n    match(ask, \"^(ask|retry)\") AND configured=0, \"FAILED\",\n    req_status=\"failed\" OR req_status=\"error\", \"FAILED\",\n    req_status=\"done\" OR req_status=\"replied\", \"REPLIED\",\n    req_status=\"pending\" AND wait_min>=15, \"STALLED\",\n    req_status=\"pending\", \"WAITING\",\n    match(ask, \"^(ask|retry)\") AND configured=1 AND (isnull(req_status) OR req_status=\"\" OR req_status=\"none\"), \"WAITING\",\n    1=1, \"IDLE\")\n| eval ask_message=case(\n    ask_state=\"IDLE\" AND picked=0, \"Select a row in the work queue. The AI suggested fix fills in automatically.\",\n    ask_state=\"IDLE\" AND mode!=\"provider\", \"AI provider is off, so the playbook fix above is the suggestion. Open AI provider setup and SAVE a provider to get an AI suggested fix automatically.\",\n    ask_state=\"IDLE\", \"No AI request yet for this suggestion.\",\n    ask_state=\"FAILED\" AND configured=0, \"ASK failed: AI provider is not ready. Open AI provider setup and SAVE provider, model, and key.\",\n    ask_state=\"FAILED\", \"ASK failed: \".coalesce(req_note, \"the provider returned an error.\"),\n    ask_state=\"WAITING\", \"Asking \".coalesce(req_provider, provider, \"the provider\")+\" for a suggested fix...\",\n    ask_state=\"STALLED\", \"Still waiting after \".tostring(wait_min).\" minutes. Click the Fix cell in the row to ask again.\",\n    ask_state=\"REPLIED\", \"Provider replied. See the replies table below.\",\n    1=1, \"ASK status unknown.\")\n| eval _color_rank=case(ask_state=\"FAILED\" OR ask_state=\"STALLED\", 1, ask_state=\"WAITING\", 2, ask_state=\"REPLIED\", 3, 1=1, 3)\n| table ask_state, ask_message, _color_rank\n]"
       }
     },
     "ds_dq_ai_replies": {
@@ -230,7 +205,7 @@
       "name": "AI suggested fix",
       "options": {
         "extend": "ds_dq_ai_write",
-        "query": "| where 1=0\n| append [\n| makeresults\n| eval _gate=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider, model, reply, note AS req_note\n| join type=left finding_id [\n    | inputlookup dq_agent_ai_suggestions\n    | where now()-strptime(suggested_at, \"%Y-%m-%d %H:%M:%S\")>=86400\n    | sort 0 -suggested_at\n    | stats first(suggestion) AS previous_suggestion, first(suggested_at) AS previous_at, last(suggested_at) AS first_suggested_at, count AS earlier_suggestions by finding_id\n]\n| eval recurring=if(isnotnull(first_suggested_at), \"RECURRING\", \"no\")\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval recurring=if(reopened=1, \"RECURRING\", recurring)\n| eval earlier_ai_suggestion=coalesce(previous_at.\": \".previous_suggestion, \"none\")\n| eval ai_suggested_fix=case(\n    picked=0, \"Select a row in the work queue. The AI suggested fix fills in here automatically.\",\n    req_status=\"replied\", reply,\n    req_status=\"failed\", \"The AI could not answer: \".coalesce(req_note, \"provider error\").\". Use the playbook fix above or click ASK AGAIN.\",\n    1=1, \"Asking the AI provider for a suggested fix... If no provider is set, use the playbook fix above.\")\n| eval from_ai=if(req_status=\"replied\", provider.\" / \".model, \"none\")\n| eval _color_rank=case(req_status=\"replied\", 3, req_status=\"failed\", 1, 1=1, 2)\n| table ai_suggested_fix, recurring, earlier_ai_suggestion, first_suggested_at, from_ai, requested_at, _color_rank\n]"
+        "query": "| where 1=0\n| append [\n| makeresults\n| eval _gate=\"$tok_ai_ask$\", finding_id=\"$tok_finding_id$\"\n| eval picked=if(finding_id!=\"none\" AND finding_id!=\"\" AND finding_id!=\"placeholder\", 1, 0)\n| lookup dq_agent_ai_requests finding_id OUTPUT status AS req_status, requested_at, provider, model, reply, note AS req_note\n| join type=left finding_id [\n    | inputlookup dq_agent_ai_suggestions\n    | where now()-strptime(suggested_at, \"%Y-%m-%d %H:%M:%S\")>=86400\n    | sort 0 -suggested_at\n    | stats first(suggestion) AS previous_suggestion, first(suggested_at) AS previous_at, last(suggested_at) AS first_suggested_at, count AS earlier_suggestions by finding_id\n]\n| eval recurring=if(isnotnull(first_suggested_at), \"RECURRING\", \"no\")\n| lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at\n| eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, \"%Y-%m-%d %H:%M:%S\")>=86400, 1, 0)\n| eval status=case(reopened=1, \"open\", rec_decision=\"approve\", \"approved\", rec_decision=\"dismiss\", \"dismissed\", 1=1, \"open\")\n| eval recurring=if(reopened=1, \"RECURRING\", recurring)\n| eval earlier_ai_suggestion=coalesce(previous_at.\": \".previous_suggestion, \"none\")\n| eval ai_suggested_fix=case(\n    picked=0, \"Select a row in the work queue. The AI suggested fix fills in here automatically.\",\n    req_status=\"replied\", reply,\n    req_status=\"failed\", \"The AI could not answer: \".coalesce(req_note, \"provider error\").\". Use the playbook fix above, or click the Fix cell in the row to ask again.\",\n    1=1, \"Asking the AI provider for a suggested fix... If no provider is set, use the playbook fix above.\")\n| eval from_ai=if(req_status=\"replied\", provider.\" / \".model, \"none\")\n| eval _color_rank=case(req_status=\"replied\", 3, req_status=\"failed\", 1, 1=1, 2)\n| table ai_suggested_fix, recurring, earlier_ai_suggestion, first_suggested_at, from_ai, requested_at, _color_rank\n]"
       }
     },
     "ds_dq_ai_list_button": {
@@ -257,7 +232,7 @@
     "viz_header": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "# Derek+ Data Quality Agent\n**1. Click Select** on a row. The AI asks your saved provider for a suggested fix automatically. **2. Read** the playbook fix and the AI suggested fix. **3. Click APPROVE or DISMISS** to record the decision. Search does not open. The agent never changes Splunk by itself.",
+        "markdown": "# Derek+ Data Quality Agent\n**Click a row** and the AI asks your saved provider for a suggested fix automatically. Read the playbook fix and the AI suggested fix, then **click Approve or Dismiss in that row** to record the decision. Search does not open. The agent never changes Splunk by itself.",
         "fontSize": "default",
         "backgroundColor": "transparent"
       }
@@ -475,7 +450,6 @@
     },
     "viz_findings": {
       "type": "splunk.table",
-      "title": "1. Work queue \u2014 click Select on a row",
       "dataSources": {
         "primary": "ds_dq_queue"
       },
@@ -500,7 +474,7 @@
           "status": {
             "rowColors": "> table | seriesByName(\"status\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"status\") | matchValue(pillBg)",
-            "width": 80,
+            "width": 90,
             "align": "center"
           },
           "state": {
@@ -530,24 +504,32 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)",
-            "width": 110,
+            "width": 100,
             "align": "center"
           },
-          "issue": {
-            "width": 250
-          },
-          "entity": {
-            "width": 140
-          },
-          "fix": {
-            "width": 340
-          },
-          "confidence": {
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)",
             "width": 80,
             "align": "center"
           },
-          "action": {
-            "width": 70,
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)",
+            "width": 80,
+            "align": "center"
+          },
+          "issue": {
+            "width": 240
+          },
+          "entity": {
+            "width": 130
+          },
+          "fix": {
+            "width": 270
+          },
+          "confidence": {
+            "width": 80,
             "align": "center"
           }
         },
@@ -690,6 +672,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -703,6 +689,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -824,6 +814,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -837,6 +831,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -863,12 +861,16 @@
                 "key": "row._ai_brief.value"
               },
               {
-                "token": "tok_decision",
-                "key": "row._reset_decision.value"
-              },
-              {
                 "token": "tok_ai_ask",
                 "key": "row._ai_auto.value"
+              },
+              {
+                "token": "tok_row_status",
+                "key": "row.status.value"
+              },
+              {
+                "token": "tok_cell",
+                "key": "name"
               }
             ]
           }
@@ -877,7 +879,6 @@
     },
     "viz_selected": {
       "type": "splunk.table",
-      "title": "2. This suggestion \u2014 why it fired and what to do",
       "dataSources": {
         "primary": "ds_dq_selected"
       },
@@ -928,6 +929,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1068,6 +1077,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1081,6 +1094,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -1202,6 +1219,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -1216,141 +1237,16 @@
           {
             "match": "WAIT",
             "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
+            "value": "#222B3A"
           }
         ]
       }
     },
-    "viz_approve": {
-      "type": "splunk.table",
-      "title": "",
-      "dataSources": {
-        "primary": "ds_dq_approve"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": false,
-      "options": {
-        "count": 1,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
-          "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
-          "headerBackgroundColor": "#2EA043",
-          "headerColor": "#FFFFFF",
-          "align": "center"
-        },
-        "columnFormat": {
-          "button_label": {
-            "align": "center"
-          }
-        },
-        "headerVisibility": "none",
-        "fontSize": "default",
-        "backgroundColor": "#2EA043"
-      },
-      "context": {
-        "btnFill": [
-          {
-            "value": "#2EA043",
-            "to": 0.5
-          },
-          {
-            "value": "#FFFFFF",
-            "from": 0.5
-          }
-        ],
-        "btnText": [
-          {
-            "value": "#FFFFFF",
-            "to": 0.5
-          },
-          {
-            "value": "#2EA043",
-            "from": 0.5
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.setToken",
-          "options": {
-            "tokens": [
-              {
-                "token": "tok_decision",
-                "key": "row._click_action.value"
-              }
-            ]
-          }
-        }
-      ]
-    },
-    "viz_dismiss": {
-      "type": "splunk.table",
-      "title": "",
-      "dataSources": {
-        "primary": "ds_dq_dismiss"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": false,
-      "options": {
-        "count": 1,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
-          "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
-          "headerBackgroundColor": "#1B2438",
-          "headerColor": "#E6EDF3",
-          "align": "center"
-        },
-        "columnFormat": {
-          "button_label": {
-            "align": "center"
-          }
-        },
-        "headerVisibility": "none",
-        "fontSize": "default",
-        "backgroundColor": "#1B2438"
-      },
-      "context": {
-        "btnFill": [
-          {
-            "value": "#1B2438",
-            "to": 0.5
-          },
-          {
-            "value": "#E6EDF3",
-            "from": 0.5
-          }
-        ],
-        "btnText": [
-          {
-            "value": "#E6EDF3",
-            "to": 0.5
-          },
-          {
-            "value": "#1B2438",
-            "from": 0.5
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.setToken",
-          "options": {
-            "tokens": [
-              {
-                "token": "tok_decision",
-                "key": "row._click_action.value"
-              }
-            ]
-          }
-        }
-      ]
-    },
     "viz_recorded": {
       "type": "splunk.table",
-      "title": "Recorded decision",
       "dataSources": {
         "primary": "ds_dq_recorded"
       },
@@ -1401,6 +1297,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1541,6 +1445,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1554,6 +1462,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -1675,6 +1587,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -1689,13 +1605,16 @@
           {
             "match": "WAIT",
             "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
+            "value": "#222B3A"
           }
         ]
       }
     },
     "viz_brief": {
       "type": "splunk.table",
-      "title": "Optional \u2014 briefing to paste into Splunk AI Assistant",
       "dataSources": {
         "primary": "ds_dq_brief"
       },
@@ -1746,6 +1665,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1886,6 +1813,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -1899,6 +1830,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -2020,6 +1955,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -2034,73 +1973,13 @@
           {
             "match": "WAIT",
             "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
+            "value": "#222B3A"
           }
         ]
       }
-    },
-    "viz_ai_ask": {
-      "type": "splunk.table",
-      "title": "",
-      "dataSources": {
-        "primary": "ds_dq_ai_ready"
-      },
-      "showLastUpdated": false,
-      "showProgressBar": false,
-      "options": {
-        "count": 1,
-        "showRowNumbers": false,
-        "showInternalFields": false,
-        "tableFormat": {
-          "rowBackgroundColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnFill)",
-          "rowColors": "> table | seriesByName(\"_pressed\") | rangeValue(btnText)",
-          "headerBackgroundColor": "#58A6FF",
-          "headerColor": "#0B1220",
-          "align": "center"
-        },
-        "columnFormat": {
-          "button_label": {
-            "align": "center"
-          }
-        },
-        "headerVisibility": "none",
-        "fontSize": "default",
-        "backgroundColor": "#58A6FF"
-      },
-      "context": {
-        "btnFill": [
-          {
-            "value": "#58A6FF",
-            "to": 0.5
-          },
-          {
-            "value": "#0B1220",
-            "from": 0.5
-          }
-        ],
-        "btnText": [
-          {
-            "value": "#0B1220",
-            "to": 0.5
-          },
-          {
-            "value": "#58A6FF",
-            "from": 0.5
-          }
-        ]
-      },
-      "eventHandlers": [
-        {
-          "type": "drilldown.setToken",
-          "options": {
-            "tokens": [
-              {
-                "token": "tok_ai_ask",
-                "key": "row._click_action.value"
-              }
-            ]
-          }
-        }
-      ]
     },
     "viz_ai_ask_state": {
       "type": "splunk.singlevalue",
@@ -2195,7 +2074,6 @@
     },
     "viz_ai_ask_msg": {
       "type": "splunk.table",
-      "title": "ASK result \u2014 waiting or failed",
       "dataSources": {
         "primary": "ds_dq_ai_ask_status"
       },
@@ -2246,6 +2124,14 @@
           "recurring": {
             "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -2386,6 +2272,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -2399,6 +2289,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -2520,6 +2414,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -2534,13 +2432,16 @@
           {
             "match": "WAIT",
             "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
+            "value": "#222B3A"
           }
         ]
       }
     },
     "viz_ai_replies": {
       "type": "splunk.table",
-      "title": "3. AI suggested fix \u2014 fills in when you select a row",
       "dataSources": {
         "primary": "ds_dq_ai_replies"
       },
@@ -2593,6 +2494,14 @@
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)",
             "width": 100,
             "align": "center"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           },
           "ai_suggested_fix": {
             "width": 430
@@ -2748,6 +2657,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -2761,6 +2674,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -2882,6 +2799,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -2895,6 +2816,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
             "value": "#222B3A"
           }
         ]
@@ -2966,7 +2891,7 @@
     },
     "viz_ai_list": {
       "type": "splunk.table",
-      "title": "All AI suggestions \u2014 newest first",
+      "title": "ALL AI SUGGESTIONS \u2014 newest first",
       "dataSources": {
         "primary": "ds_dq_ai_list"
       },
@@ -3021,6 +2946,14 @@
             "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)",
             "width": 100,
             "align": "center"
+          },
+          "approve": {
+            "rowColors": "> table | seriesByName(\"approve\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"approve\") | matchValue(pillBg)"
+          },
+          "dismiss": {
+            "rowColors": "> table | seriesByName(\"dismiss\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"dismiss\") | matchValue(pillBg)"
           },
           "suggested_at": {
             "width": 130
@@ -3179,6 +3112,10 @@
             "value": "#3FB950"
           },
           {
+            "match": "Approve",
+            "value": "#3FB950"
+          },
+          {
             "match": "dismissed",
             "value": "#8B949E"
           },
@@ -3192,6 +3129,10 @@
           },
           {
             "match": "WAIT",
+            "value": "#8B949E"
+          },
+          {
+            "match": "Dismiss",
             "value": "#8B949E"
           }
         ],
@@ -3313,6 +3254,10 @@
             "value": "#0F2D1A"
           },
           {
+            "match": "Approve",
+            "value": "#0F2D1A"
+          },
+          {
             "match": "dismissed",
             "value": "#222B3A"
           },
@@ -3327,6 +3272,10 @@
           {
             "match": "WAIT",
             "value": "#222B3A"
+          },
+          {
+            "match": "Dismiss",
+            "value": "#222B3A"
           }
         ]
       },
@@ -3335,18 +3284,9 @@
     "viz_footer": {
       "type": "splunk.markdown",
       "options": {
-        "markdown": "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. Selecting a row asks the saved provider automatically; **ASK AGAIN** retries. Search does not open. Every reply is saved; **LIST AI SUGGESTIONS** shows them all. **RECURRING** means an AI suggestion for the same issue and entity was saved at least 24 hours ago; the earlier suggestion is shown with the new one and sent to the provider. A decision closes a problem for 24 hours; one still happening after that reopens for a new decision. The API key stays in the AI provider lookup \u2014 never in this queue table.",
+        "markdown": "Approve or Dismiss only records a decision. UF, HEC, and index repairs stay runbooks.Selecting a row asks the saved provider automatically; click the **Fix** cell in a row to ask again. Search does not open. Every reply is saved; **LIST AI SUGGESTIONS** shows them all. **RECURRING** means an AI suggestion for the same issue and entity was saved at least 24 hours ago; the earlier suggestion is shown with the new one and sent to the provider. A decision closes a problem for 24 hours; one still happening after that reopens for a new decision. The API key stays in the AI provider lookup \u2014 never in this queue table.",
         "fontSize": "default",
         "backgroundColor": "transparent"
-      }
-    },
-    "card_1": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
       }
     },
     "card_2": {
@@ -3376,31 +3316,52 @@
         "strokeWidth": 1
       }
     },
-    "card_5": {
+    "rule_5": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "card_6": {
-      "type": "splunk.rectangle",
+    "cap_5": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "markdown": "WORK QUEUE \u2014 click a row to select it; Approve / Dismiss in the row records the decision; Fix asks the AI again",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_7": {
+    "rule_6": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_6": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "SELECTED SUGGESTION \u2014 why it fired and what to do",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_7": {
+      "type": "splunk.rectangle",
+      "options": {
+        "fillColor": "#222C41",
+        "rx": 0
+      }
+    },
+    "cap_7": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "AI SUGGESTED FIX \u2014 fills in when you select a row",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
     "card_8": {
@@ -3412,66 +3373,55 @@
         "strokeWidth": 1
       }
     },
-    "card_9": {
+    "rule_9": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "pill_10": {
+    "cap_9": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "ASK RESULT \u2014 waiting or failed",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_10": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#2EA043",
-        "rx": 6
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "pill_11": {
+    "cap_10": {
+      "type": "splunk.markdown",
+      "options": {
+        "markdown": "RECORDED DECISION",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
+      }
+    },
+    "rule_11": {
       "type": "splunk.rectangle",
       "options": {
-        "fillColor": "#1B2438",
-        "rx": 6,
-        "strokeColor": "#34405A",
-        "strokeWidth": 1
+        "fillColor": "#222C41",
+        "rx": 0
       }
     },
-    "pill_12": {
-      "type": "splunk.rectangle",
+    "cap_11": {
+      "type": "splunk.markdown",
       "options": {
-        "fillColor": "#58A6FF",
-        "rx": 6
+        "markdown": "OPTIONAL \u2014 briefing to paste into Splunk AI Assistant",
+        "fontSize": "small",
+        "fontColor": "#8B949E",
+        "backgroundColor": "transparent"
       }
     },
-    "card_13": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
-      }
-    },
-    "card_14": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#151D2F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
-      }
-    },
-    "card_15": {
-      "type": "splunk.rectangle",
-      "options": {
-        "fillColor": "#0C121F",
-        "rx": 8,
-        "strokeColor": "#222C41",
-        "strokeWidth": 1
-      }
-    },
-    "pill_16": {
+    "pill_13": {
       "type": "splunk.rectangle",
       "options": {
         "fillColor": "#58A6FF",
@@ -3483,29 +3433,19 @@
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 2162,
+      "height": 2072,
       "display": "fit-to-width",
       "backgroundColor": "#151D2F"
     },
     "structure": [
       {
-        "item": "card_1",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 6,
-          "w": 1188,
-          "h": 78
-        }
-      },
-      {
         "item": "viz_header",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 14,
-          "w": 1172,
-          "h": 64
+          "x": 12,
+          "y": 6,
+          "w": 1176,
+          "h": 78
         }
       },
       {
@@ -3569,63 +3509,93 @@
         }
       },
       {
-        "item": "card_5",
+        "item": "rule_5",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 226,
-          "w": 1188,
-          "h": 288
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_5",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 230,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_findings",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 234,
-          "w": 1172,
-          "h": 274
+          "x": 12,
+          "y": 254,
+          "w": 1176,
+          "h": 260
         }
       },
       {
-        "item": "card_6",
+        "item": "rule_6",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 526,
-          "w": 1188,
-          "h": 208
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_6",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 530,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_selected",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 534,
-          "w": 1172,
-          "h": 194
+          "x": 12,
+          "y": 554,
+          "w": 1176,
+          "h": 180
         }
       },
       {
-        "item": "card_7",
+        "item": "rule_7",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 746,
-          "w": 1188,
-          "h": 158
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_7",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 750,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_ai_replies",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 754,
-          "w": 1172,
-          "h": 144
+          "x": 12,
+          "y": 774,
+          "w": 1176,
+          "h": 130
         }
       },
       {
@@ -3649,151 +3619,111 @@
         }
       },
       {
-        "item": "card_9",
+        "item": "rule_9",
         "type": "block",
         "position": {
-          "x": 6,
+          "x": 12,
           "y": 1046,
-          "w": 1188,
-          "h": 118
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_9",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1050,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_ai_ask_msg",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1054,
-          "w": 1172,
-          "h": 104
+          "x": 12,
+          "y": 1074,
+          "w": 1176,
+          "h": 90
         }
       },
       {
-        "item": "pill_10",
+        "item": "rule_10",
         "type": "block",
         "position": {
-          "x": 100,
-          "y": 1189,
-          "w": 200,
-          "h": 52
+          "x": 12,
+          "y": 1176,
+          "w": 1176,
+          "h": 1
         }
       },
       {
-        "item": "viz_approve",
+        "item": "cap_10",
         "type": "block",
         "position": {
-          "x": 108,
-          "y": 1193,
-          "w": 184,
-          "h": 44
-        }
-      },
-      {
-        "item": "pill_11",
-        "type": "block",
-        "position": {
-          "x": 500,
-          "y": 1189,
-          "w": 200,
-          "h": 52
-        }
-      },
-      {
-        "item": "viz_dismiss",
-        "type": "block",
-        "position": {
-          "x": 508,
-          "y": 1193,
-          "w": 184,
-          "h": 44
-        }
-      },
-      {
-        "item": "pill_12",
-        "type": "block",
-        "position": {
-          "x": 900,
-          "y": 1189,
-          "w": 200,
-          "h": 52
-        }
-      },
-      {
-        "item": "viz_ai_ask",
-        "type": "block",
-        "position": {
-          "x": 908,
-          "y": 1193,
-          "w": 184,
-          "h": 44
-        }
-      },
-      {
-        "item": "card_13",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1266,
-          "w": 1188,
-          "h": 118
+          "x": 12,
+          "y": 1180,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_recorded",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1274,
-          "w": 1172,
-          "h": 104
+          "x": 12,
+          "y": 1204,
+          "w": 1176,
+          "h": 90
         }
       },
       {
-        "item": "card_14",
+        "item": "rule_11",
         "type": "block",
         "position": {
-          "x": 6,
-          "y": 1396,
-          "w": 1188,
-          "h": 118
+          "x": 12,
+          "y": 1306,
+          "w": 1176,
+          "h": 1
+        }
+      },
+      {
+        "item": "cap_11",
+        "type": "block",
+        "position": {
+          "x": 12,
+          "y": 1310,
+          "w": 1176,
+          "h": 24
         }
       },
       {
         "item": "viz_brief",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1404,
-          "w": 1172,
-          "h": 104
-        }
-      },
-      {
-        "item": "card_15",
-        "type": "block",
-        "position": {
-          "x": 6,
-          "y": 1526,
-          "w": 1188,
-          "h": 68
+          "x": 12,
+          "y": 1334,
+          "w": 1176,
+          "h": 90
         }
       },
       {
         "item": "viz_footer",
         "type": "block",
         "position": {
-          "x": 14,
-          "y": 1534,
-          "w": 1172,
-          "h": 54
+          "x": 12,
+          "y": 1436,
+          "w": 1176,
+          "h": 68
         }
       },
       {
-        "item": "pill_16",
+        "item": "pill_13",
         "type": "block",
         "position": {
           "x": 100,
-          "y": 1619,
+          "y": 1529,
           "w": 200,
           "h": 52
         }
@@ -3803,7 +3733,7 @@
         "type": "block",
         "position": {
           "x": 108,
-          "y": 1623,
+          "y": 1533,
           "w": 184,
           "h": 44
         }
@@ -3813,7 +3743,7 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 1696,
+          "y": 1606,
           "w": 1188,
           "h": 448
         }

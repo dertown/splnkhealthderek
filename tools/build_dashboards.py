@@ -69,14 +69,14 @@ ROW_COLORS = [
 _PILL_WORDS = {
     "red": ["RED", "ALERT", "HOST DOWN", "DATA SILENT", "HEARTBEAT ONLY", "HIGH", "CLOCK AHEAD", "FAILED", "failed", "FAIL", "MISCONFIG", "STALLED"],
     "amber": ["YELLOW", "DELAYED", "WARMUP", "WATCH", "N/A", "open", "TESTING", "WAITING", "RECURRING"],
-    "green": ["GREEN", "OK", "approved", "replied", "PASS", "LOCAL", "READY", "PROVIDER"],
-    "grey": ["dismissed", "IDLE", "SKIP", "WAIT"],
+    "green": ["GREEN", "OK", "approved", "replied", "PASS", "LOCAL", "READY", "PROVIDER", "Approve"],
+    "grey": ["dismissed", "IDLE", "SKIP", "WAIT", "Dismiss"],
 }
 _PILL_INK = {"red": RED, "amber": YELLOW, "green": GREEN, "grey": MUTED}
 _PILL_TINT = {"red": "#3D1418", "amber": "#3A2E0C", "green": "#0F2D1A", "grey": "#222B3A"}
 PILL_TEXT = [{"match": w, "value": _PILL_INK[k]} for k, ws in _PILL_WORDS.items() for w in ws]
 PILL_BG = [{"match": w, "value": _PILL_TINT[k]} for k, ws in _PILL_WORDS.items() for w in ws]
-PILL_COLUMNS = ["severity", "status", "state", "baseline_state", "latency_state", "hec_state", "tile_status", "decision", "recurring"]
+PILL_COLUMNS = ["severity", "status", "state", "baseline_state", "latency_state", "hec_state", "tile_status", "decision", "recurring", "approve", "dismiss"]
 
 
 def model_dropdown_items() -> list[dict]:
@@ -168,7 +168,7 @@ def md(text: str, font: str = "default") -> dict:
     }
 
 
-def decision_button(title: str, ds_id: str, token: str = "tok_decision", fill: str | None = None) -> dict:
+def decision_button(title: str, ds_id: str, token: str = "tok_action", fill: str | None = None) -> dict:
     """One-row table so row._click_action.value is a real table drilldown.
 
     The action lives in a hidden _ field so the label is the only visible column and
@@ -359,6 +359,24 @@ def area(title: str, ds_id: str, y_title: str) -> dict:
     }
 
 
+def pie(title: str, ds_id: str) -> dict:
+    return {
+        "type": "splunk.pie",
+        "title": title,
+        "dataSources": {"primary": ds_id},
+        "showLastUpdated": True,
+        "showProgressBar": True,
+        "options": {
+            "seriesColors": ACCENT + ["#00CDAF", "#DD9900", "#FF677B", "#009CEB", "#7B56DB"],
+            "legendDisplay": "right",
+            "labelDisplay": "valuesAndPercentage",
+            "showDonutHole": True,
+            "collapseThreshold": 0.03,
+            "collapseLabel": "other",
+        },
+    }
+
+
 def block(item: str, x: int, y: int, w: int, h: int) -> dict:
     return {"item": item, "type": "block", "position": {"x": x, "y": y, "w": w, "h": h}}
 
@@ -418,8 +436,9 @@ def grid(structure: list, extra_inputs: list | None = None, include_time: bool =
 # Dashboard Studio card styling
 #
 # Every view is written as a grid of blocks. studio_cards() turns that grid into a
-# Dashboard Studio absolute layout: a dark canvas, a rounded card behind each panel,
-# and a thin colored accent bar per panel type. Panels keep their ids and data.
+# Dashboard Studio absolute layout shaped like the reference screen: a navy canvas,
+# dark KPI cards across the top, and everything else flat and edge to edge, each
+# section opened by a hairline rule and a small muted caption. Panels keep their ids and data.
 # ---------------------------------------------------------------------------
 
 CANVAS = "#151D2F"
@@ -435,6 +454,9 @@ ACCENT_CHART = BLUE
 ACCENT_GRAPH = BLUE
 CANVAS_W = 1200
 GUTTER = 6
+FLAT_PAD = 12
+CAP_H = 24
+SECTION_TYPES = ("splunk.table", "splunk.line", "splunk.area", "splunk.column", "splunk.pie", "splunk.linkgraph", "splunk.sankey")
 BAR_H = 4
 # Buttons render as a compact rounded pill centered in their grid cell. The table
 # inside shows a single auto-width column; a fixed-width or second column makes
@@ -447,7 +469,7 @@ BUTTON_PAD_Y = 4
 BUTTON_INK = "#000000"
 HIDDEN_PREFIXES = ()
 TRANSPARENT_TYPES = (
-    "splunk.table", "splunk.line", "splunk.area", "splunk.column", "splunk.linkgraph", "splunk.sankey",
+    "splunk.table", "splunk.line", "splunk.area", "splunk.column", "splunk.pie", "splunk.linkgraph", "splunk.sankey",
     "splunk.singlevalue", "splunk.markdown",
 )
 
@@ -560,22 +582,31 @@ def studio_cards(definition: dict) -> dict:
             structure.append(block(item, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - 2 * GUTTER))
             continue
         n += 1
-        header = item == "viz_header"
-        card_id, bar_id = f"card_{n}", f"bar_{n}"
-        flat = viz.get("type") == "splunk.table"
-        vizzes[card_id] = _rect(TABLE_FILL if flat else (HEADER_FILL if header else CARD_FILL), CARD_LINE)
-        structure.append(block(card_id, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - 2 * GUTTER))
-        accent = (ACCENT_TABLE if header else _accent_for(viz)) if ACCENT_BARS else None
-        inset_left, inset_top = 14, 14
-        if header and accent:
-            vizzes[bar_id] = _rect(accent, None, rx=3)
-            structure.append(block(bar_id, x + GUTTER, y + GUTTER, 6, h - 2 * GUTTER))
-            inset_left = 22
-        elif accent:
-            vizzes[bar_id] = _rect(accent, None, rx=2)
-            structure.append(block(bar_id, x + GUTTER, y + GUTTER, w - 2 * GUTTER, BAR_H))
-            inset_top = 14
-        structure.append(block(item, x + inset_left, y + inset_top, w - inset_left - 14, h - inset_top - 12))
+        if viz.get("type") == "splunk.singlevalue":
+            # KPI tiles are the only cards, like the summary tiles in the reference screen.
+            card_id = f"card_{n}"
+            vizzes[card_id] = _rect(CARD_FILL, CARD_LINE)
+            structure.append(block(card_id, x + GUTTER, y + GUTTER, w - 2 * GUTTER, h - 2 * GUTTER))
+            structure.append(block(item, x + 14, y + 14, w - 28, h - 26))
+            continue
+        # Everything else sits flat on the page: a hairline rule, a small muted caption
+        # in place of the panel title, then the table or chart edge to edge.
+        fx, fw = x + FLAT_PAD, w - 2 * FLAT_PAD
+        top = y + GUTTER
+        if viz.get("type") in SECTION_TYPES:
+            rule_id = f"rule_{n}"
+            vizzes[rule_id] = _rect(CARD_LINE, None, rx=0)
+            structure.append(block(rule_id, fx, top, fw, 1))
+            title = viz.pop("title", None)
+            if title:
+                cap_id = f"cap_{n}"
+                vizzes[cap_id] = {
+                    "type": "splunk.markdown",
+                    "options": {"markdown": title, "fontSize": "small", "fontColor": MUTED, "backgroundColor": "transparent"},
+                }
+                structure.append(block(cap_id, fx, top + 4, fw, CAP_H))
+                top += CAP_H + 4
+        structure.append(block(item, fx, top, fw, max(40, y + h - GUTTER - top)))
 
     new_layout: dict = {
         "type": "absolute",
@@ -660,8 +691,8 @@ search `exec_health_license_usage`
 | stats sum(GB) as GB by idx
 | rename idx as index
 | sort 0 -GB
-| head 20
-| eval _color_rank=3
+| head 10
+| table index, GB
 """.strip()
 
 Q_INTROSPECTION = r"""
@@ -1144,6 +1175,7 @@ def executive_overview() -> dict:
             "ds_agent": ds("Open agent findings", Q_DQ_AGENT_FINDINGS + EXEC_AGENT_COUNTS, "-24h", "now"),
             "ds_license_daily": ds("License GB/day vs 7d MA", Q_LICENSE_DAILY, "-15d@d", "@d", refresh="15m"),
             "ds_live": ds("Live indexed events 15m", Q_LIVE, "-15m", "now"),
+            "ds_top_indexes": ds("Top indexes by GB (7 days)", Q_TOP_INDEXES, "-7d@d", "@d", refresh="15m"),
         },
         "visualizations": {
             "viz_header": md(
@@ -1179,6 +1211,7 @@ def executive_overview() -> dict:
             "viz_agent": agent_tile,
             "viz_areas": areas_table,
             "viz_ingest_chart": line("Daily ingestion vs 7-day moving average", "ds_license_daily", "GB / day"),
+            "viz_top_indexes": pie("Top indexes by license usage (GB, last 7 days)", "ds_top_indexes"),
             "viz_footer": md(
                 "Every status comes from the same searches as the dashboard it opens. "
                 "Agent findings are not counted in Overall health: they are built from these same signals, "
@@ -1201,7 +1234,8 @@ def executive_overview() -> dict:
                 block("viz_area_sc4s", 720, 270, 240, 160),
                 block("viz_agent", 960, 270, 240, 160),
                 block("viz_areas", 0, 430, 1200, 280),
-                block("viz_ingest_chart", 0, 710, 1200, 300),
+                block("viz_ingest_chart", 0, 710, 700, 300),
+                block("viz_top_indexes", 700, 710, 500, 300),
                 block("viz_footer", 0, 1010, 1200, 110),
             ],
             include_time=False,
@@ -1440,6 +1474,19 @@ DECISION_STATUS = r"""
 | lookup dq_agent_approvals finding_id OUTPUT decision AS rec_decision, decided_at AS rec_decided_at
 | eval reopened=if(isnotnull(rec_decision) AND now()-strptime(rec_decided_at, "%Y-%m-%d %H:%M:%S")>=86400, 1, 0)
 | eval status=case(reopened=1, "open", rec_decision="approve", "approved", rec_decision="dismiss", "dismissed", 1=1, "open")
+""".rstrip()
+
+# The click that records a decision also updates the page at once. Without this the
+# queue and the write run side by side and the queue can read the lookup before the
+# write lands. Only the clicked row is overridden, and only for an open row; after the
+# next click the lookup (already written) is the source again.
+DECISION_NOW = r"""
+| eval _now_status=case(
+    "$tok_row_status$"!="open" OR finding_id!="$tok_finding_id$", null(),
+    "$tok_cell$"="approve", "approved",
+    "$tok_cell$"="dismiss", "dismissed")
+| eval status=coalesce(_now_status, status)
+| fields - _now_status
 """.rstrip()
 
 Q_DQ_AGENT_FINDINGS = dq_agent_findings_core() + r"""
@@ -1728,7 +1775,6 @@ def data_topology() -> dict:
                 "ds_tcpin",
                 "| stats dc(data_source) as forwarders, dc(receiver) as receivers, sum(kb) as kb",
             ),
-            "ds_top_indexes": ds("Top indexes by GB", Q_TOP_INDEXES),
             "ds_topo_link": chain(
                 "Indexed topology nodes only",
                 "ds_topo_paths",
@@ -1740,7 +1786,7 @@ def data_topology() -> dict:
                 "# Data topology\n"
                 "How servers and data sources reach Splunk: **data source → ingest path → index**, "
                 "plus **forwarder → indexer** from `_internal` `tcpin_connections`. "
-                "**Click a data_source** in the graph or table for latest event, totals, "
+                "**Click a data_source** in the flow diagram or the forwarder table for latest event, totals, "
                 "24-hour trend, and sudden drops or bursts. Search does not open."
             ),
             "viz_sources": single_number("Data sources", "ds_topo_counts", "sources", "", None, 0),
@@ -1749,14 +1795,12 @@ def data_topology() -> dict:
             "viz_fwds": single_number("Forwarders (tcpin)", "ds_tcpin_counts", "forwarders", "", None, 0),
             "viz_link": drill_source(
                 linkgraph(
-                    "Sources → ingest path → Splunk index",
+                    "Top source → path → index flows — click data_source",
                     "ds_topo_link",
                     ["data_source", "ingest_path", "splunk_index"],
                 )
             ),
             "viz_sankey": sankey("Volume flow (events) through ingest paths", "ds_topo_sankey"),
-            "viz_top_indexes": table("Top indexes by license usage (GB)", "ds_top_indexes", count=15),
-            "viz_table": drill_source(table("Top source → path → index flows — click data_source", "ds_topo_paths", count=20)),
             "viz_src_header": md(
                 "## Selected data source\n"
                 "Click a **data_source** above. First/latest event and totals follow the time picker; "
@@ -1784,57 +1828,38 @@ def data_topology() -> dict:
                 block("viz_paths", 300, 90, 300, 140),
                 block("viz_indexes", 600, 90, 300, 140),
                 block("viz_fwds", 900, 90, 300, 140),
-                block("viz_link", 0, 230, 1200, 380),
-                block("viz_sankey", 0, 610, 700, 320),
-                block("viz_top_indexes", 700, 610, 500, 320),
-                block("viz_table", 0, 930, 1200, 280),
-                block("viz_src_header", 0, 1210, 1200, 90),
-                block("viz_src_stats", 0, 1300, 1200, 150),
-                block("viz_src_trend", 0, 1450, 1200, 280),
-                block("viz_src_outliers", 0, 1730, 1200, 260),
-                block("viz_tcpin_sankey", 0, 1990, 1200, 300),
-                block("viz_tcpin_table", 0, 2290, 1200, 280),
-                block("viz_footer", 0, 2570, 1200, 110),
+                block("viz_link", 0, 230, 1200, 420),
+                block("viz_sankey", 0, 650, 1200, 320),
+                block("viz_src_header", 0, 970, 1200, 90),
+                block("viz_src_stats", 0, 1060, 1200, 150),
+                block("viz_src_trend", 0, 1210, 1200, 280),
+                block("viz_src_outliers", 0, 1490, 1200, 260),
+                block("viz_tcpin_sankey", 0, 1750, 1200, 300),
+                block("viz_tcpin_table", 0, 2050, 1200, 280),
+                block("viz_footer", 0, 2330, 1200, 110),
             ],
         ),
     }
 
 
 Q_DQ_AGENT_STATUS = r"""
-| eval _gate="$tok_decision$"
-""".rstrip() + DECISION_STATUS + r"""
+| eval _gate="$tok_cell$|$tok_row_status$"
+""".rstrip() + DECISION_STATUS + DECISION_NOW + r"""
 | where status="open"
 | stats count as issues, count(eval(severity="RED")) as red_issues
 | eval agent_status=case(red_issues>0, "RED", issues>0, "YELLOW", 1=1, "GREEN")
 | appendpipe [ stats count | where count=0 | eval issues=0, agent_status="GREEN" ]
 """
 
-Q_DQ_CHOOSE_APPROVE = r"""
-| makeresults
-| eval finding_id="$tok_finding_id$"
-| eval picked=if(finding_id!="none" AND finding_id!="", 1, 0)
-| eval _pressed=if(picked=1 AND "$tok_decision$"="approve", 1, 0)
-| eval button_label=case(picked=0, "PICK A ROW FIRST", _pressed=1, "APPROVED", 1=1, "APPROVE")
-| eval _click_action="approve"
-| table button_label, _click_action, _pressed
-"""
 
-Q_DQ_CHOOSE_DISMISS = r"""
-| makeresults
-| eval finding_id="$tok_finding_id$"
-| eval picked=if(finding_id!="none" AND finding_id!="", 1, 0)
-| eval _pressed=if(picked=1 AND "$tok_decision$"="dismiss", 1, 0)
-| eval button_label=case(picked=0, "PICK A ROW FIRST", _pressed=1, "DISMISSED", 1=1, "DISMISS")
-| eval _click_action="dismiss"
-| table button_label, _click_action, _pressed
-"""
 
 # Only writes when APPROVE/DISMISS is chosen. Empty results skip appendpipe, so
 # page load does not rewrite the lookup (that long job was getting cancelled).
 Q_DQ_SAVE_DECISION = r"""
 | makeresults
-| eval finding_id="$tok_finding_id$", decision="$tok_decision$"
-| where (decision="approve" OR decision="dismiss") AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder"
+| eval finding_id="$tok_finding_id$", cell="$tok_cell$", row_status="$tok_row_status$"
+| eval decision=case(cell="approve" OR cell="dismiss", cell)
+| where isnotnull(decision) AND row_status="open" AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder"
 | eval actor="human_dashboard", decided_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="human_in_the_loop", entity="none"
 | eval _key=finding_id
 | table _key, finding_id, decision, actor, decided_at, note, entity
@@ -1848,7 +1873,7 @@ Q_DQ_SAVE_DECISION = r"""
 
 Q_DQ_RECORDED_READ = r"""
 | inputlookup dq_agent_approvals
-| eval _gate="$tok_decision$"
+| eval _gate="$tok_cell$|$tok_row_status$"
 | where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none" AND finding_id!="placeholder"
 | eval decision_state=if(now()-strptime(decided_at, "%Y-%m-%d %H:%M:%S")>=86400, "reopened: needs a new decision", "current")
 | eval _color_rank=case(decision_state!="current", 2, decision="approve" OR decision="dismiss", 3, 1=1, 2)
@@ -1874,16 +1899,16 @@ RECUR_HISTORY = r"""
 """.rstrip()
 
 Q_DQ_QUEUE_VIEW = r"""
-| eval _gate="$tok_decision$"
+| eval _gate="$tok_cell$|$tok_row_status$"
 """ .rstrip() + RECUR_HISTORY + r"""
-""".rstrip() + DECISION_STATUS + r"""
+""".rstrip() + DECISION_STATUS + DECISION_NOW + r"""
 | eval recurring=if(reopened=1, "RECURRING", recurring)
-| eval action=if(status="open", "Select", "Done")
+| eval approve=if(status="open", "Approve", "—"), dismiss=if(status="open", "Dismiss", "—")
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval fix=coalesce(suggested_fix, "")
 | eval fix=if(len(fix)>80, substr(fix,1,80)."...", fix)
-| eval _finding_id=finding_id, _ai_brief=ai_brief, _reset_decision="review", _ai_auto="ask"
-| table severity, issue, entity, fix, recurring, confidence, action, status, _finding_id, _ai_brief, _reset_decision, _ai_auto, _color_rank
+| eval _finding_id=finding_id, _ai_brief=ai_brief, _ai_auto="ask"
+| table severity, issue, entity, fix, recurring, confidence, status, approve, dismiss, _finding_id, _ai_brief, _ai_auto, _color_rank
 """
 
 Q_DQ_PICKER = r"""
@@ -1894,8 +1919,8 @@ Q_DQ_PICKER = r"""
 
 Q_DQ_SUGGESTION = r"""
 | where finding_id="$tok_finding_id$" AND "$tok_finding_id$"!="none" AND finding_id!=""
-| eval _gate="$tok_decision$"
-""".rstrip() + DECISION_STATUS + r"""
+| eval _gate="$tok_cell$|$tok_row_status$"
+""".rstrip() + DECISION_STATUS + DECISION_NOW + r"""
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval where_to_act=coalesce(splunk_web_path, "Open the matching dashboard in this app")
 | table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank
@@ -1944,29 +1969,13 @@ Q_DQ_AI_STATUS = Q_DQ_AI_CFG_ROW + r"""
 | table setup_reason, ai_status, status_color, mode, provider, provider_label, model, key_state, endpoint, inbox_index, inbox_sourcetype, notes, _color_rank
 """
 
-Q_DQ_AI_ASK_BUTTON = r"""
-| makeresults
-| eval finding_id="$tok_finding_id$", stanza="default"
-| lookup dq_agent_ai_config stanza OUTPUT mode, provider, api_key, updated_at
-| eval _updated=coalesce(tostring(updated_at), "0")
-| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
-| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
-| eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
-| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
-| eval picked=if(finding_id!="none" AND finding_id!="" AND finding_id!="placeholder", 1, 0)
-| eval configured=if(mode="provider" AND provider!="none" AND provider!="" AND key_ok=1, 1, 0)
-| eval _pressed=if(picked=1 AND configured=1 AND match("$tok_ai_ask$", "^retry"), 1, 0)
-| eval button_label=case(picked=0, "PICK A ROW FIRST", configured=0, "OPEN AI SETUP FIRST", _pressed=1, "ASKED", 1=1, "ASK AGAIN")
-| eval _click_action="retry".tostring(now())
-| table button_label, _click_action, _pressed
-"""
 
 # Writes a pending ASK row only after the ASK tile is clicked. Page load is a no-op.
 # Each reply is also appended to dq_agent_ai_suggestions (KV Store), which keeps every
 # reply and survives app updates. dq_agent_ai_requests keeps only the latest per finding.
 Q_DQ_AI_ASK_WRITE = r"""
 | makeresults
-| eval ask="$tok_ai_ask$", finding_id="$tok_finding_id$", entity="$tok_entity$", issue="$tok_issue$", ai_brief="$tok_ai_brief$", stanza="default"
+| eval ask="$tok_ai_ask$", cell="$tok_cell$", finding_id="$tok_finding_id$", entity="$tok_entity$", issue="$tok_issue$", ai_brief="$tok_ai_brief$", stanza="default"
 | lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at
 | eval _updated=coalesce(tostring(updated_at), "0")
 | eval used_ui=if(_updated="0" OR _updated="", 0, 1)
@@ -1978,7 +1987,7 @@ Q_DQ_AI_ASK_WRITE = r"""
 | where match(ask, "^(ask|retry)") AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder" AND mode="provider" AND provider!="none" AND provider!="" AND key_ok=1
 | lookup dq_agent_ai_requests finding_id OUTPUT status AS prev_status, requested_at AS prev_at
 | eval prev_age=coalesce(now()-strptime(coalesce(tostring(prev_at), ""), "%Y-%m-%d %H:%M:%S"), 99999)
-| where NOT (prev_status="replied" AND prev_age<3600 AND ask="ask")
+| where NOT (prev_status="replied" AND prev_age<3600 AND cell!="fix")
 | lookup dq_agent_ai_providers provider OUTPUT default_endpoint
 | eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
 | eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
@@ -2227,7 +2236,7 @@ Q_DQ_AI_ASK_STATUS = r"""
     ask_state="FAILED" AND configured=0, "ASK failed: AI provider is not ready. Open AI provider setup and SAVE provider, model, and key.",
     ask_state="FAILED", "ASK failed: ".coalesce(req_note, "the provider returned an error."),
     ask_state="WAITING", "Asking ".coalesce(req_provider, provider, "the provider")+" for a suggested fix...",
-    ask_state="STALLED", "Still waiting after ".tostring(wait_min)." minutes. Click ASK AGAIN.",
+    ask_state="STALLED", "Still waiting after ".tostring(wait_min)." minutes. Click the Fix cell in the row to ask again.",
     ask_state="REPLIED", "Provider replied. See the replies table below.",
     1=1, "ASK status unknown.")
 | eval _color_rank=case(ask_state="FAILED" OR ask_state="STALLED", 1, ask_state="WAITING", 2, ask_state="REPLIED", 3, 1=1, 3)
@@ -2246,7 +2255,7 @@ Q_DQ_AI_REPLIES = r"""
 | eval ai_suggested_fix=case(
     picked=0, "Select a row in the work queue. The AI suggested fix fills in here automatically.",
     req_status="replied", reply,
-    req_status="failed", "The AI could not answer: ".coalesce(req_note, "provider error").". Use the playbook fix above or click ASK AGAIN.",
+    req_status="failed", "The AI could not answer: ".coalesce(req_note, "provider error").". Use the playbook fix above, or click the Fix cell in the row to ask again.",
     1=1, "Asking the AI provider for a suggested fix... If no provider is set, use the playbook fix above.")
 | eval from_ai=if(req_status="replied", provider." / ".model, "none")
 | eval _color_rank=case(req_status="replied", 3, req_status="failed", 1, 1=1, 2)
@@ -2256,7 +2265,7 @@ Q_DQ_AI_REPLIES = r"""
 
 def data_quality_agent() -> dict:
     findings_table = table(
-        "1. Work queue — click Select on a row",
+        "WORK QUEUE — click a row to select it; Approve / Dismiss in the row records the decision; Fix asks the AI again",
         "ds_dq_queue",
         count=20,
     )
@@ -2270,8 +2279,9 @@ def data_quality_agent() -> dict:
                     {"token": "tok_entity", "key": "row.entity.value"},
                     {"token": "tok_issue", "key": "row.issue.value"},
                     {"token": "tok_ai_brief", "key": "row._ai_brief.value"},
-                    {"token": "tok_decision", "key": "row._reset_decision.value"},
                     {"token": "tok_ai_ask", "key": "row._ai_auto.value"},
+                    {"token": "tok_row_status", "key": "row.status.value"},
+                    {"token": "tok_cell", "key": "name"},
                 ]
             },
         }
@@ -2279,27 +2289,28 @@ def data_quality_agent() -> dict:
     findings_table["options"]["headerVisibility"] = "fixed"
     column_formats(findings_table, {
         "severity": {"width": 90, "align": "center"},
-        "issue": {"width": 250},
-        "entity": {"width": 140},
-        "fix": {"width": 340},
-        "recurring": {"width": 110, "align": "center"},
+        "issue": {"width": 240},
+        "entity": {"width": 130},
+        "fix": {"width": 270},
+        "recurring": {"width": 100, "align": "center"},
         "confidence": {"width": 80, "align": "center"},
-        "action": {"width": 70, "align": "center"},
-        "status": {"width": 80, "align": "center"},
+        "status": {"width": 90, "align": "center"},
+        "approve": {"width": 80, "align": "center"},
+        "dismiss": {"width": 80, "align": "center"},
     })
     suggestion_table = table(
-        "2. This suggestion — why it fired and what to do",
+        "SELECTED SUGGESTION — why it fired and what to do",
         "ds_dq_selected",
         count=3,
     )
     suggestion_table.pop("eventHandlers", None)
     suggestion_table["showLastUpdated"] = False
-    recorded_table = table("Recorded decision", "ds_dq_recorded", count=3)
+    recorded_table = table("RECORDED DECISION", "ds_dq_recorded", count=3)
     recorded_table.pop("eventHandlers", None)
     recorded_table["showLastUpdated"] = False
-    brief_table = table("Optional — briefing to paste into Splunk AI Assistant", "ds_dq_brief", count=1)
+    brief_table = table("OPTIONAL — briefing to paste into Splunk AI Assistant", "ds_dq_brief", count=1)
     brief_table.pop("eventHandlers", None)
-    replies_table = table("3. AI suggested fix — fills in when you select a row", "ds_dq_ai_replies", count=1)
+    replies_table = table("AI SUGGESTED FIX — fills in when you select a row", "ds_dq_ai_replies", count=1)
     replies_table.pop("eventHandlers", None)
     replies_table["showLastUpdated"] = False
     column_formats(replies_table, {
@@ -2310,10 +2321,10 @@ def data_quality_agent() -> dict:
         "from_ai": {"width": 100},
         "requested_at": {"width": 100},
     })
-    ask_msg_table = table("ASK result — waiting or failed", "ds_dq_ai_ask_status", count=1)
+    ask_msg_table = table("ASK RESULT — waiting or failed", "ds_dq_ai_ask_status", count=1)
     ask_msg_table.pop("eventHandlers", None)
     ask_msg_table["showLastUpdated"] = False
-    ai_list_table = table("All AI suggestions — newest first", "ds_dq_ai_list", count=10)
+    ai_list_table = table("ALL AI SUGGESTIONS — newest first", "ds_dq_ai_list", count=10)
     ai_list_table.pop("eventHandlers", None)
     ai_list_table["hideWhenNoData"] = True
     column_formats(ai_list_table, {
@@ -2328,7 +2339,7 @@ def data_quality_agent() -> dict:
     })
     return {
         "title": "Derek+ Data Quality Agent",
-        "description": "Click Select, then click APPROVE or DISMISS. That records the decision. Search does not open.",
+        "description": "Click Approve or Dismiss in a queue row to record the decision. Search does not open.",
         "defaults": defaults(),
         "inputs": {
             "input_global_trp": timerange("-24h@h,now"),
@@ -2339,13 +2350,8 @@ def data_quality_agent() -> dict:
             },
             "input_finding": {
                 "type": "input.text",
-                "title": "Selected suggestion (click Select in the queue)",
+                "title": "Selected suggestion (click a queue row)",
                 "options": {"token": "tok_finding_id", "defaultValue": "none"},
-            },
-            "input_decision": {
-                "type": "input.text",
-                "title": "Decision latch (set by APPROVE or DISMISS)",
-                "options": {"token": "tok_decision", "defaultValue": "review"},
             },
             "input_ai_ask": {
                 "type": "input.text",
@@ -2356,6 +2362,16 @@ def data_quality_agent() -> dict:
                 "type": "input.text",
                 "title": "List latch (set by LIST AI SUGGESTIONS)",
                 "options": {"token": "tok_ai_list", "defaultValue": "hide"},
+            },
+            "input_cell": {
+                "type": "input.text",
+                "title": "Clicked column (set by clicking a queue row)",
+                "options": {"token": "tok_cell", "defaultValue": "none"},
+            },
+            "input_row_status": {
+                "type": "input.text",
+                "title": "Selected row status",
+                "options": {"token": "tok_row_status", "defaultValue": "none"},
             },
             "input_entity": {
                 "type": "input.text",
@@ -2387,12 +2403,9 @@ def data_quality_agent() -> dict:
 | table ai_brief
 """.strip(),
             ),
-            "ds_dq_approve": ds("Approve control", Q_DQ_CHOOSE_APPROVE, "0", "now", refresh=None),
-            "ds_dq_dismiss": ds("Dismiss control", Q_DQ_CHOOSE_DISMISS, "0", "now", refresh=None),
             "ds_dq_save": ds("Write agent decision", Q_DQ_SAVE_DECISION, "0", "now", refresh=None),
             "ds_dq_recorded": chain("Recorded decision", "ds_dq_save", "| where 1=0\n| append [\n" + Q_DQ_RECORDED_READ.strip() + "\n]"),
             "ds_dq_ai_status": ds("AI provider status", Q_DQ_AI_CONN_TEST, "0", "now", refresh=None),
-            "ds_dq_ai_ready": ds("Ask AI control", Q_DQ_AI_ASK_BUTTON, "0", "now", refresh=None),
             "ds_dq_ai_write": ds("Write ASK request", Q_DQ_AI_ASK_WRITE, "0", "now", refresh=None),
             "ds_dq_ai_ask_status": chain("ASK wait or fail", "ds_dq_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_ASK_STATUS.strip() + "\n]"),
             "ds_dq_ai_replies": chain("AI suggested fix", "ds_dq_ai_write", "| where 1=0\n| append [\n" + Q_DQ_AI_REPLIES.strip() + "\n]"),
@@ -2402,9 +2415,8 @@ def data_quality_agent() -> dict:
         "visualizations": {
             "viz_header": md(
                 "# Derek+ Data Quality Agent\n"
-                "**1. Click Select** on a row. The AI asks your saved provider for a suggested fix automatically. "
-                "**2. Read** the playbook fix and the AI suggested fix. "
-                "**3. Click APPROVE or DISMISS** to record the decision. "
+                "**Click a row** and the AI asks your saved provider for a suggested fix automatically. "
+                "Read the playbook fix and the AI suggested fix, then **click Approve or Dismiss in that row** to record the decision. "
                 "Search does not open. The agent never changes Splunk by itself."
             ),
             "viz_status": single_status("Queue health", "ds_dq_status", "agent_status", "issues"),
@@ -2424,19 +2436,16 @@ def data_quality_agent() -> dict:
             },
             "viz_findings": findings_table,
             "viz_selected": suggestion_table,
-            "viz_approve": decision_button("", "ds_dq_approve", fill=BTN_GREEN),
-            "viz_dismiss": decision_button("", "ds_dq_dismiss", fill=BTN_SECONDARY),
             "viz_recorded": recorded_table,
             "viz_brief": brief_table,
-            "viz_ai_ask": decision_button("", "ds_dq_ai_ready", token="tok_ai_ask", fill=BLUE),
             "viz_ai_ask_state": single_status("ASK status", "ds_dq_ai_ask_status", "ask_state", "ask_state"),
             "viz_ai_ask_msg": ask_msg_table,
             "viz_ai_replies": replies_table,
             "viz_ai_list_button": decision_button("", "ds_dq_ai_list_button", token="tok_ai_list", fill=BLUE),
             "viz_ai_list": ai_list_table,
             "viz_footer": md(
-                "APPROVE or DISMISS only records a decision. UF, HEC, and index repairs stay runbooks. "
-                "Selecting a row asks the saved provider automatically; **ASK AGAIN** retries. Search does not open. "
+                "Approve or Dismiss only records a decision. UF, HEC, and index repairs stay runbooks."
+                "Selecting a row asks the saved provider automatically; click the **Fix** cell in a row to ask again. Search does not open. "
                 "Every reply is saved; **LIST AI SUGGESTIONS** shows them all. "
                 "**RECURRING** means an AI suggestion for the same issue and entity was saved at least 24 hours ago; "
                 "the earlier suggestion is shown with the new one and sent to the provider. "
@@ -2455,14 +2464,11 @@ def data_quality_agent() -> dict:
                 block("viz_ai_replies", 0, 740, 1200, 170),
                 block("viz_ai_ask_state", 0, 910, 280, 130),
                 block("viz_ai_ask_msg", 280, 910, 920, 130),
-                block("viz_approve", 0, 1040, 400, 90),
-                block("viz_dismiss", 400, 1040, 400, 90),
-                block("viz_ai_ask", 800, 1040, 400, 90),
-                block("viz_recorded", 0, 1130, 1200, 130),
-                block("viz_brief", 0, 1260, 1200, 130),
-                block("viz_footer", 0, 1390, 1200, 80),
-                block("viz_ai_list_button", 0, 1470, 400, 90),
-                block("viz_ai_list", 0, 1560, 1200, 460),
+                block("viz_recorded", 0, 1040, 1200, 130),
+                block("viz_brief", 0, 1170, 1200, 130),
+                block("viz_footer", 0, 1300, 1200, 80),
+                block("viz_ai_list_button", 0, 1380, 400, 90),
+                block("viz_ai_list", 0, 1470, 1200, 460),
             ],
             extra_inputs=[
                 "input_ask",
@@ -2610,7 +2616,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.43"
+APP_VERSION = "1.7.47"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2963,7 +2969,7 @@ def main() -> None:
         ),
         "data_quality_agent.xml": (
             "Derek+ Data Quality Agent",
-            "Click Select, then APPROVE or DISMISS to record the decision. Search does not open.",
+            "Click a queue row, then Approve or Dismiss in that row to record the decision. Search does not open.",
             data_quality_agent(),
         ),
         "ai_provider_setup.xml": (
