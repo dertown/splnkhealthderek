@@ -134,7 +134,7 @@
     "options": {
       "width": 1200,
       "height": 1052,
-      "display": "auto-scale",
+      "display": "fit-to-width",
       "backgroundColor": "#151D2F"
     },
     "structure": [

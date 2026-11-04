@@ -295,6 +295,10 @@
           "decision": {
             "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          },
+          "recurring": {
+            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -396,6 +400,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "RECURRING",
             "value": "#E3B341"
           },
           {
@@ -526,6 +534,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "RECURRING",
             "value": "#3A2E0C"
           },
           {
@@ -661,6 +673,10 @@
           "decision": {
             "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          },
+          "recurring": {
+            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -762,6 +778,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "RECURRING",
             "value": "#E3B341"
           },
           {
@@ -892,6 +912,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "RECURRING",
             "value": "#3A2E0C"
           },
           {
@@ -1003,6 +1027,10 @@
           "decision": {
             "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          },
+          "recurring": {
+            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1104,6 +1132,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "RECURRING",
             "value": "#E3B341"
           },
           {
@@ -1234,6 +1266,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "RECURRING",
             "value": "#3A2E0C"
           },
           {
@@ -1345,6 +1381,10 @@
           "decision": {
             "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          },
+          "recurring": {
+            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1446,6 +1486,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "RECURRING",
             "value": "#E3B341"
           },
           {
@@ -1576,6 +1620,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "RECURRING",
             "value": "#3A2E0C"
           },
           {
@@ -1687,6 +1735,10 @@
           "decision": {
             "rowColors": "> table | seriesByName(\"decision\") | matchValue(pillText)",
             "rowBackgroundColors": "> table | seriesByName(\"decision\") | matchValue(pillBg)"
+          },
+          "recurring": {
+            "rowColors": "> table | seriesByName(\"recurring\") | matchValue(pillText)",
+            "rowBackgroundColors": "> table | seriesByName(\"recurring\") | matchValue(pillBg)"
           }
         },
         "backgroundColor": "transparent"
@@ -1788,6 +1840,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#E3B341"
+          },
+          {
+            "match": "RECURRING",
             "value": "#E3B341"
           },
           {
@@ -1918,6 +1974,10 @@
           },
           {
             "match": "WAITING",
+            "value": "#3A2E0C"
+          },
+          {
+            "match": "RECURRING",
             "value": "#3A2E0C"
           },
           {
@@ -2119,8 +2179,8 @@
     "type": "absolute",
     "options": {
       "width": 1200,
-      "height": 1492,
-      "display": "auto-scale",
+      "height": 2322,
+      "display": "fit-to-width",
       "backgroundColor": "#151D2F"
     },
     "structure": [
@@ -2270,7 +2330,7 @@
         "position": {
           "x": 6,
           "y": 536,
-          "w": 588,
+          "w": 1188,
           "h": 288
         }
       },
@@ -2280,7 +2340,7 @@
         "position": {
           "x": 14,
           "y": 544,
-          "w": 572,
+          "w": 1172,
           "h": 274
         }
       },
@@ -2288,9 +2348,9 @@
         "item": "card_9",
         "type": "block",
         "position": {
-          "x": 606,
-          "y": 536,
-          "w": 588,
+          "x": 6,
+          "y": 836,
+          "w": 1188,
           "h": 288
         }
       },
@@ -2298,9 +2358,9 @@
         "item": "viz_edge_tp",
         "type": "block",
         "position": {
-          "x": 614,
-          "y": 544,
-          "w": 572,
+          "x": 14,
+          "y": 844,
+          "w": 1172,
           "h": 274
         }
       },
@@ -2309,8 +2369,8 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 836,
-          "w": 588,
+          "y": 1136,
+          "w": 1188,
           "h": 238
         }
       },
@@ -2319,8 +2379,8 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 844,
-          "w": 572,
+          "y": 1144,
+          "w": 1172,
           "h": 224
         }
       },
@@ -2328,9 +2388,9 @@
         "item": "card_11",
         "type": "block",
         "position": {
-          "x": 606,
-          "y": 836,
-          "w": 588,
+          "x": 6,
+          "y": 1386,
+          "w": 1188,
           "h": 238
         }
       },
@@ -2338,9 +2398,9 @@
         "item": "viz_sc4s_errors",
         "type": "block",
         "position": {
-          "x": 614,
-          "y": 844,
-          "w": 572,
+          "x": 14,
+          "y": 1394,
+          "w": 1172,
           "h": 224
         }
       },
@@ -2349,8 +2409,8 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 1086,
-          "w": 588,
+          "y": 1636,
+          "w": 1188,
           "h": 268
         }
       },
@@ -2359,8 +2419,8 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 1094,
-          "w": 572,
+          "y": 1644,
+          "w": 1172,
           "h": 254
         }
       },
@@ -2368,9 +2428,9 @@
         "item": "card_13",
         "type": "block",
         "position": {
-          "x": 606,
-          "y": 1086,
-          "w": 588,
+          "x": 6,
+          "y": 1916,
+          "w": 1188,
           "h": 268
         }
       },
@@ -2378,9 +2438,9 @@
         "item": "viz_edge_logs",
         "type": "block",
         "position": {
-          "x": 614,
-          "y": 1094,
-          "w": 572,
+          "x": 14,
+          "y": 1924,
+          "w": 1172,
           "h": 254
         }
       },
@@ -2389,7 +2449,7 @@
         "type": "block",
         "position": {
           "x": 6,
-          "y": 1366,
+          "y": 2196,
           "w": 1188,
           "h": 108
         }
@@ -2399,7 +2459,7 @@
         "type": "block",
         "position": {
           "x": 14,
-          "y": 1374,
+          "y": 2204,
           "w": 1172,
           "h": 94
         }
