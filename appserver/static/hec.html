@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.i18n_register=window.i18n_register||function(){};</script>
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css">
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>HEC Token Performance</h1>
+    <p class="tagline">A token that usually sends about 100 events a second and then sends nothing for 5 minutes is flagged. The window ends one minute ago so indexing lag is not read as silence.</p>
+    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+  </div>
+  <div class="stats-row" id="stats"></div>
+  <div class="section"><h2 class="section-title">Token state</h2><div id="state"></div></div>
+  <div class="section"><h2 class="section-title">Events over time</h2><div id="time"></div></div>
+  <div class="two">
+    <div class="section"><h2 class="section-title">HTTP handler</h2><div id="handler"></div></div>
+    <div class="section"><h2 class="section-title">Token errors</h2><div id="errors"></div></div>
+  </div>
+</div>
+<script src="../../static/app/splunk_exec_health/health.js"></script>
+<script src="../../static/app/splunk_exec_health/charts.js"></script>
+<script>
+(function () {
+  Health.link('home', 'executive_overview');
+  Promise.all([
+    Health.query('hec_totals'), Health.query('hec_state'), Health.query('hec_time'), Health.query('hec_handler'), Health.query('hec_errors')
+  ]).then(function (res) {
+    var totals = res[0][0] || {};
+    Health.stats(document.getElementById('stats'), [
+      { val: totals.tokens || Object.keys(res[1]).length || 0, lbl: 'Tokens' },
+      { val: totals.eps || '0', lbl: 'Events / sec' },
+      { val: totals.gb || '0', lbl: 'GB' },
+      { val: res[1].filter(function (row) { return row.hec_state === 'ALERT'; }).length, lbl: 'Silent tokens', kind: 'bad' }
+    ]);
+    Health.table(document.getElementById('state'), res[1]);
+    Charts.line(document.getElementById('time'), res[2], '_time', Object.keys(res[2][0] || {}).filter(function (key) { return key !== '_time' && key !== '_span' && key.charAt(0) !== '_'; }).slice(0, 6));
+    Health.table(document.getElementById('handler'), res[3]);
+    Health.table(document.getElementById('errors'), res[4]);
+  }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
+})();
+</script>
+</body>
+</html>

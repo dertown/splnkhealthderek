@@ -1,0 +1,137 @@
+/* Shared helpers for the Splunk Health Derek+ HTML pages. */
+var Health = (function () {
+  var PILL_GOOD = ['GREEN', 'OK', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no'];
+  var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING'];
+  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING'];
+
+  function root() {
+    var path = window.location.pathname || '';
+    var at = path.indexOf('/app/');
+    return at >= 0 ? path.substring(0, at) : '';
+  }
+
+  function appName() {
+    var match = (window.location.pathname || '').match(/\/app\/([^/]+)/);
+    return match ? match[1] : 'splunk_exec_health';
+  }
+
+  function page(name) {
+    return root() + '/app/' + appName() + '/' + name;
+  }
+
+  function api(kind) {
+    return window.location.origin + root() + '/splunkd/__raw/servicesNS/nobody/splunk_exec_health/data/healthdash/' + kind;
+  }
+
+  function csrf() {
+    var port = window.location.port || '8000';
+    var cookies = (document.cookie || '').split(';');
+    for (var i = 0; i < cookies.length; i++) {
+      var parts = cookies[i].trim().split('=');
+      if (parts[0].indexOf('splunkweb_csrf_token_') === 0 && (parts[0] === 'splunkweb_csrf_token_' + port || parts[0].indexOf('splunkweb_csrf_token_') === 0)) {
+        return decodeURIComponent((parts.slice(1).join('=') || '').replace(/^"|"$/g, ''));
+      }
+    }
+    return '';
+  }
+
+  function headers() {
+    var out = { 'X-Requested-With': 'XMLHttpRequest' };
+    var key = csrf();
+    if (key) out['X-Splunk-Form-Key'] = key;
+    return out;
+  }
+
+  function handle(response) {
+    return response.text().then(function (text) {
+      var data;
+      try { data = JSON.parse(text); } catch (e) { throw new Error('The server did not return JSON'); }
+      var body = data.payload !== undefined ? (typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload) : data;
+      if (!response.ok || body.success === false) throw new Error(body.error || ('Request failed (' + response.status + ')'));
+      return body.rows || [];
+    });
+  }
+
+  function query(name, params) {
+    var qs = 'name=' + encodeURIComponent(name);
+    Object.keys(params || {}).forEach(function (key) {
+      qs += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
+    });
+    return fetch(api('query') + '?' + qs, { credentials: 'same-origin', headers: headers() }).then(handle);
+  }
+
+  function act(name, params) {
+    return fetch(api('act'), {
+      method: 'POST', credentials: 'same-origin',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+      body: JSON.stringify({ name: name, params: params || {} })
+    }).then(handle);
+  }
+
+  function esc(value) {
+    return String(value === undefined || value === null ? '' : value)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function pill(value) {
+    var text = String(value === undefined || value === null ? '' : value);
+    var kind = 'neutral';
+    if (PILL_GOOD.indexOf(text) >= 0) kind = 'good';
+    else if (PILL_BAD.indexOf(text) >= 0) kind = 'bad';
+    else if (PILL_WARN.indexOf(text) >= 0) kind = 'warn';
+    else if (text === 'Approve' || text === 'Dismiss' || text === 'Fix') kind = 'link';
+    if (!text) return '';
+    return '<span class="pill ' + kind + '">' + esc(text) + '</span>';
+  }
+
+  var PILL_COLUMNS = ['severity', 'status', 'state', 'baseline_state', 'latency_state', 'hec_state', 'decision', 'recurring', 'approve', 'dismiss', 'key_state', 'conn_status', 'ai_status', 'tile_status', 'overall_status', 'agent_status'];
+
+  function table(el, rows, columns, onClick) {
+    columns = columns || Object.keys((rows[0] || {})).filter(function (key) { return key.charAt(0) !== '_' && key !== 'api_key'; })
+      .map(function (key) { return { key: key, label: key.replace(/_/g, ' ') }; });
+    if (!rows.length) { el.innerHTML = '<p class="note">Nothing to show.</p>'; return; }
+    var html = '<div class="table-wrap"><table><thead><tr>';
+    columns.forEach(function (col) { html += '<th>' + esc(col.label) + '</th>'; });
+    html += '</tr></thead><tbody>';
+    rows.forEach(function (row, index) {
+      html += '<tr' + (onClick ? ' class="clickable" data-row="' + index + '"' : '') + '>';
+      columns.forEach(function (col) {
+        var value = row[col.key];
+        html += '<td data-col="' + esc(col.key) + '">' + (PILL_COLUMNS.indexOf(col.key) >= 0 || col.pill ? pill(value) : esc(value)) + '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+    if (onClick) {
+      Array.prototype.forEach.call(el.querySelectorAll('tr.clickable'), function (tr) {
+        tr.addEventListener('click', function (event) {
+          var cell = event.target.closest('td');
+          onClick(rows[Number(tr.getAttribute('data-row'))], cell ? cell.getAttribute('data-col') : '');
+        });
+      });
+    }
+  }
+
+  function stats(el, items) {
+    el.innerHTML = items.map(function (item) {
+      return '<div class="stat"><div class="val ' + (item.kind || '') + '">' + esc(item.val) + '</div><div class="lbl">' + esc(item.lbl) + '</div></div>';
+    }).join('');
+  }
+
+  function num(value) {
+    var parsed = Number(value);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+
+  function fail(el, error) {
+    el.innerHTML = '<p class="note error">' + esc(error && error.message ? error.message : error) + '</p>';
+  }
+
+  function link(id, view) {
+    var el = document.getElementById(id);
+    if (el) el.href = page(view);
+  }
+
+  return { query: query, act: act, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page };
+})();

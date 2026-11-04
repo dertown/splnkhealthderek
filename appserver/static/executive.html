@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.i18n_register=window.i18n_register||function(){};</script>
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css">
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>Splunk Health Derek+</h1>
+    <p class="tagline">Overall health is the worst area. Each area opens its own page. Open agent findings are shown but never counted, because they come from the same signals.</p>
+    <div class="hero-meta"><a id="home" href="#">All pages</a></div>
+  </div>
+  <div class="stats-row" id="stats"><div class="stat"><div class="val">…</div><div class="lbl">Loading</div></div></div>
+  <div class="section">
+    <h2 class="section-title">Areas</h2>
+    <div class="cards" id="areas"></div>
+  </div>
+  <div class="section">
+    <h2 class="section-title">Status by area, worst first</h2>
+    <div id="areaTable"></div>
+  </div>
+  <div class="two">
+    <div class="section">
+      <h2 class="section-title">Daily ingestion vs 7-day average (GB)</h2>
+      <div id="ingest"></div>
+    </div>
+    <div class="section">
+      <h2 class="section-title">Top indexes by license usage (GB, last 7 days)</h2>
+      <div id="pie"></div>
+    </div>
+  </div>
+</div>
+<script src="../../static/app/splunk_exec_health/health.js"></script>
+<script src="../../static/app/splunk_exec_health/charts.js"></script>
+<script>
+(function () {
+  var links = { 'Hosts & instances': 'host_heartbeat', 'Data flow': 'data_topology', 'HEC tokens': 'hec_performance', 'SC4S & Edge': 'sc4s_edge' };
+  Health.link('home', 'executive_overview');
+  function kind(status) { return status === 'GREEN' ? 'ok' : status === 'RED' ? 'bad' : 'warn'; }
+  Promise.all([
+    Health.query('areas'), Health.query('license_daily'), Health.query('live'),
+    Health.query('agent_counts'), Health.query('top_indexes')
+  ]).then(function (res) {
+    var areas = res[0], license = res[1], live = res[2], agent = res[3], indexes = res[4];
+    var worst = areas.reduce(function (acc, row) { return row.status === 'RED' ? 'RED' : (acc === 'RED' ? acc : (row.status === 'YELLOW' ? 'YELLOW' : acc)); }, 'GREEN');
+    var today = license.length ? license[license.length - 1] : {};
+    Health.stats(document.getElementById('stats'), [
+      { val: worst || 'N/A', lbl: 'Overall health', kind: kind(worst) },
+      { val: today.daily_GB || '0', lbl: 'Ingestion GB (last full day)' },
+      { val: (today.variance_pct || '0') + '%', lbl: 'Vs 7-day average' },
+      { val: (live[0] || {}).events || '0', lbl: 'Events indexed (15m)' },
+      { val: (agent[0] || {}).open_findings || '0', lbl: 'Agent findings open' }
+    ]);
+    document.getElementById('areas').innerHTML = areas.map(function (row) {
+      var view = links[row.area] || 'executive_overview';
+      return '<a class="card" href="' + Health.page(view) + '"><h3>' + Health.esc(row.area) + '</h3><p>'
+        + Health.esc(row.detail || row.status) + '</p><div class="arrow">' + Health.esc(row.status) + ' · Open →</div></a>';
+    }).join('') + '<a class="card" href="' + Health.page('data_quality_agent') + '"><h3>Data Quality Agent</h3><p>'
+      + Health.esc((agent[0] || {}).open_findings || '0') + ' open findings.</p><div class="arrow">Open →</div></a>';
+    Health.table(document.getElementById('areaTable'), areas, [
+      { key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'detail', label: 'Why' }
+    ]);
+    Charts.line(document.getElementById('ingest'), license, '_time', ['daily_GB', 'ma_7d']);
+    Charts.pie(document.getElementById('pie'), indexes, 'index', 'GB');
+  }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
+})();
+</script>
+</body>
+</html>

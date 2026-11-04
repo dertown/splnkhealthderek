@@ -53,11 +53,13 @@ find "$STAGING/$APP_ID" \( -name '.DS_Store' -o -name '._*' -o -name '*.pyc' \) 
 find "$STAGING/$APP_ID" -type f -exec chmod 644 {} \;
 find "$STAGING/$APP_ID" -type d -exec chmod 755 {} \;
 
-if find "$STAGING/$APP_ID" -type f \( -name '*.py' -o -name '*.pyc' \) ! -path "$STAGING/$APP_ID/bin/derekaiping.py" | grep -q .; then
-  echo "Package may contain only bin/derekaiping.py as Python" >&2
+bad=$(find "$STAGING/$APP_ID" -type f \( -name '*.py' -o -name '*.pyc' \) ! -path "$STAGING/$APP_ID/bin/derekaiping.py" ! -path "$STAGING/$APP_ID/bin/healthdash.py")
+if [[ -n "$bad" ]]; then
+  echo "Package may contain only bin/derekaiping.py and bin/healthdash.py as Python" >&2
+  echo "$bad" >&2
   exit 1
 fi
-if [[ ! -f "$STAGING/$APP_ID/bin/derekaiping.py" ]]; then
+if [[ ! -f "$STAGING/$APP_ID/bin/derekaiping.py" || ! -f "$STAGING/$APP_ID/bin/healthdash.py" ]]; then
   echo "bin/derekaiping.py is missing from the package" >&2
   exit 1
 fi
@@ -82,7 +84,7 @@ with tarfile.open(path, "r:gz") as tar:
     names = tar.getnames()
     for member in tar.getmembers():
         name = member.name
-        if (name.endswith(".py") and name != "splunk_exec_health/bin/derekaiping.py") or "/tools/" in name + "/" or "/local/" in name + "/" or "/._" in name or name.endswith(".git"):
+        if (name.endswith(".py") and name not in ("splunk_exec_health/bin/derekaiping.py", "splunk_exec_health/bin/healthdash.py")) or "/tools/" in name + "/" or "/local/" in name + "/" or "/._" in name or name.endswith(".git"):
             disallowed.append(name)
         if member.isfile() and (member.mode & 0o111):
             disallowed.append(f"{name} (executable)")

@@ -1,6 +1,6 @@
 # Splunk Health Derek+
 
-Dashboard Studio app for an executive traffic-light view of Splunk ingestion, host heartbeat, HEC tokens, SC4S syslog, and Edge / Ingest Processors. Built for **Splunk Cloud Platform** (Victoria and Classic) and Splunk Enterprise.
+HTML dashboard app for an executive traffic-light view of Splunk ingestion, host heartbeat, HEC tokens, SC4S syslog, and Edge / Ingest Processors. Built for **Splunk Cloud Platform** (Victoria and Classic) and Splunk Enterprise.
 
 Baselines are **statistical**, not static GB thresholds. Daily license volume is compared to a 7-day moving average. Per-host volume uses `streamstats` mean and standard deviation. The scheduled ingestion alert uses Splunk’s built-in `predict` command so weekend and after-hours cycles are expected rather than treated as incidents.
 
@@ -54,7 +54,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.48.spl`.
+3. Upload `dist/splunk_exec_health-1.7.49.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -184,7 +184,7 @@ This app is an executive overlay. It does not replace the Cloud Monitoring Conso
 
 ## Rebuild dashboards / package
 
-Dashboard Studio XML **and `default/savedsearches.conf`** are generated from `tools/build_dashboards.py` (development only — not shipped in the Cloud `.spl`). Edit the generator, not the generated files. `tools/validate_keys.py` checks every conf key, Dashboard Studio option, macro, lookup and cross-reference; `package.sh` runs it and refuses to package on errors.
+The view XML, `default/savedsearches.conf` and `default/health_queries.json` are generated from `tools/build_dashboards.py`. The pages themselves are HTML in `appserver/static`. `tools/validate_keys.py` checks every conf key, macro, lookup, the query catalog and the REST handler; `package.sh` runs it and refuses to package on errors.
 
 ```bash
 python3 tools/build_dashboards.py
@@ -195,5 +195,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.48.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.49.spl --included-tags private_app
 ```
