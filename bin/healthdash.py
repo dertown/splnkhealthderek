@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+from urllib.parse import quote
 
 import splunk.rest as rest
 from splunk.persistconn.application import PersistentServerConnectionApplication
@@ -58,7 +59,9 @@ def _latch(params: dict) -> None:
 
 class HealthDashHandler(PersistentServerConnectionApplication):
     def __init__(self, command_line, command_arg):
-        super().__init__(command_line, command_arg)
+        # The base class takes no arguments. Passing them stops the handler from
+        # loading, and Splunk then answers the page with an HTML error.
+        PersistentServerConnectionApplication.__init__(self)
         self.catalog = _catalog()
 
     def _render(self, data: dict, status: int = 200) -> dict:
@@ -72,9 +75,13 @@ class HealthDashHandler(PersistentServerConnectionApplication):
         except (ValueError, TypeError):
             return self._render({"success": False, "error": "Invalid request"}, 400)
 
-        session_key = (args.get("session") or {}).get("authtoken") or args.get("session_key")
+        session = args.get("session") or {}
+        session_key = session.get("authtoken") or args.get("session_key")
         if not session_key:
             return self._render({"success": False, "error": "Authentication required"}, 401)
+        # "-" is the signed-in user. The app name puts the search in this app, so
+        # private macros and lookups such as exec_health_idx resolve.
+        user = quote(session.get("user") or "-", safe="")
 
         method = (args.get("method") or "get").lower()
         path = (args.get("path_info") or args.get("path") or "").strip("/")
@@ -83,10 +90,10 @@ class HealthDashHandler(PersistentServerConnectionApplication):
         supplied = self._params(args)
         try:
             if method == "get" and path == "query":
-                return self._run(session_key, supplied.get("name", ""), supplied, write=False)
+                return self._run(session_key, user, supplied.get("name", ""), supplied, write=False)
             if method == "post" and path == "act":
                 body = self._body(args)
-                return self._run(session_key, body.get("name", ""), body.get("params") or {}, write=True)
+                return self._run(session_key, user, body.get("name", ""), body.get("params") or {}, write=True)
         except Exception as exc:  # noqa: BLE001 - report a clean message, keep the detail in the log
             logger.warning("healthdash request failed: %s", exc)
             return self._render({"success": False, "error": "The search could not run"}, 500)
@@ -123,7 +130,7 @@ class HealthDashHandler(PersistentServerConnectionApplication):
             values[name] = value
         return values
 
-    def _run(self, session_key: str, name: str, supplied: dict, write: bool) -> dict:
+    def _run(self, session_key: str, user: str, name: str, supplied: dict, write: bool) -> dict:
         spec = self.catalog.get(name)
         if spec is None or bool(spec.get("write")) != write or (write and name not in WRITES):
             return self._render({"success": False, "error": "Unknown search"}, 404)
@@ -137,7 +144,7 @@ class HealthDashHandler(PersistentServerConnectionApplication):
         search = spl if spl.lstrip().startswith("|") else "| " + spl
         try:
             unused, content = rest.simpleRequest(
-                "/services/search/jobs/oneshot",
+                f"/servicesNS/{user}/splunk_exec_health/search/jobs/oneshot",
                 sessionKey=session_key,
                 postargs={
                     "search": search,

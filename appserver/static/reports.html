@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.i18n_register=window.i18n_register||function(){};</script>
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>Reports</h1>
+    <p class="tagline">Generate a timestamped report from the same statistics the dashboards collect. Overall health is one compilation. Pick a dashboard for a targeted report, or generate one report per dashboard. The report is read-only.</p>
+  </div>
+  <div class="controls no-print">
+    <label class="fld">Report
+      <select id="scope">
+        <option value="overall">Overall health — all dashboards</option>
+        <option value="summary">Summary</option>
+        <option value="host">Host Heartbeat</option>
+        <option value="hec">HEC Tokens</option>
+        <option value="sc4s">SC4S &amp; Edge</option>
+        <option value="topology">Data Topology</option>
+        <option value="agent">Data Quality Agent</option>
+        <option value="each">One report per dashboard</option>
+      </select>
+    </label>
+    <label class="fld">Host filter
+      <input id="host" value="*" maxlength="128" pattern="[\w.:*\-]{1,128}">
+    </label>
+    <button class="btn" id="go" type="button">Generate report</button>
+    <button class="btn secondary" id="download" type="button" disabled>Download HTML</button>
+    <button class="btn secondary" id="print" type="button" disabled>Print</button>
+    <span class="note" id="status"></span>
+  </div>
+  <p class="note">The host filter applies to Host Heartbeat. Leave it as * for every host.</p>
+  <div id="output"></div>
+</div>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
+<script src="../../static/app/splunk_exec_health/reports.js?v=1.7.56"></script>
+
+</body>
+</html>

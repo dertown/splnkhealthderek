@@ -10,27 +10,42 @@ var Charts = (function () {
     node.innerHTML = '<div class="chart">' + svg + '</div>';
   }
 
-  function line(node, rows, xKey, yKeys) {
+  function line(node, rows, xKey, yKeys, labels) {
     if (!rows.length) { node.innerHTML = '<p class="note">No data for this chart.</p>'; return; }
     var width = 760, height = 240, pad = 28;
     var max = 0;
+    function missing(value) { return value === null || value === undefined || value === '' || isNaN(Number(value)); }
     rows.forEach(function (row) {
-      yKeys.forEach(function (key) { var n = Number(row[key]); if (!isNaN(n) && n > max) max = n; });
+      yKeys.forEach(function (key) {
+        if (missing(row[key])) return;
+        var n = Number(row[key]);
+        if (n > max) max = n;
+      });
     });
     if (max === 0) max = 1;
     var step = rows.length > 1 ? (width - 2 * pad) / (rows.length - 1) : 0;
-    var yOf = function (value) { return height - pad - (Number(value) || 0) / max * (height - 2 * pad); };
+    var yOf = function (value) { return height - pad - Number(value) / max * (height - 2 * pad); };
     var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%">';
     yKeys.forEach(function (key, series) {
-      var points = rows.map(function (row, index) { return (pad + index * step) + ',' + yOf(row[key]); }).join(' ');
-      svg += '<polyline fill="none" stroke="' + COLORS[series % COLORS.length] + '" stroke-width="2" points="' + points + '"/>';
+      var segment = [];
+      function flush() {
+        if (segment.length < 2) { segment = []; return; }
+        var dash = key.indexOf('bound') >= 0 ? ' stroke-dasharray="6 4"' : '';
+        svg += '<polyline fill="none" stroke="' + COLORS[series % COLORS.length] + '" stroke-width="2"' + dash + ' points="' + segment.join(' ') + '"/>';
+        segment = [];
+      }
+      rows.forEach(function (row, index) {
+        if (missing(row[key])) flush();
+        else segment.push((pad + index * step) + ',' + yOf(row[key]));
+      });
+      flush();
     });
     var first = rows[0][xKey], last = rows[rows.length - 1][xKey];
     svg += '<text x="' + pad + '" y="' + (height - 8) + '" fill="#8b949e" font-size="11">' + esc(first || '') + '</text>';
     svg += '<text x="' + (width - pad) + '" y="' + (height - 8) + '" fill="#8b949e" font-size="11" text-anchor="end">' + esc(last || '') + '</text>';
     svg += '</svg>';
     yKeys.forEach(function (key, series) {
-      svg += '<span class="pill" style="color:' + COLORS[series % COLORS.length] + ';margin-right:8px;">' + esc(key) + '</span>';
+      svg += '<span class="pill" style="color:' + COLORS[series % COLORS.length] + ';margin-right:8px;">' + esc((labels && labels[key]) || key) + '</span>';
     });
     el(node, svg);
   }
@@ -60,7 +75,7 @@ var Charts = (function () {
     el(node, '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">' + svg + '<div>' + legend + '</div></div>');
   }
 
-  function flow(node, rows, columns, valueKey) {
+  function flow(node, rows, columns, valueKey, selected, onSelect) {
     if (!rows.length) { node.innerHTML = '<p class="note">No data for this flow.</p>'; return; }
     var stages = columns.map(function () { return {}; });
     rows.forEach(function (row) {
@@ -69,40 +84,86 @@ var Charts = (function () {
         stages[index][name] = (stages[index][name] || 0) + (Number(row[valueKey]) || 0);
       });
     });
-    var names = stages.map(function (stage) { return Object.keys(stage).sort(function (a, b) { return stage[b] - stage[a]; }).slice(0, 12); });
+    var names = stages.map(function (stage) {
+      return Object.keys(stage).sort(function (a, b) { return stage[b] - stage[a]; }).slice(0, 12);
+    });
+    if (selected) {
+      rows.forEach(function (row) {
+        if ((row[columns[0]] || 'unknown') !== selected) return;
+        columns.forEach(function (col, index) {
+          var name = row[col] || 'unknown';
+          if (names[index].indexOf(name) < 0) names[index].push(name);
+        });
+      });
+    }
     var height = Math.max.apply(null, names.map(function (list) { return list.length; })) * 28 + 20;
     var width = 760, colWidth = width / columns.length;
-    var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%">';
     var pos = names.map(function (list) {
       var map = {};
       list.forEach(function (name, index) { map[name] = 16 + index * 28; });
       return map;
     });
-    for (var stage = 0; stage < columns.length - 1; stage++) {
-      var links = {};
+    var hot = {};
+    if (selected) {
       rows.forEach(function (row) {
-        var from = row[columns[stage]] || 'unknown';
-        var to = row[columns[stage + 1]] || 'unknown';
-        if (pos[stage][from] === undefined || pos[stage + 1][to] === undefined) return;
-        var key = from + '->' + to;
-        links[key] = (links[key] || 0) + (Number(row[valueKey]) || 0);
+        if ((row[columns[0]] || 'unknown') !== selected) return;
+        columns.forEach(function (col, index) { hot[index + '\n' + (row[col] || 'unknown')] = 1; });
       });
-      var max = Math.max.apply(null, Object.keys(links).map(function (key) { return links[key]; }).concat([1]));
-      Object.keys(links).forEach(function (key) {
-        var parts = key.split('->');
-        var y1 = pos[stage][parts[0]], y2 = pos[stage + 1][parts[1]];
-        svg += '<path d="M ' + (colWidth * stage + 150) + ' ' + y1 + ' C ' + (colWidth * stage + colWidth / 2 + 75) + ' ' + y1
-          + ', ' + (colWidth * (stage + 1) - colWidth / 2 + 10) + ' ' + y2 + ', ' + (colWidth * (stage + 1) + 10) + ' ' + y2
-          + '" stroke="#58a6ff" stroke-opacity="0.35" stroke-width="' + Math.max(1, links[key] / max * 10) + '" fill="none"/>';
-      });
+    }
+    function curve(stage, y1, y2) {
+      return 'M ' + (colWidth * stage + 150) + ' ' + y1 + ' C ' + (colWidth * stage + colWidth / 2 + 75) + ' ' + y1
+        + ', ' + (colWidth * (stage + 1) - colWidth / 2 + 10) + ' ' + y2 + ', ' + (colWidth * (stage + 1) + 10) + ' ' + y2;
+    }
+    function drawLinks(match, color, opacity) {
+      var out = '';
+      for (var stage = 0; stage < columns.length - 1; stage++) {
+        var links = {};
+        rows.forEach(function (row) {
+          var sourceName = row[columns[0]] || 'unknown';
+          if (match !== null && ((sourceName === selected) !== match)) return;
+          var from = row[columns[stage]] || 'unknown';
+          var to = row[columns[stage + 1]] || 'unknown';
+          if (pos[stage][from] === undefined || pos[stage + 1][to] === undefined) return;
+          var key = from + '\n' + to;
+          links[key] = (links[key] || 0) + (Number(row[valueKey]) || 0);
+        });
+        var amounts = Object.keys(links).map(function (key) { return links[key]; });
+        var max = Math.max.apply(null, amounts.concat([1]));
+        Object.keys(links).forEach(function (key) {
+          var parts = key.split('\n');
+          out += '<path d="' + curve(stage, pos[stage][parts[0]], pos[stage + 1][parts[1]])
+            + '" stroke="' + color + '" stroke-opacity="' + opacity + '" stroke-width="'
+            + Math.max(1, links[key] / max * 10) + '" fill="none"/>';
+        });
+      }
+      return out;
+    }
+    var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%">';
+    if (!selected) svg += drawLinks(null, '#58a6ff', '0.35');
+    else {
+      svg += drawLinks(false, '#58a6ff', '0.12');
+      svg += drawLinks(true, '#58a6ff', '0.95');
     }
     names.forEach(function (list, stage) {
       list.forEach(function (name) {
-        svg += '<text x="' + (colWidth * stage + 10) + '" y="' + (pos[stage][name] + 4) + '" fill="#e6edf3" font-size="12">' + esc(name) + '</text>';
+        var onPath = !selected || hot[stage + '\n' + name];
+        var fill = !selected || onPath ? '#e6edf3' : '#6e7681';
+        if (selected && stage === 0 && name === selected) fill = '#58a6ff';
+        else if (selected && onPath) fill = '#79c0ff';
+        var pick = stage === 0 ? ' data-pick="' + esc(name).replace(/"/g, '&quot;') + '"' : '';
+        var weight = selected && onPath ? ' font-weight="700"' : '';
+        svg += '<text x="' + (colWidth * stage + 10) + '" y="' + (pos[stage][name] + 4) + '" fill="' + fill
+          + '" font-size="12"' + weight + pick + '>' + esc(name) + '</text>';
       });
     });
     svg += '</svg>';
     el(node, svg);
+    if (onSelect) {
+      Array.prototype.forEach.call(node.querySelectorAll('text[data-pick]'), function (text) {
+        text.style.cursor = 'pointer';
+        text.addEventListener('click', function () { onSelect(text.getAttribute('data-pick')); });
+      });
+    }
   }
 
   return { line: line, pie: pie, flow: flow };

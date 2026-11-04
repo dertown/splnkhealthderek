@@ -45,7 +45,10 @@ var Health = (function () {
   function handle(response) {
     return response.text().then(function (text) {
       var data;
-      try { data = JSON.parse(text); } catch (e) { throw new Error('The server did not return JSON'); }
+      try { data = JSON.parse(text); } catch (e) {
+        var snippet = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+        throw new Error('The server did not return JSON (HTTP ' + response.status + '). ' + (snippet || 'Empty response. Restart Splunk so the new endpoint loads.'));
+      }
       var body = data.payload !== undefined ? (typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload) : data;
       if (!response.ok || body.success === false) throw new Error(body.error || ('Request failed (' + response.status + ')'));
       return body.rows || [];
@@ -133,5 +136,80 @@ var Health = (function () {
     if (el) el.href = page(view);
   }
 
+  function chromeTop() {
+    var top = 0;
+    var selectors = ['#header', '.shared-header', 'header', '#appbar', '.app-bar', '.navbar'];
+    selectors.forEach(function (sel) {
+      Array.prototype.forEach.call(document.querySelectorAll(sel), function (el) {
+        if (el.closest && el.closest('.sidenav, .page')) return;
+        var rect = el.getBoundingClientRect();
+        if (rect.width > 400 && rect.height >= 24 && rect.height <= 140 && rect.top < 160 && rect.bottom > top) top = rect.bottom;
+      });
+    });
+    return top;
+  }
+
+  function mountNav(attempt) {
+    if (document.querySelector('.sidenav')) return;
+    if (!document.querySelector('.page')) {
+      if ((attempt || 0) < 25) window.setTimeout(function () { mountNav((attempt || 0) + 1); }, 80);
+      return;
+    }
+    var current = ((window.location.pathname || '').split('/').pop() || '').split('?')[0];
+    var items = [
+      { external: true, label: 'Splunk home' },
+      { group: 'Health' },
+      { view: 'executive_overview', label: 'Summary' },
+      { view: 'host_heartbeat', label: 'Host Heartbeat' },
+      { view: 'hec_performance', label: 'HEC Tokens' },
+      { view: 'sc4s_edge', label: 'SC4S & Edge' },
+      { view: 'data_topology', label: 'Data Topology' },
+      { group: 'Agent' },
+      { view: 'data_quality_agent', label: 'Data Quality Agent' },
+      { view: 'health_reports', label: 'Reports' },
+      { group: 'Configure' },
+      { view: 'ai_provider_setup', label: 'AI provider' },
+      { group: 'Help' },
+      { view: 'readme', label: 'README' },
+      { view: 'about', label: 'About' }
+    ];
+    var nav = document.createElement('div');
+    nav.className = 'sidenav';
+    nav.setAttribute('role', 'navigation');
+    nav.setAttribute('aria-label', 'Splunk Health Derek+');
+    var brand = document.createElement('div');
+    brand.className = 'nav-brand';
+    brand.textContent = 'Splunk Health Derek+';
+    nav.appendChild(brand);
+    items.forEach(function (item) {
+      if (item.group) {
+        var group = document.createElement('div');
+        group.className = 'nav-group';
+        group.textContent = item.group;
+        nav.appendChild(group);
+        return;
+      }
+      var linkEl = document.createElement('a');
+      linkEl.textContent = item.label;
+      if (item.external) {
+        linkEl.className = 'nav-home';
+        linkEl.href = root() + '/app/launcher/home';
+      } else {
+        linkEl.href = page(item.view);
+        if (item.view === current) {
+          linkEl.className = 'current';
+          linkEl.setAttribute('aria-current', 'page');
+        }
+      }
+      nav.appendChild(linkEl);
+    });
+    document.body.appendChild(nav);
+    document.body.classList.add('has-nav');
+    function pin() { nav.style.top = chromeTop() + 'px'; }
+    pin();
+    window.addEventListener('resize', pin);
+  }
+
+  mountNav(0);
   return { query: query, act: act, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page };
 })();

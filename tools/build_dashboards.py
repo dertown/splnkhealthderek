@@ -1530,6 +1530,70 @@ search `exec_health_hec_handler` (log_level=ERROR OR log_level=WARN)
 | timechart span=5m count as handler_issues
 """.strip()
 
+# HttpInputDataHandler lines look like:
+# Failed processing http input, token name=<input name>, source_IP=<client>,
+# reply=<n>, status_message="...", parsing_err="invalid_index='<index>'"
+# token name is the HEC input name, never the token secret.
+Q_HEC_PARSE = r"""
+search `exec_health_hec_handler`
+| rex field=_raw "token name=(?<token>[^,\s]+)"
+| rex field=_raw "source_IP=(?<source_ip>[^,\s\"]+)"
+| rex field=_raw "forwarded_source_IP=\"?(?<forwarded_ip>[^,\"\s]+)"
+| rex field=_raw "reply=(?<reply>\d+)"
+| rex field=_raw "events_processed=(?<events_processed>\d+)"
+| rex field=_raw "status_message=\"(?<status_message>[^\"]*)\""
+| rex field=_raw "invalid_index='(?<bad_index>[^']+)'"
+| rex field=_raw "invalid_sourcetype='(?<bad_sourcetype>[^']+)'"
+| rex field=_raw "sourcetype=(?<logged_sourcetype>[^,\s\"]+)"
+| rex field=_raw "\bsource=(?<logged_source>[^,\s\"]+)"
+| rex field=_raw "\bindex=(?<logged_index>[^,\s\"]+)"
+| eval token=coalesce(token, "n/a")
+| eval data_source=coalesce(forwarded_ip, source_ip, "not logged")
+| eval splunk_index=coalesce(bad_index, logged_index, "not logged")
+| eval sourcetype=coalesce(bad_sourcetype, logged_sourcetype, "not logged")
+| eval hec_source=coalesce(logged_source, "not logged")
+| eval events_processed=coalesce(events_processed, 0)
+| eval reply_label=case(
+    reply="0", "Success",
+    reply="1", "Token disabled",
+    reply="2", "Token is required",
+    reply="3", "Invalid authorization",
+    reply="4", "Invalid token",
+    reply="5", "No data",
+    reply="6", "Invalid data format",
+    reply="7", "Incorrect index",
+    reply="9", "Server is busy",
+    reply="10", "Data channel is missing",
+    reply="11", "Invalid data channel",
+    reply="12", "Event field is required",
+    reply="13", "Event field cannot be blank",
+    reply="14", "ACK is disabled",
+    reply="15", "Error in handling indexed fields",
+    reply="16", "Query string authorization is not enabled",
+    isnotnull(reply), "reply ".reply,
+    1=1, "n/a")
+| lookup hec_token_map token OUTPUT token_name
+| eval token_label=coalesce(token_name, token)
+""".strip()
+
+Q_HEC_INPUT_ERRORS = (Q_HEC_PARSE + r"""
+| where log_level="ERROR" OR log_level="WARN" OR (isnotnull(reply) AND reply!="0")
+| stats count as errors, sum(events_processed) as events_processed, latest(status_message) as status_message by data_source, token_label, splunk_index, sourcetype, hec_source, reply_label
+| eval _color_rank=1
+| sort 0 -errors
+| table data_source, token_label, splunk_index, sourcetype, hec_source, reply_label, errors, events_processed, status_message, _color_rank
+""").strip()
+
+Q_HEC_FLOW = (Q_HEC_PARSE + r"""
+| where token!="n/a" OR data_source!="not logged"
+| stats sum(events_processed) as events, count as requests, sum(eval(if(log_level="ERROR" OR log_level="WARN" OR (isnotnull(reply) AND reply!="0"), 1, 0))) as errors by data_source, token_label, splunk_index, sourcetype
+| eval flow_index=if(splunk_index="not logged" AND sourcetype="not logged", "not logged", splunk_index." · ".sourcetype)
+| eval _color_rank=if(errors>0, 1, 3)
+| sort 0 -events, -errors
+| head 80
+| table data_source, token_label, splunk_index, sourcetype, flow_index, events, requests, errors, _color_rank
+""").strip()
+
 
 def hec_performance() -> dict:
     return {
@@ -2647,7 +2711,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.49"
+APP_VERSION = "1.7.56"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2999,6 +3063,8 @@ def emit_catalog() -> None:
         "hec_totals": entry(Q_HEC_TOTALS, "-4h", "now", count=5),
         "hec_handler": entry(Q_HEC_HANDLER, "-4h", "now", count=50),
         "hec_errors": entry(Q_HEC_ERRORS, "-4h", "now", count=100),
+        "hec_input_errors": entry(Q_HEC_INPUT_ERRORS, "-4h", "now", count=100),
+        "hec_flow": entry(Q_HEC_FLOW, "-4h", "now", count=80),
         "sc4s_time": entry(Q_SC4S_TIME, "-4h", "now", count=400),
         "sc4s_hosts": entry(Q_SC4S_HOSTS, "-4h", "now", count=100),
         "sc4s_errors": entry(Q_SC4S_ERRORS, "-4h", "now", count=100),
@@ -3050,6 +3116,7 @@ def main() -> None:
         ("sc4s_edge.xml", "SC4S Syslog & Edge/Ingest Processors", "sc4s.html"),
         ("data_topology.xml", "Data Topology", "topology.html"),
         ("data_quality_agent.xml", "Derek+ Data Quality Agent", "agent.html"),
+        ("health_reports.xml", "Reports", "reports.html"),
         ("ai_provider_setup.xml", "AI provider setup", "setup.html"),
         ("readme.xml", "README", "readme.html"),
         ("about.xml", "About", "about.html"),

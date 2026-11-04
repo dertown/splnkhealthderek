@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>HEC Token Performance</h1>
-    <p class="tagline">A token that usually sends about 100 events a second and then sends nothing for 5 minutes is flagged. The window ends one minute ago so indexing lag is not read as silence.</p>
+    <p class="tagline">A token that usually sends about 100 events a second and then sends nothing for 5 minutes is flagged. Handler errors name the client, token, index, and sourcetype when Splunk writes them. The flow is client, then HEC token, then index, with the sourcetype on that last step.</p>
     <div class="hero-meta"><a id="home" href="#">Summary</a></div>
   </div>
   <div class="stats-row" id="stats"></div>
@@ -19,14 +19,26 @@
     <div class="section"><h2 class="section-title">HTTP handler</h2><div id="handler"></div></div>
     <div class="section"><h2 class="section-title">Token errors</h2><div id="errors"></div></div>
   </div>
+  <div class="section">
+    <h2 class="section-title">HEC input errors — client, token, index, sourcetype</h2>
+    <p class="note">Each row is a failed HttpInputDataHandler request. Client is source_IP (or the forwarded client). Index and sourcetype are filled when the log records them, such as invalid_index on an incorrect-index reply.</p>
+    <div id="inputErrors"></div>
+  </div>
+  <div class="section">
+    <h2 class="section-title">Source → HEC token → index</h2>
+    <p class="note">The index node lists the sourcetype. This uses the same handler log, so a path appears when Splunk recorded that client and token together.</p>
+    <div id="flow"></div>
+    <div id="flowTable"></div>
+  </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js"></script>
-<script src="../../static/app/splunk_exec_health/charts.js"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.56"></script>
 <script>
 (function () {
   Health.link('home', 'executive_overview');
   Promise.all([
-    Health.query('hec_totals'), Health.query('hec_state'), Health.query('hec_time'), Health.query('hec_handler'), Health.query('hec_errors')
+    Health.query('hec_totals'), Health.query('hec_state'), Health.query('hec_time'), Health.query('hec_handler'), Health.query('hec_errors'),
+    Health.query('hec_input_errors'), Health.query('hec_flow')
   ]).then(function (res) {
     var totals = res[0][0] || {};
     Health.stats(document.getElementById('stats'), [
@@ -39,6 +51,18 @@
     Charts.line(document.getElementById('time'), res[2], '_time', Object.keys(res[2][0] || {}).filter(function (key) { return key !== '_time' && key !== '_span' && key.charAt(0) !== '_'; }).slice(0, 6));
     Health.table(document.getElementById('handler'), res[3]);
     Health.table(document.getElementById('errors'), res[4]);
+    Health.table(document.getElementById('inputErrors'), res[5], [
+      { key: 'data_source', label: 'Client' }, { key: 'token_label', label: 'HEC token' },
+      { key: 'splunk_index', label: 'Index' }, { key: 'sourcetype', label: 'Sourcetype' },
+      { key: 'hec_source', label: 'Source' }, { key: 'reply_label', label: 'Result' },
+      { key: 'errors', label: 'Errors' }, { key: 'status_message', label: 'Message' }
+    ]);
+    Charts.flow(document.getElementById('flow'), res[6], ['data_source', 'token_label', 'flow_index'], 'requests');
+    Health.table(document.getElementById('flowTable'), res[6], [
+      { key: 'data_source', label: 'Client' }, { key: 'token_label', label: 'HEC token' },
+      { key: 'splunk_index', label: 'Index' }, { key: 'sourcetype', label: 'Sourcetype' },
+      { key: 'events', label: 'Events' }, { key: 'requests', label: 'Requests' }, { key: 'errors', label: 'Errors' }
+    ]);
   }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
 })();
 </script>
