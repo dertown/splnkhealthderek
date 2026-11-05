@@ -793,6 +793,107 @@ Q_TOPO_PATHS = (
     + "\n| table data_source, ingest_path, splunk_index, events, _color_rank"
 )
 
+# Category → network → ingest method → index.
+# An IPv4 host becomes its /24. A hostname stays a hostname: this data has no
+# address for it, so it is not given a made-up CIDR. Volume is event count.
+# The search never reads a HEC token secret.
+Q_TOPO_CLASSIFY = r"""
+| eval octets=split(host, ".")
+| eval o1=coalesce(tonumber(mvindex(octets,0)), -1), o2=coalesce(tonumber(mvindex(octets,1)), -1), o3=coalesce(tonumber(mvindex(octets,2)), -1), o4=coalesce(tonumber(mvindex(octets,3)), -1)
+| eval network=if(mvcount(octets)=4 AND o1>=0 AND o1<=255 AND o2>=0 AND o2<=255 AND o3>=0 AND o3<=255 AND o4>=0 AND o4<=255 AND match(host, "^[0-9.]+"), o1.".".o2.".".o3.".0/24", host)
+| eval category=case(
+    match(sourcetype, "(?i)paloalto|pan:traffic|pan:threat|cisco:asa|cisco:ftd|cisco:firepower|fortinet|fortigate|checkpoint|opsec|pfsense|netscreen|sonicwall|zscaler|meraki|iptables|juniper:firewall"), "Firewall",
+    match(source, "(?i)paloalto|fortigate|cisco_asa|checkpoint|firepower"), "Firewall",
+    host_os="Windows" OR os_class="Windows", "Windows",
+    host_os="Linux" OR os_class="Linux", "Linux",
+    1=1, "Other")
+| eval ingest_method=case(
+    match(sourcetype, "(?i)netflow|ipfix"), "NetFlow / IPFIX",
+    match(sourcetype, "(?i)sc4s") OR ingest_path="SC4S", "SC4S",
+    match(sourcetype, "(?i)syslog") OR match(coalesce(net_label, ""), "^UDP:"), "Syslog",
+    ingest_path="Edge / Ingest Processor", "Edge Processor",
+    match(sourcetype, "(?i)httpevent") OR ingest_path="HEC / API / cloud", "HEC",
+    forwarder_class="HF" OR ingest_path="HF", "HF",
+    forwarder_class="UF" OR ingest_path="Windows UF" OR ingest_path="Linux UF", "UF",
+    match(coalesce(net_label, ""), "^TCP:"), "Other TCP",
+    1=1, "Other")
+| eval endpoint=case(
+    match(sourcetype, "(?i)o365|office365|office.365|ms:o365|m365:|exchange:online|sharepoint") OR match(source, "(?i)o365|office365"), "Microsoft 365",
+    match(sourcetype, "(?i)azure:|mscs:azure") OR match(source, "(?i)azure"), "Azure",
+    match(sourcetype, "(?i)aws:|cloudtrail") OR match(source, "(?i)aws:|cloudtrail"), "AWS",
+    match(sourcetype, "(?i)gcp:|google:|googlecloud|gws:") OR match(source, "(?i)gcp:|googlecloud"), "Google Cloud",
+    match(sourcetype, "(?i)okta") OR match(source, "(?i)okta"), "Okta",
+    match(sourcetype, "(?i)proofpoint") OR match(source, "(?i)proofpoint"), "Proofpoint",
+    match(sourcetype, "(?i)salesforce|sfdc:") OR match(source, "(?i)salesforce"), "Salesforce",
+    match(sourcetype, "(?i)duo:|cisco:duo") OR match(source, "(?i)duo"), "Cisco Duo",
+    match(sourcetype, "(?i)zscaler") OR match(source, "(?i)zscaler"), "Zscaler",
+    match(sourcetype, "(?i)crowdstrike|falcon") OR match(source, "(?i)crowdstrike"), "CrowdStrike",
+    match(sourcetype, "(?i)sentinelone") OR match(source, "(?i)sentinelone"), "SentinelOne",
+    match(sourcetype, "(?i)carbonblack|bit9"), "Carbon Black",
+    match(sourcetype, "(?i)github") OR match(source, "(?i)github"), "GitHub",
+    match(sourcetype, "(?i)zoom:") OR match(source, "(?i)zoom"), "Zoom",
+    match(sourcetype, "(?i)^box:|box:events") OR match(source, "(?i)box.com"), "Box",
+    match(sourcetype, "(?i)slack") OR match(source, "(?i)slack"), "Slack",
+    match(sourcetype, "(?i)servicenow|snow:") OR match(source, "(?i)servicenow"), "ServiceNow",
+    match(sourcetype, "(?i)workday") OR match(source, "(?i)workday"), "Workday",
+    match(sourcetype, "(?i)cloudflare") OR match(source, "(?i)cloudflare"), "Cloudflare",
+    match(sourcetype, "(?i)akamai") OR match(source, "(?i)akamai"), "Akamai",
+    match(sourcetype, "(?i)paloalto|pan:traffic|pan:threat") OR match(source, "(?i)paloalto|pan:"), "Palo Alto NGFW",
+    match(sourcetype, "(?i)fortinet|fortigate") OR match(source, "(?i)fortigate"), "Fortinet",
+    match(sourcetype, "(?i)cisco:asa|cisco:ftd|cisco:firepower") OR match(source, "(?i)cisco_asa|firepower"), "Cisco Firewall",
+    match(sourcetype, "(?i)checkpoint|opsec") OR match(source, "(?i)checkpoint"), "Check Point",
+    match(sourcetype, "(?i)apache|access_combined") OR match(source, "(?i)apache"), "Apache",
+    match(sourcetype, "(?i)nginx") OR match(source, "(?i)nginx"), "Nginx",
+    match(sourcetype, "(?i)kube:|kubernetes") OR match(source, "(?i)kube:"), "Kubernetes",
+    match(sourcetype, "(?i)wineventlog|xmlwineventlog|winhostmon|powershell"), "Windows",
+    match(sourcetype, "(?i)linux_|auditd|journald|osnix"), "Linux",
+    match(sourcetype, "(?i)syslog|sc4s"), "Syslog",
+    1=1, coalesce(sourcetype, host, "unknown"))
+| eval endpoint=substr(endpoint, 1, 80)
+| eval endpoint_kind=if(endpoint==sourcetype OR endpoint==host, "sourcetype", "product")
+""".strip()
+
+Q_TOPO_MAP = (
+    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n"
+    + Q_TOPO_CLASSIFY
+    + "\n| stats sum(events) as events by endpoint, endpoint_kind, category, network, ingest_method, index, host"
+    + "\n| eventstats sum(events) as endpoint_total by endpoint"
+    + "\n| sort 0 endpoint_kind -endpoint_total -events"
+    + "\n| streamstats count as ep_rank by endpoint"
+    + "\n| where ep_rank<=8"
+    + "\n| sort 0 -endpoint_total -events"
+    + "\n| head 500"
+    + "\n| rename host as data_source, index as splunk_index"
+    + "\n| eval _color_rank=3"
+    + "\n| table endpoint, endpoint_kind, category, network, ingest_method, splunk_index, data_source, events, _color_rank"
+)
+
+Q_TOPO_FOCUS_TREND = (
+    "| tstats count as events where index=`exec_health_idx` earliest=-25h@m latest=@m by _time span=15m host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n"
+    + Q_TOPO_CLASSIFY
+    + '\n| where ("$tok_topo_category$"="*" OR category="$tok_topo_category$") AND ("$tok_topo_network$"="*" OR network="$tok_topo_network$") AND ("$tok_topo_ingest$"="*" OR ingest_method="$tok_topo_ingest$") AND ("$tok_topo_index$"="*" OR index="$tok_topo_index$") AND ("$tok_topo_endpoint$"="*" OR endpoint="$tok_topo_endpoint$")'
+    + "\n| stats sum(events) as events by _time"
+    + "\n| timechart span=15m sum(events) as events"
+    + "\n| fillnull value=0 events"
+    + "\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples"
+    + "\n| eval sigma=`exec_health_sigma`"
+    + "\n| eval mean=if(samples>=8, round(mean_vol, 1), null())"
+    + "\n| eval drop_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol-(sigma*stdev_vol), 1), null())"
+    + "\n| eval burst_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol+(sigma*stdev_vol), 1), null())"
+    + "\n| eval drop_bound=if(drop_bound<0, 0, drop_bound)"
+    + "\n| eval outlier=case("
+    + '    samples<8, "WARMUP",'
+    + '    stdev_vol>0 AND events < drop_bound AND mean_vol>10, "DROP",'
+    + '    stdev_vol>0 AND events > burst_bound AND events>10, "BURST",'
+    + '    1=1, "OK")'
+    + '\n| eval bucket=strftime(_time, "%Y-%m-%d %H:%M")'
+    + "\n| table _time, bucket, events, mean, drop_bound, burst_bound, outlier"
+)
+
 Q_TCPIN_PATHS = r"""
 search index=_internal source=*metrics.log group=tcpin_connections
 | eval data_source=coalesce(sourceHost, hostname)
@@ -2711,7 +2812,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.56"
+APP_VERSION = "1.7.62"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3075,6 +3176,8 @@ def emit_catalog() -> None:
         "edge_logs": entry(Q_EDGE_LOGS, "-4h", "now", count=100),
         "indexed": entry(Q_INDEXED_COMPARE, "-4h", "now", count=300),
         "topo_paths": entry(Q_TOPO_PATHS, "-4h", "now", count=100, timeout=120),
+        "topo_map": entry(Q_TOPO_MAP, "-24h", "now", count=500, timeout=120),
+        "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_category", "tok_topo_network", "tok_topo_ingest", "tok_topo_index", "tok_topo_endpoint"], count=200, timeout=120),
         "tcpin": entry(Q_TCPIN_PATHS, "-4h", "now", count=80),
         "topo_src_stats": entry(Q_TOPO_SRC_STATS, "-4h", "now", ["tok_data_source"], count=5),
         "topo_src_trend": entry(Q_TOPO_SRC_TREND, "-25h@m", "@m", ["tok_data_source"], count=120),

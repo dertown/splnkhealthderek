@@ -24,6 +24,11 @@ logger = logging.getLogger("healthdash")
 PARAMS = {
     "host_filter": (r"^[\w.:*\-]{1,128}$", "*"),
     "tok_data_source": (r"^[\w.:\-]{1,128}$", "none"),
+    "tok_topo_category": (r"^(?:\*|Windows|Linux|Firewall|Other)$", "*"),
+    "tok_topo_network": (r"^(?:\*|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.0/24|[\w.:\-]{1,128})$", "*"),
+    "tok_topo_ingest": (r"^(?:\*|UF|HF|HEC|SC4S|Edge Processor|Syslog|NetFlow / IPFIX|Other TCP|Other|Universal Forwarder|Heavy Forwarder)$", "*"),
+    "tok_topo_index": (r"^(?:\*|[\w.:\-]{1,128})$", "*"),
+    "tok_topo_endpoint": (r"^(?:\*|[^\"\\`$\r\n|]{1,80})$", "*"),
     "tok_finding_id": (r"^(none|[a-fA-F0-9]{8,128})$", "none"),
     "tok_ask": (r"^[a-z0-9 ]{0,64}$", "all"),
     "tok_cell": (r"^(none|approve|dismiss|fix)$", "none"),

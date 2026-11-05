@@ -59,6 +59,7 @@
     topology: {
       title: 'Data Topology',
       sections: [
+        { title: 'Category, network, ingest method, and index (24h)', query: 'topo_map' },
         { title: 'Top source, path, and index flows', query: 'topo_paths' },
         { title: 'Forwarder to indexer (tcpin)', query: 'tcpin' }
       ]
