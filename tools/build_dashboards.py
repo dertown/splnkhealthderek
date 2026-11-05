@@ -1596,7 +1596,14 @@ Q_DQ_AGENT_FINDINGS = dq_agent_findings_core() + r"""
 """.rstrip() + DECISION_STATUS + r"""
 | eval action=if(status="open", "Review", "Resolved")
 | eval agent_thought="OBSERVE: "+issue+" on "+entity+". INVESTIGATE: "+coalesce(tool_plan, "learned baselines")+". TOOLS: fwdType="+coalesce(tool_fwdType, "n/a")+" conn="+coalesce(tool_conn, "n/a")+" err_component="+coalesce(tool_err_component, "none")+" err_count="+coalesce(tostring(tool_err_count), "0")+". HYPOTHESIZE: "+coalesce(likely_cause, "needs human review")+" (confidence "+coalesce(confidence, "n/a")+"). PROPOSE: "+suggested_fix+". ACT: wait for human APPROVE or DISMISS — never change Splunk unattended."
-| eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Reply with root cause, confidence, and step-by-step admin actions. Do not request secrets or HEC token values."
+| lookup dq_agent_config_samples fix_type OUTPUT sample AS cfg_sample, check_command AS cfg_cmd, check_search AS cfg_search
+| eval cfg_sample=substr(replace(replace(replace(replace(coalesce(cfg_sample, "none"), "@@", " ; "), "\|", " / "), "`", " "), "\$", " "), 1, 700)
+| eval cfg_cmd=substr(replace(replace(replace(coalesce(cfg_cmd, "none"), "\|", " / "), "`", " "), "\$", " "), 1, 300)
+| eval cfg_search=substr(replace(replace(replace(coalesce(cfg_search, "none"), "\|", " / "), "`", " "), "\$", " "), 1, 500)
+""" + "\n| eval cfg_sample=replace(cfg_sample, \"\\\"\", \" \")\n| eval cfg_cmd=replace(cfg_cmd, \"\\\"\", \" \")\n| eval cfg_search=replace(cfg_search, \"\\\"\", \" \")\n" + r"""
+| eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Sample config to validate: "+cfg_sample+". Host check to validate: "+cfg_cmd+". Splunk check to validate: "+cfg_search+". Reply with root cause, confidence, and step-by-step admin actions. Then validate the sample config and both checks: say whether each would confirm this issue and is safe to hand to an admin. End with exactly three lines and nothing after them. SAMPLE_CHECK: pass or fail, then a short reason. FIX_CHECK: pass or fail, then a short reason. SUPPORT_TICKET: yes or no, then a short reason. Use SUPPORT_TICKET yes only when the next step is to open a Splunk support ticket. Do not request secrets or HEC token values."
+| eval ai_brief=replace(replace(replace(replace(ai_brief, "\|", " / "), "`", " "), "\$", " "), "[\r\n]+", " ")
+""" + "\n| eval ai_brief=replace(ai_brief, \"\\\"\", \" \")\n| eval ai_brief=substr(ai_brief, 1, 5800)\n" + r"""
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank
 | sort _color_rank, issue, entity
@@ -2212,6 +2219,33 @@ Q_DQ_AI_ASK_WRITE = r"""
 | table requested_at, finding_id, provider, status, _color_rank
 """
 
+# A support ticket is drafted only when the person clicks Generate. The reply is
+# returned to the page and is not written over the suggested fix.
+Q_DQ_AI_TICKET = r"""
+| makeresults
+| eval ask="$tok_ai_ask$", finding_id="$tok_finding_id$", entity="$tok_entity$", issue="$tok_issue$", facts="$tok_ai_brief$", stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
+| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
+| eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
+| eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
+| eval endpoint=if(used_ui=0, "`exec_health_ai_endpoint`", coalesce(endpoint, "none"))
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
+| where ask="ask" AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder" AND mode="provider" AND provider!="none" AND provider!="" AND key_ok=1
+| lookup dq_agent_ai_providers provider OUTPUT default_endpoint
+| eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
+| eval ai_brief="Write a Splunk Support ticket a person can copy and paste. Use only the facts below. Do not invent counts, dates, host names, or searches. If a number or date is not in the facts, write not measured. Do not include secrets, certificates, or HEC token values. Reply with only the markdown below, and put each heading on its own line. For Estate evidence and Measured effect, fill the parentheses with the collection method, the date, and the count. Under Estate evidence, include one sample search when the facts contain a check search; otherwise write No sample search applies. Facts: "+facts+". Ticket: ## Subject. ## Environment. ## Summary. ## Estate evidence (how it was collected, date, count). ## Measured effect (what was measured, time window, how many items). ## Documentation we relied on. ## Questions for Splunk. ## Impact. ## What we have not verified."
+| eval is_ping=0
+| derekaiping
+| eval ticket=if(ai_result="replied", ai_reply, "none")
+| eval ticket_error=if(ai_result="replied", "none", coalesce(ai_error, "no reply"))
+| fields - api_key
+| table ticket, ticket_error
+"""
+
 Q_DQ_AI_LIST_BUTTON = r"""
 | makeresults
 | eval _pressed=if("$tok_ai_list$"="show", 1, 0)
@@ -2812,7 +2846,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.62"
+APP_VERSION = "1.7.65"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3191,6 +3225,7 @@ def emit_catalog() -> None:
         "agent_recorded": entry(Q_DQ_RECORDED_READ, "0", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5),
         "decide": entry(Q_DQ_SAVE_DECISION, "0", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5, timeout=60, write=True),
         "ask": entry(Q_DQ_AI_ASK_WRITE, "0", "now", ["tok_ai_ask", "tok_cell", "tok_finding_id", "tok_entity", "tok_issue", "tok_ai_brief"], count=5, timeout=150, write=True),
+        "ticket": entry(Q_DQ_AI_TICKET, "0", "now", ["tok_ai_ask", "tok_finding_id", "tok_entity", "tok_issue", "tok_ai_brief"], count=5, timeout=150, write=True),
         "ai_current": entry(Q_DQ_AI_CONN_TEST, "0", "now", count=5),
         "ai_providers": entry("| inputlookup dq_agent_ai_providers | table provider, provider_label, default_endpoint, notes", "0", "now", count=20),
         "ai_models": entry(Q_DQ_AI_MODELS, "0", "now", ["tok_cfg_provider"], count=50),

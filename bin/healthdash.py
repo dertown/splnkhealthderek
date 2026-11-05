@@ -2,9 +2,10 @@
 
 The browser asks for a search by name. The handler runs only the named searches in
 default/health_queries.json, as the signed-in user, and never SPL sent from the
-browser. A click can only run the four searches marked write=True (record a
-decision, ask the AI provider, save the AI config, test the connection). Nothing
-here changes Splunk configuration.
+browser. A click can only run the five searches marked write=True (record a
+decision, ask the AI provider, draft a support ticket, save the AI config, test
+the connection). Nothing here changes Splunk configuration, and the ticket is
+only text returned to the page.
 """
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ PARAMS = {
     "tok_cfg_save": (r"^save\|[a-z]*\|[A-Za-z0-9._-]*\|[0-9]+$", "save|||0"),
 }
 
-WRITES = {"decide", "ask", "save_config", "conn_test"}
+WRITES = {"decide", "ask", "ticket", "save_config", "conn_test"}
 TOKEN_RE = re.compile(r"\$([a-z_]+)\$")
 
 

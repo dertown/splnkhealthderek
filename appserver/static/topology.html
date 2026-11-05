@@ -3,33 +3,27 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.62">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.65">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>Data Topology</h1>
-    <p class="tagline">Every source that sent data in the last 24 hours is already on the map, including SaaS products such as Microsoft 365, Azure, AWS, and Okta when those sourcetypes are present. Click a source or an index to filter the panels below.</p>
+    <p class="tagline">One flow for the last 24 hours: host, ingestion path, sourcetype, then index. Known products such as Microsoft 365, Azure, AWS, and Okta keep their name. Click any step to filter the panels below.</p>
     <div class="hero-meta"><a id="home" href="#">Summary</a></div>
   </div>
   <div class="stats-row" id="stats"></div>
   <div class="section">
-    <h2 class="section-title">Data sources into Splunk</h2>
-    <p class="note">The left side lists the sources sending data. Known SaaS and security products are named. Anything else is shown by its sourcetype, so nothing is dropped. The center is Splunk, labeled by how the data arrived: UF, HEC, SC4S, or Edge Processor. The lines then continue into the indexes. The flow under the map uses that same source, method, and index.</p>
+    <h2 class="section-title">Host → ingestion path → sourcetype → index</h2>
+    <p class="note">Hosts are on the left. The next column is how the data arrived: UF, HF, HEC, SC4S, or Edge Processor. Then the sourcetype — a known product keeps its name, and anything else stays the sourcetype. The line ends at the index. Click +N under the hosts or the sourcetypes to list what did not fit.</p>
     <div id="map"></div>
-    <p class="note" id="mapHover">Click a data source, an ingest method, or an index. Click +N to load the sources that did not fit.</p>
-  </div>
-  <div class="section">
-    <h2 class="section-title">Host → ingestion path → data source</h2>
-    <p class="note">Hosts are on the left. The center is the ingestion path (UF, HEC, SC4S, or Edge Processor). The data source is on the right. A line shows which host sends which source through that path. Clicking either diagram filters the other.</p>
-    <div id="netmap"></div>
-    <p class="note" id="netHover">Click a host, an ingestion path, or a data source. Click +N to load the hosts that did not fit.</p>
+    <p class="note" id="mapHover">Click a host, an ingestion path, a sourcetype, or an index.</p>
   </div>
   <div class="section">
     <h2 class="section-title">Not drawn on the map</h2>
-    <div id="missing"><p class="note">Click +N on either diagram to list what did not fit.</p></div>
+    <div id="missing"><p class="note">Click +N under the hosts or the sourcetypes to list what did not fit.</p></div>
   </div>
-  <div class="section"><h2 class="section-title">Source → path → index — follows the map selection</h2><div id="flow"></div></div>
+  <div class="section"><h2 class="section-title">Same flow, for the current selection</h2><div id="flow"></div></div>
   <div class="section"><h2 class="section-title">Top source → path → index flows</h2><div id="paths"></div></div>
   <div class="section">
     <h2 class="section-title">Selected from the map <span id="selected" class="note"></span></h2>
@@ -42,8 +36,8 @@
   </div>
   <div class="section"><h2 class="section-title">Forwarder → indexer (tcpin)</h2><div id="tcpin"></div></div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.62"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.62"></script>
-<script src="../../static/app/splunk_exec_health/topology.js?v=1.7.62"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.65"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.65"></script>
+<script src="../../static/app/splunk_exec_health/topology.js?v=1.7.65"></script>
 </body>
 </html>

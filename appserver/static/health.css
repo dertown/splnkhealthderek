@@ -130,6 +130,12 @@ tr.selected td { background: #388bfd40; }
 .map-cats { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
 .fan { background: #070b10; border: 1px solid #1c2836; border-radius: 12px; padding: 6px 8px 12px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ticket {
+  width: 100%; min-height: 320px; margin-top: 12px; box-sizing: border-box;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.check { white-space: pre-line; margin: 0 0 12px; }
 .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }
 label.fld { display: flex; flex-direction: column; gap: 4px; font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 input, select {

@@ -736,7 +736,7 @@ def check_html_backend() -> None:
             err("health_queries.json", f"{name} looks like it carries a secret")
         if re.search(r"""api_key\s*=\s*["'][^"']{12,}""", spec["spl"]):
             err("health_queries.json", f"{name} assigns a literal API key")
-    if writes != {"decide", "ask", "save_config", "conn_test"}:
+    if writes != {"decide", "ask", "ticket", "save_config", "conn_test"}:
         err("health_queries.json", f"write searches are {sorted(writes)}")
     for banned in ("verify=False", "CERT_NONE", "http://"):
         if banned in handler:

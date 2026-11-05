@@ -8,7 +8,7 @@
   var focus = { category: '', network: '', ingest: '', index: '', host: '', endpoint: '' };
   var bounds = { events: 'events', mean: 'mean', drop_bound: 'drop (2σ)', burst_bound: 'burst (2σ)' };
   var sliceColumns = [
-    { key: 'endpoint', label: 'Data source' },
+    { key: 'endpoint', label: 'Sourcetype' },
     { key: 'data_source', label: 'Host' },
     { key: 'network', label: 'CIDR or host' },
     { key: 'ingest_method', label: 'Ingest' },
@@ -16,7 +16,7 @@
     { key: 'events', label: 'Events (24h)' }
   ];
   var directoryColumns = [
-    { key: 'endpoint', label: 'Data source' },
+    { key: 'endpoint', label: 'Sourcetype' },
     { key: 'events', label: 'Events (24h)' },
     { key: 'hosts', label: 'Hosts' },
     { key: 'indexes', label: 'Indexes' }
@@ -93,7 +93,7 @@
     rows.forEach(function (row) { if (row.endpoint_kind === 'product') products[row.endpoint] = 1; });
     var events = list.reduce(function (sum, row) { return sum + row.events; }, 0);
     Health.stats(document.getElementById('srcStats'), [
-      { val: list.length, lbl: 'Data sources' },
+      { val: list.length, lbl: 'Sourcetypes' },
       { val: Object.keys(products).length, lbl: 'Named products' },
       { val: Math.round(events).toLocaleString(), lbl: 'Events (24h)' }
     ]);
@@ -151,9 +151,6 @@
     Charts.sourceFan(document.getElementById('map'), mapRows, selected, pick, function (text) {
       document.getElementById('mapHover').textContent = text;
     });
-    Charts.networkFan(document.getElementById('netmap'), mapRows, selected, pick, function (text) {
-      document.getElementById('netHover').textContent = text;
-    });
   }
   function showMissing(rows) {
     var list = rows.slice().sort(function (a, b) { return (Number(b.events) || 0) - (Number(a.events) || 0); });
@@ -164,7 +161,7 @@
     Health.table(document.getElementById('missing'), list.slice(0, 80), [
       { key: 'data_source', label: 'Host' },
       { key: 'ingest_method', label: 'Ingestion path' },
-      { key: 'endpoint', label: 'Data source' },
+      { key: 'endpoint', label: 'Sourcetype' },
       { key: 'splunk_index', label: 'Index' },
       { key: 'events', label: 'Events (24h)' }
     ], function (row) { pick(focus.host === '__more__' ? 'host' : 'endpoint', focus.host === '__more__' ? row.data_source : row.endpoint); });
@@ -187,7 +184,8 @@
     }
     var one = focus.host || (hostList.length === 1 ? hostList[0] : '');
     var flowRows = focused() ? chosen : mapRows;
-    Charts.flow(document.getElementById('flow'), flowRows, ['endpoint', 'ingest_method', 'splunk_index'], 'events', focus.endpoint && focus.endpoint !== '__more__' ? focus.endpoint : '', function (name) { pick('endpoint', name); });
+    var flowPick = focus.host && focus.host !== '__more__' ? focus.host : '';
+    Charts.flow(document.getElementById('flow'), flowRows, ['data_source', 'ingest_method', 'endpoint', 'splunk_index'], 'events', flowPick, function (name) { pick('host', name); });
     Health.table(document.getElementById('paths'), pathRows, null, function (row) { pickHost(row.data_source); });
     Health.table(document.getElementById('tcpin'), tcpRows, null, function (row) { pickHost(row.data_source); });
     markRows(one);
@@ -277,7 +275,7 @@
     drawMap();
     paintLists();
     if (focus.endpoint === '__more__' || focus.host === '__more__') showMissing(selection());
-    else document.getElementById('missing').innerHTML = '<p class="note">Click +N on either diagram to list what did not fit.</p>';
+    else document.getElementById('missing').innerHTML = '<p class="note">Click +N under the hosts or the sourcetypes to list what did not fit.</p>';
     if (focus.host && focus.host !== '__more__') loadHost(focus.host);
     else if (focus.endpoint === '__more__' || focus.host === '__more__') showDirectory(selection());
     else if (focus.endpoint || focus.category || focus.network || focus.ingest || focus.index) loadGroup();
