@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.i18n_register=window.i18n_register||function(){};</script>
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>How to use Splunk Health Derek+</h1>
+    <p class="tagline">A search-head app for Splunk Cloud and Splunk Enterprise. It watches ingestion, hosts, HEC tokens, SC4S and Edge, and suggests fixes. A person approves or dismisses every suggestion. The app never changes Splunk configuration.</p>
+    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+  </div>
+  <div class="section">
+    <h2 class="section-title">Pages</h2>
+    <div class="cards">
+      <a class="card" id="p1" href="#"><h3>Summary</h3><p>Worst-area health, one card per area, ingestion trend, top indexes.</p><div class="arrow">Open →</div></a>
+      <a class="card" id="p2" href="#"><h3>Host Heartbeat</h3><p>Last data vs heartbeat, latency, 24-hour baseline, instance health.</p><div class="arrow">Open →</div></a>
+      <a class="card" id="p3" href="#"><h3>HEC Tokens</h3><p>Per-token volume and silence detection.</p><div class="arrow">Open →</div></a>
+      <a class="card" id="p4" href="#"><h3>SC4S &amp; Edge</h3><p>Syslog sources and Edge Processor in versus out.</p><div class="arrow">Open →</div></a>
+      <a class="card" id="p5" href="#"><h3>Data Topology</h3><p>Source to ingest path to index. Click a source for its history.</p><div class="arrow">Open →</div></a>
+      <a class="card" id="p6" href="#"><h3>Data Quality Agent</h3><p>Click a row for an AI suggested fix, then Approve or Dismiss.</p><div class="arrow">Open →</div></a>
+      <a class="card" id="p7" href="#"><h3>Reports</h3><p>A timestamped compilation of overall health, or one report for a single dashboard.</p><div class="arrow">Open →</div></a>
+    </div>
+  </div>
+  <div class="section">
+    <h2 class="section-title">Working a suggestion</h2>
+    <div class="panel">
+      <p>1. Filter the work queue if you want, or leave it on <code>all</code>.</p>
+      <p>2. Click a row. The saved AI provider is asked automatically and the suggested fix fills in below the playbook fix. Click the <strong>Fix</strong> cell to ask again.</p>
+      <p>3. Click <strong>Approve</strong> or <strong>Dismiss</strong> in the row. The row's status updates straight away and the decision is stored in the <code>dq_agent_approvals</code> KV Store. A decision closes a problem for 24 hours.</p>
+      <p>4. The sample config panel shows which file to change, where it goes, what differs on Splunk Cloud, and a command and search to check the fix. Nothing is applied for you.</p>
+    </div>
+  </div>
+  <div class="section">
+    <h2 class="section-title">Thresholds</h2>
+    <div class="panel">
+      <p>All of these are search macros under Settings → Advanced search → Search macros.</p>
+      <p><code>exec_health_silence_sec</code> 3600, seconds without data before DATA SILENT. <code>exec_health_heartbeat_sec</code> 600, seconds without <code>_internal</code> before a missing heartbeat. <code>exec_health_latency_sec</code> 300, p95 index lag before DELAYED. <code>exec_health_sigma</code> 2, standard deviations below a host's mean before ALERT. <code>exec_health_hec_silence_min</code> 5 and <code>exec_health_hec_baseline_eps</code> 100 control HEC silence.</p>
+    </div>
+  </div>
+</div>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
+<script>
+['p1', 'executive_overview', 'p2', 'host_heartbeat', 'p3', 'hec_performance', 'p4', 'sc4s_edge', 'p5', 'data_topology', 'p6', 'data_quality_agent', 'p7', 'health_reports']
+  .reduce(function (pairs, value, index, all) { if (index % 2 === 0) Health.link(value, all[index + 1]); return pairs; }, 0);
+Health.link('home', 'executive_overview');
+</script>
+</body>
+</html>

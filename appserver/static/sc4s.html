@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.i18n_register=window.i18n_register||function(){};</script>
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>SC4S Syslog &amp; Edge/Ingest Processors</h1>
+    <p class="tagline">Syslog volume per source, and Edge Processor traffic in against traffic out. Filter efficiency is the share of events that do not leave the processor.</p>
+    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+  </div>
+  <div class="stats-row" id="stats"></div>
+  <div class="two">
+    <div class="section"><h2 class="section-title">SC4S / syslog events</h2><div id="sc4s"></div></div>
+    <div class="section"><h2 class="section-title">Events reaching indexers</h2><div id="indexed"></div></div>
+  </div>
+  <div class="two">
+    <div class="section"><h2 class="section-title">Events per syslog source</h2><div id="hosts"></div></div>
+    <div class="section"><h2 class="section-title">SC4S issues</h2><div id="errors"></div></div>
+  </div>
+  <div class="section"><h2 class="section-title">Edge Processor in vs out</h2><div id="edge"></div></div>
+  <div class="two">
+    <div class="section"><h2 class="section-title">Edge queue fill and export errors</h2><div id="queue"></div></div>
+    <div class="section"><h2 class="section-title">Edge / ingest logs</h2><div id="logs"></div></div>
+  </div>
+  <div class="section"><h2 class="section-title">Blocked ingestion queues</h2><div id="blocked"></div></div>
+</div>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.56"></script>
+<script>
+(function () {
+  Health.link('home', 'executive_overview');
+  function series(rows) {
+    return Object.keys(rows[0] || {}).filter(function (key) { return key !== '_time' && key !== '_span' && key.charAt(0) !== '_'; }).slice(0, 6);
+  }
+  Promise.all([
+    Health.query('edge_summary'), Health.query('sc4s_time'), Health.query('indexed'), Health.query('sc4s_hosts'),
+    Health.query('sc4s_errors'), Health.query('edge_tp'), Health.query('edge_queue'), Health.query('edge_logs'), Health.query('ingest_actions')
+  ]).then(function (res) {
+    var edge = res[0][0] || {};
+    Health.stats(document.getElementById('stats'), [
+      { val: edge.events_in_eps || '0', lbl: 'Edge events in / sec' },
+      { val: edge.events_out_eps || '0', lbl: 'Edge events out / sec' },
+      { val: (edge.filter_efficiency_pct || '0') + '%', lbl: 'Filter efficiency' },
+      { val: edge.bytes_in_mbps || '0', lbl: 'Edge MB/s in' }
+    ]);
+    Charts.line(document.getElementById('sc4s'), res[1], '_time', series(res[1]));
+    Charts.line(document.getElementById('indexed'), res[2], '_time', series(res[2]));
+    Health.table(document.getElementById('hosts'), res[3]);
+    Health.table(document.getElementById('errors'), res[4]);
+    Health.table(document.getElementById('edge'), res[5]);
+    Health.table(document.getElementById('queue'), res[6]);
+    Health.table(document.getElementById('logs'), res[7]);
+    Charts.line(document.getElementById('blocked'), res[8], '_time', series(res[8]));
+  }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
+})();
+</script>
+</body>
+</html>

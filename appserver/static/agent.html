@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.i18n_register=window.i18n_register||function(){};</script>
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>Derek+ Data Quality Agent</h1>
+    <p class="tagline">Click a row to select it and ask the saved AI provider for a suggested fix. Click Approve or Dismiss in the row to record the decision. The app never changes Splunk.</p>
+    <div class="hero-meta"><a id="home" href="#">Summary</a><span>·</span><a id="setup" href="#">AI provider setup</a></div>
+  </div>
+  <div class="controls">
+    <label class="fld">Filter<input id="filter" value="all" maxlength="64"></label>
+    <button class="btn" id="apply">Apply</button>
+    <span class="note" id="status"></span>
+  </div>
+  <div class="stats-row" id="stats"></div>
+  <div class="section"><h2 class="section-title">Work queue — click a row, or Approve / Dismiss in the row</h2><div id="queue"></div></div>
+  <div class="section"><h2 class="section-title">Selected suggestion</h2><div id="selected"></div></div>
+  <div class="section"><h2 class="section-title">Sample config and fix check</h2><div id="sample"></div></div>
+  <div class="section"><h2 class="section-title">AI suggested fix</h2><div id="replies"><p class="note">Click a row in the work queue.</p></div></div>
+  <div class="section"><h2 class="section-title">Recorded decision</h2><div id="recorded"></div></div>
+  <div class="section">
+    <h2 class="section-title">All AI suggestions</h2>
+    <button class="btn secondary" id="toggle">Hide the list</button>
+    <div id="list"></div>
+  </div>
+</div>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
+<script>
+(function () {
+  Health.link('home', 'executive_overview');
+  Health.link('setup', 'ai_provider_setup');
+  var current = null;
+  var listShown = true;
+
+  function params() {
+    return { tok_ask: (document.getElementById('filter').value || 'all').toLowerCase() };
+  }
+
+  function reload() {
+    var base = params();
+    Promise.all([
+      Health.query('agent_queue', base),
+      Health.query('agent_status', base)
+    ]).then(function (res) {
+      var status = res[1][0] || {};
+      Health.stats(document.getElementById('stats'), [
+        { val: status.agent_status || 'GREEN', lbl: 'Queue health', kind: status.agent_status === 'RED' ? 'bad' : (status.agent_status === 'YELLOW' ? 'warn' : 'ok') },
+        { val: status.issues || '0', lbl: 'Open suggestions' }
+      ]);
+      Health.table(document.getElementById('queue'), res[0], [
+        { key: 'severity', label: 'Severity' }, { key: 'issue', label: 'Issue' }, { key: 'entity', label: 'Entity' },
+        { key: 'fix', label: 'Fix' }, { key: 'recurring', label: 'Recurring' }, { key: 'confidence', label: 'Confidence' },
+        { key: 'status', label: 'Status' }, { key: 'approve', label: 'Approve' }, { key: 'dismiss', label: 'Dismiss' }
+      ], onRow);
+    }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
+    loadList();
+  }
+
+  function loadList() {
+    Health.query('agent_list', { tok_ai_list: listShown ? 'show' : 'hide' })
+      .then(function (rows) { Health.table(document.getElementById('list'), rows); })
+      .catch(function (error) { Health.fail(document.getElementById('list'), error); });
+  }
+
+  function showSelection(row) {
+    var find = { tok_finding_id: row.finding_ref, tok_cell: 'none', tok_row_status: row.status };
+    Health.query('agent_selected', find).then(function (rows) { Health.table(document.getElementById('selected'), rows); });
+    Health.query('agent_sample', { tok_finding_id: row.finding_ref }).then(function (rows) { Health.table(document.getElementById('sample'), rows); });
+    Health.query('agent_recorded', find).then(function (rows) { Health.table(document.getElementById('recorded'), rows); });
+  }
+
+  function ask(row, again) {
+    document.getElementById('replies').innerHTML = '<p class="note">Asking the saved provider…</p>';
+    Health.act('ask', {
+      tok_ai_ask: 'ask', tok_cell: again ? 'fix' : 'none', tok_finding_id: row.finding_ref,
+      tok_entity: row.entity || 'none', tok_issue: row.issue || 'none', tok_ai_brief: row.ai_brief_text || 'none'
+    }).then(function () {
+      return Health.query('agent_replies', { tok_finding_id: row.finding_ref, tok_ai_ask: 'ask' });
+    }).then(function (rows) {
+      Health.table(document.getElementById('replies'), rows);
+    }).catch(function (error) { Health.fail(document.getElementById('replies'), error); });
+  }
+
+  function onRow(row, column) {
+    current = row;
+    if (column === 'approve' || column === 'dismiss') {
+      if (row.status !== 'open') return;
+      document.getElementById('status').textContent = 'Recording ' + column + '…';
+      Health.act('decide', { tok_finding_id: row.finding_ref, tok_cell: column, tok_row_status: 'open' })
+        .then(function () { document.getElementById('status').textContent = 'Recorded.'; reload(); })
+        .catch(function (error) { Health.fail(document.getElementById('status'), error); });
+      return;
+    }
+    showSelection(row);
+    ask(row, column === 'fix');
+  }
+
+  document.getElementById('apply').addEventListener('click', reload);
+  document.getElementById('toggle').addEventListener('click', function () {
+    listShown = !listShown;
+    this.textContent = listShown ? 'Hide the list' : 'Show the list';
+    loadList();
+  });
+  reload();
+})();
+</script>
+</body>
+</html>

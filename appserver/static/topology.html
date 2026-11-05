@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.i18n_register=window.i18n_register||function(){};</script>
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>Data Topology</h1>
+    <p class="tagline">How data reaches Splunk: source, then ingest path, then index. Click a source in the table to see its first and latest event, its 24-hour trend, and its drops and bursts.</p>
+    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+  </div>
+  <div class="stats-row" id="stats"></div>
+  <div class="section"><h2 class="section-title">Source → path → index flows — click a source to highlight its path</h2><div id="flow"></div></div>
+  <div class="section"><h2 class="section-title">Top source → path → index flows</h2><div id="paths"></div></div>
+  <div class="section">
+    <h2 class="section-title">Selected source <span id="selected" class="note"></span></h2>
+    <div id="srcStats"></div>
+    <h2 class="section-title">24-hour volume and 2σ drop / burst</h2>
+    <div id="srcTrend"><p class="note">Click a source to see its volume against the 2σ drop and burst bounds.</p></div>
+    <h2 class="section-title">Drop and burst buckets</h2>
+    <div id="srcOutliers"></div>
+  </div>
+  <div class="section"><h2 class="section-title">Forwarder → indexer (tcpin)</h2><div id="tcpin"></div></div>
+</div>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.56"></script>
+<script>
+(function () {
+  Health.link('home', 'executive_overview');
+  var paths = [];
+  var bounds = { events: 'events', mean: 'mean', drop_bound: 'drop (2σ)', burst_bound: 'burst (2σ)' };
+  function drawFlow(name) {
+    Charts.flow(document.getElementById('flow'), paths, ['data_source', 'ingest_path', 'splunk_index'], 'events', name, source);
+  }
+  function markRows(name) {
+    ['paths', 'tcpin'].forEach(function (id) {
+      Array.prototype.forEach.call(document.querySelectorAll('#' + id + ' tbody tr'), function (tr) {
+        var cell = tr.querySelector('td');
+        tr.classList.toggle('selected', !!(cell && name && cell.textContent === name));
+      });
+    });
+  }
+  function source(name) {
+    document.getElementById('selected').textContent = name ? '· ' + name : '';
+    drawFlow(name);
+    markRows(name);
+    var params = { tok_data_source: name };
+    Promise.all([
+      Health.query('topo_src_stats', params), Health.query('topo_src_trend', params), Health.query('topo_src_outliers', params)
+    ]).then(function (res) {
+      Health.table(document.getElementById('srcStats'), res[0]);
+      Charts.line(document.getElementById('srcTrend'), res[1], '_time', ['events', 'mean', 'burst_bound', 'drop_bound'], bounds);
+      Health.table(document.getElementById('srcOutliers'), res[2]);
+    }).catch(function (error) { Health.fail(document.getElementById('srcStats'), error); });
+  }
+  Promise.all([Health.query('topo_paths'), Health.query('tcpin')]).then(function (res) {
+    paths = res[0];
+    var tcpin = res[1];
+    var count = function (key) { var seen = {}; paths.forEach(function (row) { seen[row[key]] = 1; }); return Object.keys(seen).length; };
+    Health.stats(document.getElementById('stats'), [
+      { val: count('data_source'), lbl: 'Data sources' },
+      { val: count('ingest_path'), lbl: 'Ingest paths' },
+      { val: count('splunk_index'), lbl: 'Destination indexes' },
+      { val: (function () { var seen = {}; tcpin.forEach(function (row) { seen[row.data_source] = 1; }); return Object.keys(seen).length; })(), lbl: 'Forwarders' }
+    ]);
+    drawFlow('');
+    Health.table(document.getElementById('paths'), paths, null, function (row) { source(row.data_source); });
+    Health.table(document.getElementById('tcpin'), tcpin, null, function (row) { source(row.data_source); });
+  }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
+})();
+</script>
+</body>
+</html>

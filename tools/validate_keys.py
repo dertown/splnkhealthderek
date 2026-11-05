@@ -513,6 +513,15 @@ def check_dashboard(path: Path, macros: dict, transforms: dict) -> None:
     except ET.ParseError as exc:
         err(where, f"XML parse error: {exc}")
         return
+    if root.tag == "view":
+        template = root.get("template") or ""
+        if root.get("type") != "html" or not template.startswith("splunk_exec_health:/static/"):
+            err(where, "html view needs type=html and a splunk_exec_health:/static/ template")
+            return
+        page = ROOT / "appserver" / "static" / template.split("/static/", 1)[1]
+        if not page.is_file():
+            err(where, f"template {template} does not exist")
+        return
     if root.tag != "dashboard" or root.get("version") != "2":
         err(where, "root must be <dashboard version=\"2\">")
     if root.get("theme") not in (None, "light", "dark"):
@@ -699,6 +708,54 @@ def check_nav() -> None:
             warn("nav/default.xml", f"view {view.stem!r} is not in the nav")
 
 
+def check_html_backend() -> None:
+    """The HTML pages only run named searches, and every value they send is checked."""
+    import json as _json
+    catalog_path = DEFAULT / "health_queries.json"
+    if not catalog_path.is_file():
+        err("health_queries.json", "missing query catalog")
+        return
+    catalog = _json.loads(catalog_path.read_text(encoding="utf-8"))
+    handler = (ROOT / "bin" / "healthdash.py").read_text(encoding="utf-8")
+    allowed = set(re.findall(r'^    "([a-z_]+)": \(', handler, re.M))
+    writes = set()
+    for name, spec in catalog.items():
+        if not isinstance(spec, dict) or "spl" not in spec:
+            err("health_queries.json", f"{name} is malformed")
+            continue
+        used = set(re.findall(r"\$([a-z_]+)\$", spec["spl"]))
+        declared = set(spec.get("params") or [])
+        if used != declared:
+            err("health_queries.json", f"{name} tokens {sorted(used)} differ from params {sorted(declared)}")
+        unknown = declared - allowed
+        if unknown:
+            err("health_queries.json", f"{name} uses unknown params {sorted(unknown)}")
+        if spec.get("write"):
+            writes.add(name)
+        if re.search(r"(?i)(sk-|AKIA|BEGIN (RSA |EC )?PRIVATE)", spec["spl"]):
+            err("health_queries.json", f"{name} looks like it carries a secret")
+        if re.search(r"""api_key\s*=\s*["'][^"']{12,}""", spec["spl"]):
+            err("health_queries.json", f"{name} assigns a literal API key")
+    if writes != {"decide", "ask", "save_config", "conn_test"}:
+        err("health_queries.json", f"write searches are {sorted(writes)}")
+    for banned in ("verify=False", "CERT_NONE", "http://"):
+        if banned in handler:
+            err("bin/healthdash.py", f"contains {banned}")
+
+    restmap = parse_conf(DEFAULT / "restmap.conf")
+    stanza = restmap.get("script:healthdash", {})
+    for key, value in {
+        "match": "/data/healthdash", "script": "healthdash.py", "scripttype": "persist",
+        "handler": "healthdash.HealthDashHandler", "requireAuthentication": "true",
+    }.items():
+        if stanza.get(key) != value:
+            err("restmap.conf", f"script:healthdash {key} must be {value}")
+    web = parse_conf(DEFAULT / "web.conf")
+    expose = web.get("expose:healthdash", {})
+    if "GET" not in expose.get("methods", "") or "POST" not in expose.get("methods", ""):
+        err("web.conf", "expose:healthdash must allow GET and POST")
+
+
 def main() -> int:
     app_conf = check_app_conf()
     macros = check_macros()
@@ -707,6 +764,7 @@ def main() -> int:
     check_commands_conf()
     check_collections()
     check_config_samples()
+    check_html_backend()
     check_meta()
     check_manifest(app_conf)
     check_nav()

@@ -1530,6 +1530,70 @@ search `exec_health_hec_handler` (log_level=ERROR OR log_level=WARN)
 | timechart span=5m count as handler_issues
 """.strip()
 
+# HttpInputDataHandler lines look like:
+# Failed processing http input, token name=<input name>, source_IP=<client>,
+# reply=<n>, status_message="...", parsing_err="invalid_index='<index>'"
+# token name is the HEC input name, never the token secret.
+Q_HEC_PARSE = r"""
+search `exec_health_hec_handler`
+| rex field=_raw "token name=(?<token>[^,\s]+)"
+| rex field=_raw "source_IP=(?<source_ip>[^,\s\"]+)"
+| rex field=_raw "forwarded_source_IP=\"?(?<forwarded_ip>[^,\"\s]+)"
+| rex field=_raw "reply=(?<reply>\d+)"
+| rex field=_raw "events_processed=(?<events_processed>\d+)"
+| rex field=_raw "status_message=\"(?<status_message>[^\"]*)\""
+| rex field=_raw "invalid_index='(?<bad_index>[^']+)'"
+| rex field=_raw "invalid_sourcetype='(?<bad_sourcetype>[^']+)'"
+| rex field=_raw "sourcetype=(?<logged_sourcetype>[^,\s\"]+)"
+| rex field=_raw "\bsource=(?<logged_source>[^,\s\"]+)"
+| rex field=_raw "\bindex=(?<logged_index>[^,\s\"]+)"
+| eval token=coalesce(token, "n/a")
+| eval data_source=coalesce(forwarded_ip, source_ip, "not logged")
+| eval splunk_index=coalesce(bad_index, logged_index, "not logged")
+| eval sourcetype=coalesce(bad_sourcetype, logged_sourcetype, "not logged")
+| eval hec_source=coalesce(logged_source, "not logged")
+| eval events_processed=coalesce(events_processed, 0)
+| eval reply_label=case(
+    reply="0", "Success",
+    reply="1", "Token disabled",
+    reply="2", "Token is required",
+    reply="3", "Invalid authorization",
+    reply="4", "Invalid token",
+    reply="5", "No data",
+    reply="6", "Invalid data format",
+    reply="7", "Incorrect index",
+    reply="9", "Server is busy",
+    reply="10", "Data channel is missing",
+    reply="11", "Invalid data channel",
+    reply="12", "Event field is required",
+    reply="13", "Event field cannot be blank",
+    reply="14", "ACK is disabled",
+    reply="15", "Error in handling indexed fields",
+    reply="16", "Query string authorization is not enabled",
+    isnotnull(reply), "reply ".reply,
+    1=1, "n/a")
+| lookup hec_token_map token OUTPUT token_name
+| eval token_label=coalesce(token_name, token)
+""".strip()
+
+Q_HEC_INPUT_ERRORS = (Q_HEC_PARSE + r"""
+| where log_level="ERROR" OR log_level="WARN" OR (isnotnull(reply) AND reply!="0")
+| stats count as errors, sum(events_processed) as events_processed, latest(status_message) as status_message by data_source, token_label, splunk_index, sourcetype, hec_source, reply_label
+| eval _color_rank=1
+| sort 0 -errors
+| table data_source, token_label, splunk_index, sourcetype, hec_source, reply_label, errors, events_processed, status_message, _color_rank
+""").strip()
+
+Q_HEC_FLOW = (Q_HEC_PARSE + r"""
+| where token!="n/a" OR data_source!="not logged"
+| stats sum(events_processed) as events, count as requests, sum(eval(if(log_level="ERROR" OR log_level="WARN" OR (isnotnull(reply) AND reply!="0"), 1, 0))) as errors by data_source, token_label, splunk_index, sourcetype
+| eval flow_index=if(splunk_index="not logged" AND sourcetype="not logged", "not logged", splunk_index." · ".sourcetype)
+| eval _color_rank=if(errors>0, 1, 3)
+| sort 0 -events, -errors
+| head 80
+| table data_source, token_label, splunk_index, sourcetype, flow_index, events, requests, errors, _color_rank
+""").strip()
+
 
 def hec_performance() -> dict:
     return {
@@ -2647,7 +2711,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.48"
+APP_VERSION = "1.7.56"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -2968,65 +3032,107 @@ def render_savedsearches() -> str:
     return "\n".join(out) + "\n"
 
 
+
+def emit_catalog() -> None:
+    """Named searches the HTML pages may run. The REST handler only ever runs a
+    name from this file, never SPL from the browser, and only the entries marked
+    write=True can be triggered by a click."""
+
+    def entry(spl: str, earliest: str = "-24h", latest: str = "now", params: list | None = None,
+              count: int = 200, timeout: int = 90, write: bool = False) -> dict:
+        return {"spl": spl.strip(), "earliest": earliest, "latest": latest,
+                "params": params or [], "count": count, "timeout": timeout, "write": write}
+
+    asked = Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_AGENT_ASK
+    gate = ["tok_ask", "tok_cell", "tok_row_status", "tok_finding_id"]
+    catalog = {
+        "areas": entry(exec_area_rollup(), "-15m", "now", count=20),
+        "license_daily": entry(Q_LICENSE_DAILY, "-15d@d", "@d", count=30),
+        "live": entry(Q_LIVE, "-15m", "now", count=5),
+        "agent_counts": entry(Q_DQ_AGENT_FINDINGS + "\n" + EXEC_AGENT_COUNTS, "-24h", "now", count=5),
+        "top_indexes": entry(Q_TOP_INDEXES, "-7d@d", "@d", count=12),
+        "state_counts": entry(Q_STATE_COUNTS, "-24h", "now", ["host_filter"], count=10),
+        "phone_home": entry(Q_PHONE_HOME, "-24h", "now", ["host_filter"], count=300),
+        "latency": entry(Q_LATENCY, "-15m@m", "now", ["host_filter"], count=300),
+        "baseline": entry(Q_BASELINE_ALL, "-25h@m", "@m", ["host_filter"], count=300, timeout=120),
+        "features": entry(Q_HEALTH_FEATURES, "-15m", "now", count=100),
+        "introspection": entry(Q_INTROSPECTION, "-4h", "now", count=100),
+        "ingest_actions": entry(Q_INGEST_ACTIONS, "-4h", "now", count=300),
+        "hec_state": entry(Q_HEC_STATE, "-2h@m", "-1m@m", count=100, timeout=120),
+        "hec_time": entry(Q_HEC_TIMECHART, "-4h", "now", count=400),
+        "hec_totals": entry(Q_HEC_TOTALS, "-4h", "now", count=5),
+        "hec_handler": entry(Q_HEC_HANDLER, "-4h", "now", count=50),
+        "hec_errors": entry(Q_HEC_ERRORS, "-4h", "now", count=100),
+        "hec_input_errors": entry(Q_HEC_INPUT_ERRORS, "-4h", "now", count=100),
+        "hec_flow": entry(Q_HEC_FLOW, "-4h", "now", count=80),
+        "sc4s_time": entry(Q_SC4S_TIME, "-4h", "now", count=400),
+        "sc4s_hosts": entry(Q_SC4S_HOSTS, "-4h", "now", count=100),
+        "sc4s_errors": entry(Q_SC4S_ERRORS, "-4h", "now", count=100),
+        "sc4s_err_time": entry(Q_SC4S_ERR_TIME, "-4h", "now", count=300),
+        "edge_summary": entry(Q_EDGE_SUMMARY, "-4h", "now", count=5),
+        "edge_tp": entry(Q_EDGE_THROUGHPUT, "-4h", "now", count=100),
+        "edge_queue": entry(Q_EDGE_QUEUE, "-4h", "now", count=100),
+        "edge_logs": entry(Q_EDGE_LOGS, "-4h", "now", count=100),
+        "indexed": entry(Q_INDEXED_COMPARE, "-4h", "now", count=300),
+        "topo_paths": entry(Q_TOPO_PATHS, "-4h", "now", count=100, timeout=120),
+        "tcpin": entry(Q_TCPIN_PATHS, "-4h", "now", count=80),
+        "topo_src_stats": entry(Q_TOPO_SRC_STATS, "-4h", "now", ["tok_data_source"], count=5),
+        "topo_src_trend": entry(Q_TOPO_SRC_TREND, "-25h@m", "@m", ["tok_data_source"], count=120),
+        "topo_src_outliers": entry(Q_TOPO_SRC_OUTLIERS, "-25h@m", "@m", ["tok_data_source"], count=50),
+        "agent_queue": entry(asked + "\n" + Q_DQ_QUEUE_VIEW + "\n| rename _finding_id AS finding_ref, _ai_brief AS ai_brief_text", "-24h", "now", gate, count=100, timeout=120),
+        "agent_status": entry(asked + "\n" + Q_DQ_AGENT_STATUS, "-24h", "now", gate, count=5),
+        "agent_selected": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_SUGGESTION, "-24h", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5),
+        "agent_sample": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_CONFIG_SAMPLE, "-24h", "now", ["tok_finding_id"], count=20),
+        "agent_replies": entry(Q_DQ_AI_REPLIES, "0", "now", ["tok_finding_id", "tok_ai_ask"], count=5),
+        "agent_list": entry(Q_DQ_AI_LIST, "0", "now", ["tok_ai_list"], count=100),
+        "agent_recorded": entry(Q_DQ_RECORDED_READ, "0", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5),
+        "decide": entry(Q_DQ_SAVE_DECISION, "0", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5, timeout=60, write=True),
+        "ask": entry(Q_DQ_AI_ASK_WRITE, "0", "now", ["tok_ai_ask", "tok_cell", "tok_finding_id", "tok_entity", "tok_issue", "tok_ai_brief"], count=5, timeout=150, write=True),
+        "ai_current": entry(Q_DQ_AI_CONN_TEST, "0", "now", count=5),
+        "ai_providers": entry("| inputlookup dq_agent_ai_providers | table provider, provider_label, default_endpoint, notes", "0", "now", count=20),
+        "ai_models": entry(Q_DQ_AI_MODELS, "0", "now", ["tok_cfg_provider"], count=50),
+        "save_config": entry(Q_DQ_AI_SAVE_CONFIG, "0", "now", ["tok_cfg_save", "tok_cfg_provider", "tok_cfg_model", "tok_cfg_key"], count=5, timeout=60, write=True),
+        "conn_test": entry(Q_DQ_AI_CONN_WRITE, "0", "now", ["tok_cfg_save", "tok_cfg_provider", "tok_cfg_model", "tok_cfg_key"], count=5, timeout=150, write=True),
+    }
+    import re as _re
+    for name, item in catalog.items():
+        used = set(_re.findall(r"\$([a-z_]+)\$", item["spl"]))
+        declared = set(item["params"])
+        if used != declared:
+            raise SystemExit(f"catalog {name}: tokens {sorted(used)} != params {sorted(declared)}")
+    path = ROOT / "default" / "health_queries.json"
+    path.write_text(json.dumps(catalog, indent=1), encoding="utf-8")
+    print(f"wrote {path.relative_to(ROOT)}")
+
+
 def main() -> None:
     VIEWS.mkdir(parents=True, exist_ok=True)
     SAVEDSEARCHES.write_text(render_savedsearches(), encoding="utf-8")
     print(f"wrote {SAVEDSEARCHES.relative_to(ROOT)}")
-    dashboards = {
-        "executive_overview.xml": (
-            "Splunk Health Derek+",
-            "Traffic-light Splunk infrastructure health for executives.",
-            executive_overview(),
-        ),
-        "host_heartbeat.xml": (
-            "Host Heartbeat & Instance Health",
-            "Last data vs last heartbeat and 24-hour volume baselines.",
-            host_heartbeat(),
-        ),
-        "hec_performance.xml": (
-            "HEC Token Performance",
-            "HTTP Event Collector throughput and silence detection.",
-            hec_performance(),
-        ),
-        "sc4s_edge.xml": (
-            "SC4S Syslog & Edge/Ingest Processors",
-            "Syslog/SC4S sources and Edge/Ingest Processor in-flight metrics.",
-            sc4s_edge(),
-        ),
-        "data_topology.xml": (
-            "Data Topology",
-            "Click a data source for latest event, volume, trend, and drop/burst outliers.",
-            data_topology(),
-        ),
-        "data_quality_agent.xml": (
-            "Derek+ Data Quality Agent",
-            "Click a queue row, then Approve or Dismiss in that row to record the decision. Search does not open.",
-            data_quality_agent(),
-        ),
-        "ai_provider_setup.xml": (
-            "AI provider setup",
-            "Set provider, model, and key, then click SAVE. Search does not open.",
-            ai_provider_setup(),
-        ),
-        "readme.xml": (
-            "README",
-            f"How to use {APP_LABEL}: dashboards, indexes, macros, and alerts.",
-            readme(),
-        ),
-        "about.xml": (
-            "About",
-            f"About {APP_LABEL}: version, license, and Splunk Cloud compatibility.",
-            about(),
-        ),
-    }
-    for filename, (label, desc, definition) in dashboards.items():
+    pages = [
+        ("executive_overview.xml", "Splunk Health Derek+", "executive.html"),
+        ("host_heartbeat.xml", "Host Heartbeat & Instance Health", "host.html"),
+        ("hec_performance.xml", "HEC Token Performance", "hec.html"),
+        ("sc4s_edge.xml", "SC4S Syslog & Edge/Ingest Processors", "sc4s.html"),
+        ("data_topology.xml", "Data Topology", "topology.html"),
+        ("data_quality_agent.xml", "Derek+ Data Quality Agent", "agent.html"),
+        ("health_reports.xml", "Reports", "reports.html"),
+        ("ai_provider_setup.xml", "AI provider setup", "setup.html"),
+        ("readme.xml", "README", "readme.html"),
+        ("about.xml", "About", "about.html"),
+    ]
+    for filename, label, template in pages:
         path = VIEWS / filename
-        definition = studio_cards(definition)
-        xml_text = wrap(label, desc, definition)
+        xml_text = (
+            '<view template="splunk_exec_health:/static/' + template + '" type="html" '
+            'isDashboard="true" isVisible="true">\n'
+            '  <label>' + xml_escape(label) + '</label>\n'
+            '</view>\n'
+        )
         path.write_text(xml_text, encoding="utf-8")
-        json.loads(json.dumps(definition))
         ET.fromstring(xml_text)
         print(f"wrote {path.relative_to(ROOT)}")
+    emit_catalog()
 
 
 if __name__ == "__main__":

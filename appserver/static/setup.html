@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.i18n_register=window.i18n_register||function(){};</script>
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>AI provider setup</h1>
+    <p class="tagline">Choose a provider and model, paste the API key, and save. The key is stored in the KV Store on this search head and is never written into the app. Leave the key blank to keep the stored one. Saving also runs the connection test.</p>
+    <div class="hero-meta"><a id="home" href="#">Summary</a><span>·</span><a id="agent" href="#">Data Quality Agent</a></div>
+  </div>
+  <div class="panel">
+    <div class="controls">
+      <label class="fld">Provider<select id="provider"></select></label>
+      <label class="fld">Model<select id="model"></select></label>
+      <label class="fld">API key<input id="key" type="password" autocomplete="off" maxlength="512"></label>
+      <button class="btn" id="save">Save and test</button>
+    </div>
+    <p class="note" id="status"></p>
+  </div>
+  <div class="section"><h2 class="section-title">Saved settings and connection test</h2><div id="current"></div></div>
+  <div class="section"><h2 class="section-title">Supported providers</h2><div id="providers"></div></div>
+</div>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
+<script>
+(function () {
+  Health.link('home', 'executive_overview');
+  Health.link('agent', 'data_quality_agent');
+  var provider = document.getElementById('provider');
+  var model = document.getElementById('model');
+
+  function loadModels() {
+    Health.query('ai_models', { tok_cfg_provider: provider.value }).then(function (rows) {
+      model.innerHTML = rows.map(function (row) {
+        return '<option value="' + Health.esc(row.value) + '">' + Health.esc(row.label) + '</option>';
+      }).join('') || '<option value="none">None</option>';
+    }).catch(function (error) { Health.fail(document.getElementById('status'), error); });
+  }
+
+  function saved() {
+    Health.query('ai_current').then(function (rows) { Health.table(document.getElementById('current'), rows); });
+  }
+
+  Health.query('ai_providers').then(function (rows) {
+    provider.innerHTML = '<option value="none">None — local briefing only</option>' + rows
+      .filter(function (row) { return row.provider && row.provider !== 'none'; })
+      .map(function (row) { return '<option value="' + Health.esc(row.provider) + '">' + Health.esc(row.provider_label || row.provider) + '</option>'; })
+      .join('');
+    Health.table(document.getElementById('providers'), rows);
+    loadModels();
+  }).catch(function (error) { Health.fail(document.getElementById('status'), error); });
+  saved();
+
+  provider.addEventListener('change', loadModels);
+  document.getElementById('save').addEventListener('click', function () {
+    var status = document.getElementById('status');
+    var values = { tok_cfg_provider: provider.value, tok_cfg_model: model.value || 'none', tok_cfg_key: document.getElementById('key').value };
+    status.textContent = 'Saving…';
+    Health.act('save_config', values).then(function () {
+      status.textContent = 'Saved. Testing the connection…';
+      return Health.act('conn_test', values);
+    }).then(function () {
+      status.textContent = 'Saved and tested.';
+      document.getElementById('key').value = '';
+      saved();
+    }).catch(function (error) { Health.fail(status, error); });
+  });
+})();
+</script>
+</body>
+</html>

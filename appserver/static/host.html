@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.i18n_register=window.i18n_register||function(){};</script>
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>Host Heartbeat &amp; Instance Health</h1>
+    <p class="tagline">Whether each host is alive right now: last indexed data against its _internal heartbeat, ingestion latency over the last 15 minutes, and current volume against the 24-hour baseline.</p>
+    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+  </div>
+  <div class="controls">
+    <label class="fld">Host filter<input id="host" value="*" pattern="[\w.:*\-]{1,128}"></label>
+    <button class="btn" id="apply">Apply</button>
+  </div>
+  <div class="stats-row" id="stats"></div>
+  <div class="section"><h2 class="section-title">Last data received vs last internal heartbeat</h2><div id="phone"></div></div>
+  <div class="section"><h2 class="section-title">Ingestion latency, last 15 minutes (seconds)</h2><div id="latency"></div></div>
+  <div class="section"><h2 class="section-title">Current volume vs 24-hour baseline</h2><div id="baseline"></div></div>
+  <div class="two">
+    <div class="section"><h2 class="section-title">Splunkd health by feature</h2><div id="features"></div></div>
+    <div class="section"><h2 class="section-title">Instance CPU and memory</h2><div id="intro"></div></div>
+  </div>
+  <div class="section"><h2 class="section-title">Blocked ingestion queues</h2><div id="queues"></div></div>
+</div>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.56"></script>
+<script>
+(function () {
+  Health.link('home', 'executive_overview');
+  function load() {
+    var params = { host_filter: document.getElementById('host').value || '*' };
+    Promise.all([
+      Health.query('state_counts', params), Health.query('phone_home', params), Health.query('latency', params),
+      Health.query('baseline', params), Health.query('features'), Health.query('introspection'), Health.query('ingest_actions')
+    ]).then(function (res) {
+      var counts = {};
+      res[0].forEach(function (row) { counts[row.state] = Health.num(row.hosts); });
+      Health.stats(document.getElementById('stats'), [
+        { val: counts.OK || 0, lbl: 'OK', kind: 'ok' },
+        { val: counts.DELAYED || 0, lbl: 'Delayed (>15m)', kind: counts.DELAYED ? 'warn' : '' },
+        { val: (counts['DATA SILENT'] || 0) + (counts['HEARTBEAT ONLY'] || 0), lbl: 'Data silent / heartbeat only', kind: 'warn' },
+        { val: counts['HOST DOWN'] || 0, lbl: 'Host down', kind: counts['HOST DOWN'] ? 'bad' : '' }
+      ]);
+      Health.table(document.getElementById('phone'), res[1]);
+      Health.table(document.getElementById('latency'), res[2]);
+      Health.table(document.getElementById('baseline'), res[3]);
+      Health.table(document.getElementById('features'), res[4]);
+      Health.table(document.getElementById('intro'), res[5]);
+      Charts.line(document.getElementById('queues'), res[6], '_time', Object.keys(res[6][0] || {}).filter(function (key) { return key !== '_time' && key !== '_span' && key.charAt(0) !== '_'; }).slice(0, 6));
+    }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
+  }
+  document.getElementById('apply').addEventListener('click', load);
+  load();
+})();
+</script>
+</body>
+</html>
