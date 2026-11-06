@@ -3,31 +3,31 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.71">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.74">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>Host Heartbeat &amp; Instance Health</h1>
     <p class="tagline">Whether each host is alive right now: last indexed data against its _internal heartbeat, ingestion latency over the last 15 minutes, and current volume against the 24-hour baseline.</p>
-    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+    <div class="hero-meta"><a id="home" href="#">Executive overview</a></div>
   </div>
   <div class="controls">
     <label class="fld">Host filter<input id="host" value="*" pattern="[\w.:*\-]{1,128}"></label>
     <button class="btn" id="apply">Apply</button>
   </div>
   <div class="stats-row" id="stats"></div>
-  <div class="section"><h2 class="section-title">Last data received vs last internal heartbeat</h2><div id="phone"></div></div>
-  <div class="section"><h2 class="section-title">Ingestion latency, last 15 minutes (seconds)</h2><div id="latency"></div></div>
-  <div class="section"><h2 class="section-title">Current volume vs 24-hour baseline</h2><div id="baseline"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Compares the last event a host sent with the last time it phoned home on _internal. A host can be up and still not be sending data.">Last data received vs last internal heartbeat</h2><div id="phone"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Seconds between the event time and the index time, over the last 15 minutes. A host whose clock is ahead of the indexer is marked separately from one that is simply late.">Ingestion latency, last 15 minutes (seconds)</h2><div id="latency"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Events from this host right now, compared with its own previous 24 hours. The high and low lines are statistical. They are not a fixed number of gigabytes.">Current volume vs 24-hour baseline</h2><div id="baseline"></div></div>
   <div class="two">
-    <div class="section"><h2 class="section-title">Splunkd health by feature</h2><div id="features"></div></div>
-    <div class="section"><h2 class="section-title">Instance CPU and memory</h2><div id="intro"></div></div>
+    <div class="section"><h2 class="section-title" data-help="The health report Splunk already keeps for splunkd, one row per feature.">Splunkd health by feature</h2><div id="features"></div></div>
+    <div class="section"><h2 class="section-title" data-help="CPU and memory for this Splunk instance, from introspection.">Instance CPU and memory</h2><div id="intro"></div></div>
   </div>
-  <div class="section"><h2 class="section-title">Blocked ingestion queues</h2><div id="queues"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Ingestion queues that are blocked. A blocked queue stops data from moving through this instance.">Blocked ingestion queues</h2><div id="queues"></div></div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.71"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.71"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.74"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.74"></script>
 <script>
 (function () {
   Health.link('home', 'executive_overview');

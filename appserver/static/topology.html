@@ -3,55 +3,55 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.71">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.74">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>Data Topology</h1>
     <p class="tagline">The estate opens as sites, ingestion paths, sourcetype families, and indexes. Click one to open the hosts and sourcetypes inside it.</p>
-    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+    <div class="hero-meta"><a id="home" href="#">Executive overview</a></div>
   </div>
   <div class="stats-row" id="stats"></div>
   <div class="section">
-    <h2 class="section-title" id="mapTitle">Site → ingestion path → sourcetype family → index</h2>
+    <h2 class="section-title" id="mapTitle" data-help="The summary groups hosts into sites, then the ingestion path, the sourcetype family, and the index. Hover a node to light only its path. Click a node to open the hosts and sourcetypes inside it. Windows stays one family until you open it, and then each sourcetype or event-log channel in the index is its own node. Overview returns to the summary.">Site → ingestion path → sourcetype family → index</h2>
     <p class="note" id="mapNote">Hundreds of hosts and sourcetypes stay grouped. A site is a shared domain, or an IPv4 /16. A sourcetype family is a known product, or the prefix of the sourcetype. Hover a node to light its path. Click a site, a path, a family, or an index to open the hosts and sourcetypes inside it.</p>
     <p class="note" id="mapCrumb">Estate view</p>
     <div id="map"></div>
     <p class="note" id="mapHover">Hover a node to highlight its data flow. Click it to open that group.</p>
   </div>
   <div class="section">
-    <h2 class="section-title" id="missingTitle">Not drawn on the map</h2>
+    <h2 class="section-title" id="missingTitle" data-help="Rows for the current click. On the summary this waits for a click. After you open a group, it lists the hosts, paths, sourcetypes, and indexes in that group, including ones the drawing could not fit.">Not drawn on the map</h2>
     <div id="missing"><p class="note">Click +N under the hosts or the sourcetypes to list what did not fit.</p></div>
   </div>
-  <div class="section"><h2 class="section-title">Top source → path → index flows</h2><div id="paths"></div></div>
+  <div class="section"><h2 class="section-title" data-help="The busiest combinations of host, ingestion path, and index over the last few hours. Click a row to focus that host.">Top source → path → index flows</h2><div id="paths"></div></div>
   <div class="section">
-    <h2 class="section-title">Selected from the map <span id="selected" class="note"></span></h2>
+    <h2 class="section-title" data-help="Counts for whatever you clicked: how many hosts, events, indexes, and ingestion paths are in that selection.">Selected from the map <span id="selected" class="note"></span></h2>
     <div id="srcStats"></div>
     <div id="srcSlice"></div>
-    <h2 class="section-title">24-hour volume and 2σ drop / burst</h2>
+    <h2 class="section-title" data-help="Event volume for the selection over the last 24 hours. The middle line is the usual level. The other two lines are two standard deviations below and above that level.">24-hour volume and 2σ drop / burst</h2>
     <div id="srcTrend"><p class="note">Click the map or a source to see volume against the 2σ drop and burst bounds.</p></div>
-    <h2 class="section-title">Drop and burst buckets</h2>
+    <h2 class="section-title" data-help="Time buckets in that trend that fell below the low line or rose above the high line.">Drop and burst buckets</h2>
     <div id="srcOutliers"></div>
   </div>
-  <div class="section"><h2 class="section-title">Forwarder → indexer (tcpin)</h2><div id="tcpin"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Which forwarder is connected to which indexer, from the tcpin connection logs.">Forwarder → indexer (tcpin)</h2><div id="tcpin"></div></div>
   <div class="section">
-    <h2 class="section-title">Expected feeds</h2>
-    <p class="note">Compared with lookups/feed_catalog.csv over the last 30 days. Silence uses min_silence_minutes. Sourcetype drift means the sourcetype is not the one named on that row. A source whose first event is inside 7 days is new. disabled_expected is listed and not counted.</p>
+    <h2 class="section-title" data-help="The last 30 days against the feeds you listed. Gone quiet means nothing arrived within the minutes you set. Wrong sourcetype means the data arrived under a different sourcetype than the one you named. New this week means that source was first seen in the last 7 days. A row marked turned off on purpose is listed and is not counted.">Feeds you expect</h2>
+    <p class="note">The last 30 days, compared with the list in lookups/feed_catalog.csv. Copy a row for each feed. Name the index, the sourcetype you expect, and how many minutes of silence count as a problem. Gone quiet means nothing arrived in that time. Wrong sourcetype means the data arrived, but not as the sourcetype you named. New this week means that source was first seen in the last 7 days. A row you mark as turned off on purpose stays on the list and is not counted.</p>
     <div class="stats-row" id="feedStats"></div>
     <div id="feeds"></div>
   </div>
   <div class="section">
-    <h2 class="section-title">Quarantine</h2>
-    <p class="note">Indexes whose catalog row has expected_state=catchall. The shipped row is named quarantine. Rename it to the catch-all index this estate uses.</p>
-    <h2 class="section-title">Events per day by sourcetype</h2>
+    <h2 class="section-title" data-help="Indexes where unexpected data is allowed to land. The starting names are quarantine, lastchance, and main. Delete a row in the feed list when that index is a normal destination.">Catch-all indexes</h2>
+    <p class="note">Where unexpected data is allowed to land. In the feed list, set that index's state to catchall. The name is whatever this stack uses. The starting list includes quarantine, lastchance, and main. Delete a row when that index is a normal place for data, especially main.</p>
+    <h2 class="section-title" data-help="How many events each sourcetype put into the catch-all indexes, one point per day for the last 7 days.">Events per day by sourcetype</h2>
     <div id="quarantineDaily"></div>
-    <h2 class="section-title">What is in the catch-all</h2>
+    <h2 class="section-title" data-help="The index, sourcetype, and source of what landed in a catch-all over the last 7 days. The index column tells quarantine, lastchance, and main apart.">What is in the catch-all</h2>
     <div id="quarantineRows"></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.71"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.71"></script>
-<script src="../../static/app/splunk_exec_health/topology.js?v=1.7.71"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.74"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.74"></script>
+<script src="../../static/app/splunk_exec_health/topology.js?v=1.7.74"></script>
 </body>
 </html>

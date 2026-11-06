@@ -3,53 +3,53 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.71">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.74">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>HEC Token Performance</h1>
     <p class="tagline">A token that usually sends about 100 events a second and then sends nothing for 5 minutes is flagged. Handler errors name the client, token, index, and sourcetype when Splunk writes them. The flow is client, then HEC token, then index, with the sourcetype on that last step.</p>
-    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+    <div class="hero-meta"><a id="home" href="#">Executive overview</a></div>
   </div>
   <div class="stats-row" id="stats"></div>
-  <div class="section"><h2 class="section-title">Token state</h2><div id="state"></div></div>
-  <div class="section"><h2 class="section-title">Events over time</h2><div id="time"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Each HEC token and its recent rate. A token that usually sends about 100 events a second, then sends nothing for 5 minutes, is flagged. The token secret is never shown.">Token state</h2><div id="state"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Event count for the busiest tokens over the last few hours.">Events over time</h2><div id="time"></div></div>
   <div class="two">
-    <div class="section"><h2 class="section-title">HTTP handler</h2><div id="handler"></div></div>
-    <div class="section"><h2 class="section-title">Token errors</h2><div id="errors"></div></div>
+    <div class="section"><h2 class="section-title" data-help="Replies from the HEC data handler, including a disabled token, a missing token, and an index the token is not allowed to use.">HTTP handler</h2><div id="handler"></div></div>
+    <div class="section"><h2 class="section-title" data-help="Handler errors grouped by token name. This is the error count, not the contents of the token.">Token errors</h2><div id="errors"></div></div>
   </div>
   <div class="section">
-    <h2 class="section-title">HEC input errors — client, token, index, sourcetype</h2>
+    <h2 class="section-title" data-help="One row for each failed HEC request: who sent it, which token name, which index and sourcetype, and why Splunk rejected it. A rejected event is not the same as a token that failed to load.">HEC input errors — client, token, index, sourcetype</h2>
     <p class="note">Each row is a failed HttpInputDataHandler request. Client is source_IP (or the forwarded client). Index and sourcetype are filled when the log records them, such as invalid_index on an incorrect-index reply.</p>
     <div id="inputErrors"></div>
   </div>
   <div class="section">
-    <h2 class="section-title">HEC token configuration load failures</h2>
+    <h2 class="section-title" data-help="Indexers that logged Failed to load HEC token configuration in the last 7 days. The token configuration did not load. This is separate from an event that was rejected.">HEC token configuration load failures</h2>
     <p class="note">Indexers that logged "Failed to load HEC token configuration" in the last 7 days. This is separate from a rejected event.</p>
     <div id="confLoad"></div>
   </div>
   <div class="two">
     <div class="section">
-      <h2 class="section-title">Line-breaking warnings</h2>
+      <h2 class="section-title" data-help="Warnings from the last 24 hours that Splunk truncated an event while breaking it into lines. Grouped by the source and sourcetype named in the warning.">Line-breaking warnings</h2>
       <p class="note">LineBreakingProcessor truncation warnings in the last 24 hours, by source and sourcetype.</p>
       <div id="lineBreak"></div>
     </div>
     <div class="section">
-      <h2 class="section-title">Timestamp parse warnings</h2>
+      <h2 class="section-title" data-help="Warnings from the last 24 hours that Splunk could not read the time on an event. The context is the start of the line it could not time.">Timestamp parse warnings</h2>
       <p class="note">DateParserVerbose warnings in the last 24 hours. The context is the start of the line Splunk could not time.</p>
       <div id="timeParse"></div>
     </div>
   </div>
   <div class="section">
-    <h2 class="section-title">Source → HEC token → index</h2>
+    <h2 class="section-title" data-help="The path from the sending client, to the HEC token name, to the index that received it. The sourcetype is shown on the index step. A path appears only when the handler log recorded that client and token together.">Source → HEC token → index</h2>
     <p class="note">The index node lists the sourcetype. This uses the same handler log, so a path appears when Splunk recorded that client and token together.</p>
     <div id="flow"></div>
     <div id="flowTable"></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.71"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.71"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.74"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.74"></script>
 <script>
 (function () {
   Health.link('home', 'executive_overview');

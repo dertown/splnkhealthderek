@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.71">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.74">
 </head>
 <body>
 <div class="page">
@@ -15,7 +15,7 @@
     <label class="fld">Report
       <select id="scope">
         <option value="overall">Overall health — all dashboards</option>
-        <option value="summary">Summary</option>
+        <option value="summary">Executive overview</option>
         <option value="host">Host Heartbeat</option>
         <option value="hec">HEC Tokens</option>
         <option value="sc4s">SC4S &amp; Edge</option>
@@ -33,10 +33,13 @@
     <span class="note" id="status"></span>
   </div>
   <p class="note">The host filter applies to Host Heartbeat. Leave it as * for every host.</p>
-  <div id="output"></div>
+  <div class="section">
+    <h2 class="section-title" data-help="A read-only copy of the dashboard numbers, stamped with the time you generated it. Pick one dashboard, all of them, or one report per dashboard. The host filter applies only to Host Heartbeat. Download or print when the report is ready. Nothing is changed in Splunk.">Generated report</h2>
+    <div id="output"></div>
+  </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.71"></script>
-<script src="../../static/app/splunk_exec_health/reports.js?v=1.7.71"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.74"></script>
+<script src="../../static/app/splunk_exec_health/reports.js?v=1.7.74"></script>
 
 </body>
 </html>

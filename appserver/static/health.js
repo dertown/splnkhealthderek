@@ -1,8 +1,8 @@
 /* Shared helpers for the Splunk Health Derek+ HTML pages. */
 var Health = (function () {
-  var PILL_GOOD = ['GREEN', 'OK', 'ok', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no', 'disabled (expected)'];
-  var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING', 'SILENT', 'NO EVENTS IN WINDOW', 'SOURCETYPE DRIFT'];
-  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING', 'stale source', 'new in last 7d', 'catch-all: review'];
+  var PILL_GOOD = ['GREEN', 'OK', 'ok', 'Healthy', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no', 'Turned off on purpose'];
+  var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING', 'Gone quiet', 'No events in 30 days', 'Wrong sourcetype'];
+  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING', 'Source gone quiet', 'New this week', 'In the catch-all'];
 
   function root() {
     var path = window.location.pathname || '';
@@ -136,6 +136,68 @@ var Health = (function () {
     if (el) el.href = page(view);
   }
 
+  var helpPop = null;
+  var helpBtn = null;
+  function closeHelp() {
+    if (!helpPop) return;
+    helpPop.hidden = true;
+    if (helpBtn) helpBtn.setAttribute('aria-expanded', 'false');
+    helpBtn = null;
+  }
+  function placeHelp(btn) {
+    var rect = btn.getBoundingClientRect();
+    var width = Math.min(360, window.innerWidth - 24);
+    var left = rect.right - width;
+    if (left < 8) left = 8;
+    helpPop.style.width = width + 'px';
+    helpPop.style.top = (window.scrollY + rect.bottom + 6) + 'px';
+    helpPop.style.left = (window.scrollX + left) + 'px';
+  }
+  function openHelp(btn, text) {
+    if (!helpPop) {
+      helpPop = document.createElement('div');
+      helpPop.className = 'help-pop';
+      helpPop.setAttribute('role', 'dialog');
+      helpPop.hidden = true;
+      document.body.appendChild(helpPop);
+      document.addEventListener('click', function (event) {
+        if (helpPop.hidden) return;
+        if (event.target.closest && (event.target.closest('.help-pop') || event.target.closest('.help-btn'))) return;
+        closeHelp();
+      });
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') closeHelp();
+      });
+      window.addEventListener('resize', closeHelp);
+    }
+    if (helpBtn === btn && !helpPop.hidden) { closeHelp(); return; }
+    closeHelp();
+    helpPop.textContent = text;
+    helpPop.hidden = false;
+    helpBtn = btn;
+    btn.setAttribute('aria-expanded', 'true');
+    placeHelp(btn);
+  }
+  function help(root) {
+    if (helpBtn && helpBtn.ownerDocument && !document.body.contains(helpBtn)) closeHelp();
+    var scope = root && root.querySelectorAll ? root : document;
+    Array.prototype.forEach.call(scope.querySelectorAll('h2.section-title[data-help]'), function (heading) {
+      if (heading.querySelector('.help-btn')) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'help-btn';
+      btn.setAttribute('aria-expanded', 'false');
+      btn.setAttribute('aria-label', 'What this panel shows');
+      btn.textContent = '?';
+      heading.appendChild(btn);
+      btn.addEventListener('click', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        openHelp(btn, heading.getAttribute('data-help'));
+      });
+    });
+  }
+
   function chromeTop() {
     var top = 0;
     var selectors = ['#header', '.shared-header', 'header', '#appbar', '.app-bar', '.navbar'];
@@ -159,7 +221,7 @@ var Health = (function () {
     var items = [
       { external: true, label: 'Splunk home' },
       { group: 'Health' },
-      { view: 'executive_overview', label: 'Summary' },
+      { view: 'executive_overview', label: 'Executive overview' },
       { view: 'host_heartbeat', label: 'Host Heartbeat' },
       { view: 'hec_performance', label: 'HEC Tokens' },
       { view: 'sc4s_edge', label: 'SC4S & Edge' },
@@ -211,5 +273,6 @@ var Health = (function () {
   }
 
   mountNav(0);
-  return { query: query, act: act, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page };
+  help(document);
+  return { query: query, act: act, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help };
 })();

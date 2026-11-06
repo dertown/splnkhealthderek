@@ -3,31 +3,31 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.71">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.74">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>About Splunk Health Derek+</h1>
-    <p class="tagline">Search-head only, built for Splunk Cloud Platform (Victoria and Classic) and Splunk Enterprise. Version 1.7.71.</p>
-    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+    <p class="tagline">Search-head only, built for Splunk Cloud Platform (Victoria and Classic) and Splunk Enterprise. Version 1.7.74.</p>
+    <div class="hero-meta"><a id="home" href="#">Executive overview</a></div>
   </div>
   <div class="section">
-    <h2 class="section-title">What it does</h2>
+    <h2 class="section-title" data-help="What the app reads, where a decision is stored, and what it will not change. It does not edit Splunk configuration, restart a forwarder, or rotate a token.">What it does</h2>
     <div class="panel">
       <p>The pages read <code>_internal</code>, <code>_introspection</code> and your event indexes, compare them with learned baselines, and list what needs a person. The Data Quality Agent proposes a fix and, when an AI provider is saved, asks that provider for a second opinion.</p>
       <p>Recording a decision writes one row to the <code>dq_agent_approvals</code> KV Store. Asking the provider writes the reply to <code>dq_agent_ai_suggestions</code>. Neither path edits Splunk configuration, restarts a forwarder, or rotates a token.</p>
     </div>
   </div>
   <div class="section">
-    <h2 class="section-title">Cloud notes</h2>
+    <h2 class="section-title" data-help="What a Splunk Cloud search head needs. The AI calls leave this search head over HTTPS. Install and administer the app as sc_admin. The API key is not in the app package.">Cloud notes</h2>
     <div class="panel">
       <p>The AI connection test and the suggested fixes call the provider directly from the search head, so the search head needs outbound HTTPS to that provider. The API key lives in the KV Store collection <code>dq_agent_ai_config</code>, which is not shipped in the app package.</p>
       <p>Install with <code>sc_admin</code>. The app ships with <code>is_configured = 0</code> and every object grants <code>sc_admin</code>.</p>
     </div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.71"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.74"></script>
 <script>Health.link('home', 'executive_overview');</script>
 </body>
 </html>

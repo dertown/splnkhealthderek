@@ -2921,7 +2921,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.71"
+APP_VERSION = "1.7.74"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3275,9 +3275,9 @@ Q_FEED_CATALOG = (
 | eval thr=tonumber(min_silence_minutes)
 | eval silent_min=if(isnotnull(last_epoch), round((now()-last_epoch)/60), null())
 | eval index_silent_min=if(isnotnull(index_last), round((now()-index_last)/60), null())
-| eval status=case(expected_state="catchall", "catch-all: review", isnull(last_epoch), "NO EVENTS IN WINDOW", expected_state="disabled_expected", "disabled (expected)", isnotnull(thr) AND index_silent_min>thr, "SILENT", isnotnull(thr) AND silent_min>thr, "stale source", expected_sourcetype!="" AND sourcetype!=expected_sourcetype, "SOURCETYPE DRIFT", isnotnull(first_epoch) AND first_epoch>relative_time(now(), "-7d"), "new in last 7d", 1=1, "ok")
+| eval status=case(expected_state="catchall", "In the catch-all", isnull(last_epoch), "No events in 30 days", expected_state="disabled_expected", "Turned off on purpose", isnotnull(thr) AND index_silent_min>thr, "Gone quiet", isnotnull(thr) AND silent_min>thr, "Source gone quiet", expected_sourcetype!="" AND sourcetype!=expected_sourcetype, "Wrong sourcetype", isnotnull(first_epoch) AND first_epoch>relative_time(now(), "-7d"), "New this week", 1=1, "Healthy")
 | eval last_event=strftime(last_epoch, "%F %T"), first_event=strftime(first_epoch, "%F %T")
-| eval _color_rank=case(status="SILENT" OR status="NO EVENTS IN WINDOW" OR status="SOURCETYPE DRIFT", 1, status="stale source" OR status="new in last 7d" OR status="catch-all: review", 2, 1=1, 3)
+| eval _color_rank=case(status="Gone quiet" OR status="No events in 30 days" OR status="Wrong sourcetype", 1, status="Source gone quiet" OR status="New this week" OR status="In the catch-all", 2, 1=1, 3)
 | table index sourcetype source status last_event silent_min expected_sourcetype thr count first_event notes _color_rank
 | sort _color_rank index -count
 """
@@ -3318,11 +3318,11 @@ Q_QUARANTINE_DAILY = (
 Q_QUARANTINE_ROWS = (
     "| tstats count max(_time) as last_epoch min(_time) as first_epoch where earliest=-7d@d latest=now "
     + _catalog_indexes('expected_state="catchall"')
-    + " by sourcetype source\n"
-    + r"""| where sourcetype!="__no_feed_catalog__" AND source!="__no_feed_catalog__"
+    + " by index sourcetype source\n"
+    + r"""| where index!="__no_feed_catalog__"
 | eval last_event=strftime(last_epoch, "%F %T"), first_event=strftime(first_epoch, "%F %T")
-| sort 0 -count
-| table sourcetype source count first_event last_event
+| sort 0 index -count
+| table index sourcetype source count first_event last_event
 """
 )
 
@@ -3440,7 +3440,7 @@ def main() -> None:
     SAVEDSEARCHES.write_text(render_savedsearches(), encoding="utf-8")
     print(f"wrote {SAVEDSEARCHES.relative_to(ROOT)}")
     pages = [
-        ("executive_overview.xml", "Splunk Health Derek+", "executive.html"),
+        ("executive_overview.xml", "Executive overview", "executive.html"),
         ("host_heartbeat.xml", "Host Heartbeat & Instance Health", "host.html"),
         ("hec_performance.xml", "HEC Token Performance", "hec.html"),
         ("sc4s_edge.xml", "SC4S Syslog & Edge/Ingest Processors", "sc4s.html"),

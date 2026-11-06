@@ -9,7 +9,7 @@
   ];
   var BOOKS = {
     summary: {
-      title: 'Summary',
+      title: 'Executive overview',
       sections: [
         { title: 'Status by area', query: 'areas', columns: AREA_COLUMNS },
         { title: 'Daily ingestion vs 7-day average (GB)', query: 'license_daily' },
@@ -67,8 +67,8 @@
         { title: 'Category, network, ingest method, and index (24h)', query: 'topo_map' },
         { title: 'Top source, path, and index flows', query: 'topo_paths' },
         { title: 'Forwarder to indexer (tcpin)', query: 'tcpin' },
-        { title: 'Expected feeds', query: 'feed_catalog' },
-        { title: 'Quarantine by sourcetype and source', query: 'quarantine_rows' }
+        { title: 'Feeds you expect', query: 'feed_catalog' },
+        { title: 'Catch-all indexes by sourcetype and source', query: 'quarantine_rows' }
       ]
     },
     agent: {

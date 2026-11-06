@@ -440,6 +440,7 @@
     else if (focus.endpoint || focus.category || focus.network || focus.ingest || focus.index) loadGroup();
     else if (zoomed()) showDirectory(detailRows || []);
     else showDirectory(mapRows);
+    if (window.Health && Health.help) Health.help(document);
   }
   function settled(promise) {
     return promise.then(function (rows) { return { rows: rows }; }, function (error) { return { error: error }; });
@@ -468,6 +469,7 @@
       { val: (function () { var seen = {}; tcpAll.forEach(function (row) { seen[row.data_source] = 1; }); return Object.keys(seen).length; })(), lbl: 'Forwarders' }
     ]);
     apply();
+    if (window.Health && Health.help) Health.help(document);
     if (res[2].error) document.getElementById('mapHover').textContent = res[2].error.message || String(res[2].error);
   }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
   function countStatus(rows, names) {
@@ -476,18 +478,18 @@
   Health.query('feed_catalog').then(function (rows) {
     if (!rows.length) {
       document.getElementById('feedStats').innerHTML = '';
-      document.getElementById('feeds').innerHTML = '<p class="note">No feeds in lookups/feed_catalog.csv. Add an index row with expected_state=active.</p>';
+      document.getElementById('feeds').innerHTML = '<p class="note">No feeds in the list yet. In lookups/feed_catalog.csv, add a row, set the state to active, and name the index and sourcetype you expect.</p>';
       return;
     }
     Health.stats(document.getElementById('feedStats'), [
-      { val: countStatus(rows, ['SILENT', 'NO EVENTS IN WINDOW']), lbl: 'Silent or missing', kind: 'bad' },
-      { val: countStatus(rows, ['SOURCETYPE DRIFT']), lbl: 'Sourcetype drift', kind: 'bad' },
-      { val: countStatus(rows, ['new in last 7d']), lbl: 'New in last 7 days', kind: 'warn' }
+      { val: countStatus(rows, ['Gone quiet', 'No events in 30 days']), lbl: 'Gone quiet', kind: 'bad' },
+      { val: countStatus(rows, ['Wrong sourcetype']), lbl: 'Wrong sourcetype', kind: 'bad' },
+      { val: countStatus(rows, ['New this week']), lbl: 'New this week', kind: 'warn' }
     ]);
     Health.table(document.getElementById('feeds'), rows, [
       { key: 'index', label: 'Index' }, { key: 'sourcetype', label: 'Sourcetype' }, { key: 'source', label: 'Source' },
       { key: 'status', label: 'Status' }, { key: 'last_event', label: 'Last event' },
-      { key: 'silent_min', label: 'Silent minutes' }, { key: 'expected_sourcetype', label: 'Expected sourcetype' },
+      { key: 'silent_min', label: 'Minutes since last event' }, { key: 'expected_sourcetype', label: 'Expected sourcetype' },
       { key: 'count', label: 'Events (30d)' }, { key: 'notes', label: 'Notes' }
     ]);
   }).catch(function (error) { Health.fail(document.getElementById('feeds'), error); });
@@ -501,9 +503,9 @@
       Charts.line(document.getElementById('quarantineDaily'), res[0].rows, '_time', keys.slice(0, 8));
     }
     if (res[1].error) Health.fail(document.getElementById('quarantineRows'), res[1].error);
-    else if (!res[1].rows.length) document.getElementById('quarantineRows').innerHTML = '<p class="note">No events in the catch-all indexes from the feed catalog.</p>';
+    else if (!res[1].rows.length) document.getElementById('quarantineRows').innerHTML = '<p class="note">Nothing has landed in the catch-all indexes in the last 7 days.</p>';
     else Health.table(document.getElementById('quarantineRows'), res[1].rows, [
-      { key: 'sourcetype', label: 'Sourcetype' }, { key: 'source', label: 'Source' },
+      { key: 'index', label: 'Index' }, { key: 'sourcetype', label: 'Sourcetype' }, { key: 'source', label: 'Source' },
       { key: 'count', label: 'Events' }, { key: 'first_event', label: 'First event' }, { key: 'last_event', label: 'Last event' }
     ]);
   });

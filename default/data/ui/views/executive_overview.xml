@@ -1,3 +1,3 @@
 <view template="splunk_exec_health:/static/executive.html" type="html" isDashboard="true" isVisible="true">
-  <label>Splunk Health Derek+</label>
+  <label>Executive overview</label>
 </view>

@@ -3,85 +3,46 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.71">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.74">
 </head>
 <body>
 <div class="page">
   <div class="hero">
-    <h1>Splunk Health Derek+</h1>
-    <p class="tagline">Overall health is the worst area. Each area opens its own page. Open agent findings are shown but never counted, because they come from the same signals.</p>
-    <div class="hero-meta"><a id="home" href="#">All pages</a></div>
+    <h1>Executive overview</h1>
+    <p class="tagline">The worst area sets the color of the estate. Open a card for that area. Findings are counted here and worked on the Data Quality Agent page.</p>
+    <div class="hero-meta"><a id="queue" href="#">Work queue</a></div>
+  </div>
+  <div class="section">
+    <h2 class="section-title" data-help="The color of the estate is the worst area below. Green means every area with a signal is healthy. Yellow means watch. Red means that area needs a person. A missing signal does not change the color.">Estate</h2>
+    <div class="verdict" id="verdict"><h3>Loading the estate</h3><p>Reading hosts, data flow, HEC, and SC4S.</p></div>
   </div>
   <div class="stats-row" id="stats"><div class="stat"><div class="val">…</div><div class="lbl">Loading</div></div></div>
   <div class="section">
-    <h2 class="section-title">Areas</h2>
-    <div class="cards" id="areas"></div>
+    <h2 class="section-title" data-help="One card for each area. The color is that area's status. Click a card to open its page. The agent card counts open findings and does not change the estate color, because those findings come from these same signals.">Areas</h2>
+    <div class="cards" id="areas"><p class="note">Loading areas.</p></div>
   </div>
   <div class="section">
-    <h2 class="section-title">Status by area, worst first</h2>
-    <div id="areaTable"></div>
+    <h2 class="section-title" data-help="Why each area has its color, worst first. Each reason is the same check used on that area's own page.">Why, worst first</h2>
+    <div id="areaTable"><p class="note">Loading the reasons.</p></div>
   </div>
   <div class="two">
     <div class="section">
-      <h2 class="section-title">Daily ingestion vs 7-day average (GB)</h2>
-      <div id="ingest"></div>
+      <h2 class="section-title" data-help="Gigabytes indexed each complete day, next to the average of the previous 7 days. A rise or a drop is judged against that average. There is no fixed license line.">Daily ingestion vs 7-day average (GB)</h2>
+      <div id="ingest"><p class="note">Loading license usage.</p></div>
     </div>
     <div class="section">
-      <h2 class="section-title">Top indexes by license usage (GB, last 7 days)</h2>
-      <div id="pie"></div>
+      <h2 class="section-title" data-help="Which indexes used the most license, in gigabytes, over the last 7 complete days.">Top indexes by license usage (GB, last 7 days)</h2>
+      <div id="pie"><p class="note">Loading indexes.</p></div>
     </div>
   </div>
   <div class="section">
-    <h2 class="section-title">Empty hours by index</h2>
-    <p class="note">Hours in the last 7 days with no events, for indexes marked active in lookups/feed_catalog.csv. An index with no events at all counts as empty for the whole window.</p>
-    <div id="emptyHours"></div>
+    <h2 class="section-title" data-help="Hours in the last 7 days with no events, for indexes you marked as active feeds. An index that sent nothing at all counts as empty for the whole week.">Empty hours by index</h2>
+    <p class="note">Only indexes marked active in the feed list. A catch-all or a feed turned off on purpose is not included.</p>
+    <div id="emptyHours"><p class="note">Loading empty hours.</p></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.71"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.71"></script>
-<script>
-(function () {
-  var links = { 'Hosts & instances': 'host_heartbeat', 'Data flow': 'data_topology', 'HEC tokens': 'hec_performance', 'SC4S & Edge': 'sc4s_edge' };
-  Health.link('home', 'executive_overview');
-  function kind(status) { return status === 'GREEN' ? 'ok' : status === 'RED' ? 'bad' : 'warn'; }
-  Promise.all([
-    Health.query('areas'), Health.query('license_daily'), Health.query('live'),
-    Health.query('agent_counts'), Health.query('top_indexes')
-  ]).then(function (res) {
-    var areas = res[0], license = res[1], live = res[2], agent = res[3], indexes = res[4];
-    var worst = areas.reduce(function (acc, row) { return row.status === 'RED' ? 'RED' : (acc === 'RED' ? acc : (row.status === 'YELLOW' ? 'YELLOW' : acc)); }, 'GREEN');
-    var today = license.length ? license[license.length - 1] : {};
-    Health.stats(document.getElementById('stats'), [
-      { val: worst || 'N/A', lbl: 'Overall health', kind: kind(worst) },
-      { val: today.daily_GB || '0', lbl: 'Ingestion GB (last full day)' },
-      { val: (today.variance_pct || '0') + '%', lbl: 'Vs 7-day average' },
-      { val: (live[0] || {}).events || '0', lbl: 'Events indexed (15m)' },
-      { val: (agent[0] || {}).open_findings || '0', lbl: 'Agent findings open' }
-    ]);
-    document.getElementById('areas').innerHTML = areas.map(function (row) {
-      var view = links[row.area] || 'executive_overview';
-      return '<a class="card" href="' + Health.page(view) + '"><h3>' + Health.esc(row.area) + '</h3><p>'
-        + Health.esc(row.detail || row.status) + '</p><div class="arrow">' + Health.esc(row.status) + ' · Open →</div></a>';
-    }).join('') + '<a class="card" href="' + Health.page('data_quality_agent') + '"><h3>Data Quality Agent</h3><p>'
-      + Health.esc((agent[0] || {}).open_findings || '0') + ' open findings.</p><div class="arrow">Open →</div></a>';
-    Health.table(document.getElementById('areaTable'), areas, [
-      { key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'detail', label: 'Why' }
-    ]);
-    Charts.line(document.getElementById('ingest'), license, '_time', ['daily_GB', 'ma_7d']);
-    Charts.pie(document.getElementById('pie'), indexes, 'index', 'GB');
-  }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
-  Health.query('empty_hours').then(function (rows) {
-    if (!rows.length) {
-      document.getElementById('emptyHours').innerHTML = '<p class="note">No active indexes in lookups/feed_catalog.csv. Add a row with expected_state=active.</p>';
-      return;
-    }
-    Health.table(document.getElementById('emptyHours'), rows, [
-      { key: 'index', label: 'Index' }, { key: 'hours', label: 'Hours' },
-      { key: 'empty_hours', label: 'Empty hours' }, { key: 'empty_pct', label: 'Empty %' },
-      { key: 'last_empty', label: 'Last empty hour' }
-    ]);
-  }).catch(function (error) { Health.fail(document.getElementById('emptyHours'), error); });
-})();
-</script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.74"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.74"></script>
+<script src="../../static/app/splunk_exec_health/executive.js?v=1.7.74"></script>
 </body>
 </html>
