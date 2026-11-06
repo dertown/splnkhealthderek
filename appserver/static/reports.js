@@ -9,13 +9,15 @@
   ];
   var BOOKS = {
     summary: {
-      title: 'Summary',
+      title: 'Executive overview',
       sections: [
         { title: 'Status by area', query: 'areas', columns: AREA_COLUMNS },
         { title: 'Daily ingestion vs 7-day average (GB)', query: 'license_daily' },
         { title: 'Events indexed, last 15 minutes', query: 'live' },
         { title: 'Open agent findings', query: 'agent_counts' },
-        { title: 'Top indexes by license usage (GB, last 7 days)', query: 'top_indexes' }
+        { title: 'Top indexes by license usage (GB, last 7 days)', query: 'top_indexes' },
+        { title: 'Last hour vs the usual hour, by index', query: 'index_season' },
+        { title: 'Empty hours by index', query: 'empty_hours' }
       ]
     },
     host: {
@@ -23,6 +25,8 @@
       sections: [
         { title: 'Hosts by state', query: 'state_counts', host: true },
         { title: 'Last data received vs last internal heartbeat', query: 'phone_home', host: true },
+        { title: 'Heartbeat vs this host usual gap', query: 'heartbeat_learned', host: true },
+        { title: 'Last hour vs the same hour this week', query: 'host_season', host: true },
         { title: 'Ingestion latency, last 15 minutes (seconds)', query: 'latency', host: true },
         { title: 'Current volume vs 24-hour baseline', query: 'baseline', host: true },
         { title: 'Splunkd health by feature', query: 'features' },
@@ -39,6 +43,9 @@
         { title: 'HTTP handler', query: 'hec_handler' },
         { title: 'Token errors', query: 'hec_errors' },
         { title: 'HEC input errors', query: 'hec_input_errors' },
+        { title: 'HEC token configuration load failures', query: 'hec_conf_load' },
+        { title: 'Line-breaking warnings', query: 'parse_linebreak' },
+        { title: 'Timestamp parse warnings', query: 'parse_time' },
         { title: 'Source, token, and index', query: 'hec_flow' }
       ]
     },
@@ -59,8 +66,12 @@
     topology: {
       title: 'Data Topology',
       sections: [
+        { title: 'Sites, sourcetype families, and indexes', query: 'topo_macro' },
+        { title: 'Category, network, ingest method, and index (24h)', query: 'topo_map' },
         { title: 'Top source, path, and index flows', query: 'topo_paths' },
-        { title: 'Forwarder to indexer (tcpin)', query: 'tcpin' }
+        { title: 'Forwarder to indexer (tcpin)', query: 'tcpin' },
+        { title: 'Feeds you expect', query: 'feed_catalog' },
+        { title: 'Catch-all indexes by sourcetype and source', query: 'quarantine_rows' }
       ]
     },
     agent: {

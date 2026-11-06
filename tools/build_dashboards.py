@@ -793,6 +793,182 @@ Q_TOPO_PATHS = (
     + "\n| table data_source, ingest_path, splunk_index, events, _color_rank"
 )
 
+# Category → network → ingest method → index.
+# An IPv4 host becomes its /24. A hostname stays a hostname: this data has no
+# address for it, so it is not given a made-up CIDR. Volume is event count.
+# The search never reads a HEC token secret.
+Q_TOPO_CLASSIFY = r"""
+| eval octets=split(host, ".")
+| eval o1=coalesce(tonumber(mvindex(octets,0)), -1), o2=coalesce(tonumber(mvindex(octets,1)), -1), o3=coalesce(tonumber(mvindex(octets,2)), -1), o4=coalesce(tonumber(mvindex(octets,3)), -1)
+| eval network=if(mvcount(octets)=4 AND o1>=0 AND o1<=255 AND o2>=0 AND o2<=255 AND o3>=0 AND o3<=255 AND o4>=0 AND o4<=255 AND match(host, "^[0-9.]+"), o1.".".o2.".".o3.".0/24", host)
+| eval labels=split(host, ".")
+| eval environment=case(match(host, "^[0-9.]+$") AND o1>=0 AND o2>=0, o1.".".o2.".0.0/16", mvcount(labels)>=3, mvindex(labels, -2).".".mvindex(labels, -1), 1=1, coalesce(host, "unknown"))
+| eval environment=substr(environment, 1, 80)
+| eval category=case(
+    match(sourcetype, "(?i)paloalto|pan:traffic|pan:threat|cisco:asa|cisco:ftd|cisco:firepower|fortinet|fortigate|checkpoint|opsec|pfsense|netscreen|sonicwall|zscaler|meraki|iptables|juniper:firewall"), "Firewall",
+    match(source, "(?i)paloalto|fortigate|cisco_asa|checkpoint|firepower"), "Firewall",
+    host_os="Windows" OR os_class="Windows", "Windows",
+    host_os="Linux" OR os_class="Linux", "Linux",
+    1=1, "Other")
+| eval ingest_method=case(
+    match(sourcetype, "(?i)netflow|ipfix"), "NetFlow / IPFIX",
+    match(sourcetype, "(?i)sc4s") OR ingest_path="SC4S", "SC4S",
+    match(sourcetype, "(?i)syslog") OR match(coalesce(net_label, ""), "^UDP:"), "Syslog",
+    ingest_path="Edge / Ingest Processor", "Edge Processor",
+    match(sourcetype, "(?i)httpevent") OR ingest_path="HEC / API / cloud", "HEC",
+    forwarder_class="HF" OR ingest_path="HF", "HF",
+    forwarder_class="UF" OR ingest_path="Windows UF" OR ingest_path="Linux UF", "UF",
+    match(coalesce(net_label, ""), "^TCP:"), "Other TCP",
+    1=1, "Other")
+| eval endpoint=case(
+    match(sourcetype, "(?i)o365|office365|office.365|ms:o365|m365:|exchange:online|sharepoint") OR match(source, "(?i)o365|office365"), "Microsoft 365",
+    match(sourcetype, "(?i)azure:|mscs:azure") OR match(source, "(?i)azure"), "Azure",
+    match(sourcetype, "(?i)aws:|cloudtrail") OR match(source, "(?i)aws:|cloudtrail"), "AWS",
+    match(sourcetype, "(?i)gcp:|google:|googlecloud|gws:") OR match(source, "(?i)gcp:|googlecloud"), "Google Cloud",
+    match(sourcetype, "(?i)okta") OR match(source, "(?i)okta"), "Okta",
+    match(sourcetype, "(?i)proofpoint") OR match(source, "(?i)proofpoint"), "Proofpoint",
+    match(sourcetype, "(?i)salesforce|sfdc:") OR match(source, "(?i)salesforce"), "Salesforce",
+    match(sourcetype, "(?i)duo:|cisco:duo") OR match(source, "(?i)duo"), "Cisco Duo",
+    match(sourcetype, "(?i)zscaler") OR match(source, "(?i)zscaler"), "Zscaler",
+    match(sourcetype, "(?i)crowdstrike|falcon") OR match(source, "(?i)crowdstrike"), "CrowdStrike",
+    match(sourcetype, "(?i)sentinelone") OR match(source, "(?i)sentinelone"), "SentinelOne",
+    match(sourcetype, "(?i)carbonblack|bit9"), "Carbon Black",
+    match(sourcetype, "(?i)github") OR match(source, "(?i)github"), "GitHub",
+    match(sourcetype, "(?i)zoom:") OR match(source, "(?i)zoom"), "Zoom",
+    match(sourcetype, "(?i)^box:|box:events") OR match(source, "(?i)box.com"), "Box",
+    match(sourcetype, "(?i)slack") OR match(source, "(?i)slack"), "Slack",
+    match(sourcetype, "(?i)servicenow|snow:") OR match(source, "(?i)servicenow"), "ServiceNow",
+    match(sourcetype, "(?i)workday") OR match(source, "(?i)workday"), "Workday",
+    match(sourcetype, "(?i)cloudflare") OR match(source, "(?i)cloudflare"), "Cloudflare",
+    match(sourcetype, "(?i)akamai") OR match(source, "(?i)akamai"), "Akamai",
+    match(sourcetype, "(?i)paloalto|pan:traffic|pan:threat") OR match(source, "(?i)paloalto|pan:"), "Palo Alto NGFW",
+    match(sourcetype, "(?i)fortinet|fortigate") OR match(source, "(?i)fortigate"), "Fortinet",
+    match(sourcetype, "(?i)cisco:asa|cisco:ftd|cisco:firepower") OR match(source, "(?i)cisco_asa|firepower"), "Cisco Firewall",
+    match(sourcetype, "(?i)checkpoint|opsec") OR match(source, "(?i)checkpoint"), "Check Point",
+    match(sourcetype, "(?i)apache|access_combined") OR match(source, "(?i)apache"), "Apache",
+    match(sourcetype, "(?i)nginx") OR match(source, "(?i)nginx"), "Nginx",
+    match(sourcetype, "(?i)kube:|kubernetes") OR match(source, "(?i)kube:"), "Kubernetes",
+    match(sourcetype, "(?i)wineventlog|xmlwineventlog|winhostmon|powershell"), "Windows",
+    match(sourcetype, "(?i)linux_|auditd|journald|osnix"), "Linux",
+    match(sourcetype, "(?i)syslog|sc4s"), "Syslog",
+    1=1, coalesce(sourcetype, host, "unknown"))
+| eval endpoint=substr(endpoint, 1, 80)
+| eval endpoint_kind=if(endpoint==sourcetype OR endpoint==host, "sourcetype", "product")
+| eval family=case(endpoint_kind="product", endpoint, match(sourcetype, "^[A-Za-z0-9]+[:_]"), replace(sourcetype, "[:_].*", ""), 1=1, coalesce(sourcetype, "unknown"))
+| eval family=substr(family, 1, 40)
+""".strip()
+
+Q_TOPO_MAP = (
+    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n"
+    + Q_TOPO_CLASSIFY
+    + "\n| stats sum(events) as events by endpoint, endpoint_kind, category, network, ingest_method, index, host"
+    + "\n| eventstats sum(events) as endpoint_total by endpoint"
+    + "\n| sort 0 endpoint_kind -endpoint_total -events"
+    + "\n| streamstats count as ep_rank by endpoint"
+    + "\n| where ep_rank<=8"
+    + "\n| sort 0 -endpoint_total -events"
+    + "\n| head 500"
+    + "\n| rename host as data_source, index as splunk_index"
+    + "\n| eval _color_rank=3"
+    + "\n| table endpoint, endpoint_kind, category, network, ingest_method, splunk_index, data_source, events, _color_rank"
+)
+
+# Estate summary. A site is the parent domain, or an IPv4 /16. A sourcetype family
+# is a known product, or the prefix before ":" or "_". The long tail is one
+# "Other" node so the counts still include it. The browser drills in from here.
+Q_TOPO_MACRO = (
+    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n"
+    + Q_TOPO_CLASSIFY
+    + "\n"
+    + r"""| eventstats sum(events) as env_total by environment
+| eventstats sum(events) as fam_total by family
+| eventstats sum(events) as idx_total by index
+| sort 0 -env_total environment
+| streamstats dc(environment) as env_rank
+| sort 0 -fam_total family
+| streamstats dc(family) as fam_rank
+| sort 0 -idx_total index
+| streamstats dc(index) as idx_rank
+| eval environment=if(env_rank<=8, environment, "Other sites")
+| eval family=if(fam_rank<=8, family, "Other sourcetypes")
+| eval splunk_index=if(idx_rank<=8, index, "Other indexes")
+| stats sum(events) as events by environment, ingest_method, family, splunk_index
+| eventstats sum(events) as env_events by environment
+| eventstats sum(events) as fam_events by family
+| eventstats sum(events) as idx_events by splunk_index
+| eventstats sum(events) as method_events by ingest_method
+| sort 0 -events
+| head 240
+| rename environment as data_source, family as endpoint
+| eval _color_rank=3
+| table data_source, ingest_method, endpoint, splunk_index, events, env_events, fam_events, idx_events, method_events, _color_rank
+"""
+)
+
+# One site, family, path, or index. "Other *" keeps everything outside the top
+# groups, using the same rank as the summary. The map then draws hosts.
+Q_TOPO_DETAIL = (
+    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n"
+    + Q_TOPO_CLASSIFY
+    + "\n"
+    + r"""| where ("$tok_topo_environment$"="*" OR "$tok_topo_environment$"="Other sites" OR environment="$tok_topo_environment$") AND ("$tok_topo_family$"="*" OR "$tok_topo_family$"="Other sourcetypes" OR family="$tok_topo_family$") AND ("$tok_topo_index$"="*" OR "$tok_topo_index$"="Other indexes" OR index="$tok_topo_index$") AND ("$tok_topo_ingest$"="*" OR ingest_method="$tok_topo_ingest$")
+| eventstats sum(events) as env_total by environment
+| eventstats sum(events) as fam_total by family
+| eventstats sum(events) as idx_total by index
+| sort 0 -env_total environment
+| streamstats dc(environment) as env_rank
+| sort 0 -fam_total family
+| streamstats dc(family) as fam_rank
+| sort 0 -idx_total index
+| streamstats dc(index) as idx_rank
+| where ("$tok_topo_environment$"!="Other sites" OR env_rank>8) AND ("$tok_topo_family$"!="Other sourcetypes" OR fam_rank>8) AND ("$tok_topo_index$"!="Other indexes" OR idx_rank>8)
+| eval endpoint=if(match(sourcetype, "(?i)^(wineventlog|xmlwineventlog)$"), coalesce(source, sourcetype), sourcetype)
+| eval endpoint=substr(coalesce(endpoint, "unknown"), 1, 80)
+| eval endpoint_kind="sourcetype"
+| stats sum(events) as events by endpoint, endpoint_kind, category, network, ingest_method, index, host
+| eventstats sum(events) as st_total by endpoint
+| sort 0 -st_total endpoint -events
+| streamstats count as st_host_rank by endpoint
+| where st_host_rank<=6
+| sort 0 -st_total -events
+| head 400
+| rename host as data_source, index as splunk_index
+| fields - st_total st_host_rank
+| eval _color_rank=3
+| table endpoint, endpoint_kind, category, network, ingest_method, splunk_index, data_source, events, _color_rank
+"""
+)
+
+Q_TOPO_FOCUS_TREND = (
+    "| tstats count as events where index=`exec_health_idx` earliest=-25h@m latest=@m by _time span=15m host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n"
+    + Q_TOPO_CLASSIFY
+    + '\n| where ("$tok_topo_category$"="*" OR category="$tok_topo_category$") AND ("$tok_topo_network$"="*" OR network="$tok_topo_network$") AND ("$tok_topo_ingest$"="*" OR ingest_method="$tok_topo_ingest$") AND ("$tok_topo_index$"="*" OR index="$tok_topo_index$") AND ("$tok_topo_endpoint$"="*" OR endpoint="$tok_topo_endpoint$")'
+    + "\n| stats sum(events) as events by _time"
+    + "\n| timechart span=15m sum(events) as events"
+    + "\n| fillnull value=0 events"
+    + "\n| streamstats window=96 current=f avg(events) as mean_vol stdev(events) as stdev_vol count as samples"
+    + "\n| eval sigma=`exec_health_sigma`"
+    + "\n| eval mean=if(samples>=8, round(mean_vol, 1), null())"
+    + "\n| eval drop_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol-(sigma*stdev_vol), 1), null())"
+    + "\n| eval burst_bound=if(samples>=8 AND stdev_vol>0, round(mean_vol+(sigma*stdev_vol), 1), null())"
+    + "\n| eval drop_bound=if(drop_bound<0, 0, drop_bound)"
+    + "\n| eval outlier=case("
+    + '    samples<8, "WARMUP",'
+    + '    stdev_vol>0 AND events < drop_bound AND mean_vol>10, "DROP",'
+    + '    stdev_vol>0 AND events > burst_bound AND events>10, "BURST",'
+    + '    1=1, "OK")'
+    + '\n| eval bucket=strftime(_time, "%Y-%m-%d %H:%M")'
+    + "\n| table _time, bucket, events, mean, drop_bound, burst_bound, outlier"
+)
+
 Q_TCPIN_PATHS = r"""
 search index=_internal source=*metrics.log group=tcpin_connections
 | eval data_source=coalesce(sourceHost, hostname)
@@ -868,6 +1044,111 @@ Q_TOPO_SRC_OUTLIERS = r"""
 """.strip()
 
 
+def heartbeat_learned_core(host_clause: str = "") -> str:
+    """Usual gap between a host's _internal events over 7 days.
+
+    tstats emits only buckets that had events, so the gap is the time between
+    buckets that actually phoned home. A host needs 48 gaps and 24 hours of
+    history. Until then the fixed heartbeat cutoff still applies.
+    """
+    where_host = f" {host_clause}" if host_clause else ""
+    return (
+        f"| tstats count where index=_internal{where_host} earliest=-7d@h latest=@h by host _time span=5m\n"
+        "| sort 0 host _time\n"
+        "| streamstats current=f window=1 last(_time) as prev_beat by host\n"
+        "| eval gap_sec=if(isnotnull(prev_beat), _time-prev_beat, null())\n"
+        "| stats min(_time) as first_bucket, max(_time) as last_bucket, median(gap_sec) as typical_gap, perc95(gap_sec) as p95_gap, count(gap_sec) as samples by host\n"
+        "| eval history_sec=last_bucket-first_bucket, current_gap=round(now()-last_bucket, 0)\n"
+        "| eval typical_gap=round(typical_gap, 0), p95_gap=round(p95_gap, 0)\n"
+        "| eval ready=if(samples>=`exec_health_heartbeat_samples` AND history_sec>=86400, 1, 0)\n"
+        "| eval bound_sec=if(ready=1, round(max(2*p95_gap, 3*typical_gap), 0), null())\n"
+        '| eval heartbeat_band=case(ready=0, "LEARNING", current_gap>bound_sec, "QUIET", 1=1, "ON PATTERN")'
+    )
+
+
+def host_season_core(host_clause: str = "") -> str:
+    """Last complete hour of indexed events vs the same hour on earlier days."""
+    where_host = f" {host_clause}" if host_clause else ""
+    return (
+        f"| tstats count as events where index=`exec_health_idx`{where_host} earliest=-8d@h latest=@h by _time span=1h host\n"
+        '| eval hour=strftime(_time, "%H"), closed=if(_time<relative_time(now(), "@h"), 1, 0)\n'
+        "| eventstats avg(eval(if(closed=1, events, null()))) as typical, stdev(eval(if(closed=1, events, null()))) as spread, count(eval(closed=1)) as samples by host hour\n"
+        '| where _time>=relative_time(now(), "-1h@h") AND _time<relative_time(now(), "@h")\n'
+        "| eval sigma=`exec_health_sigma`\n"
+        "| eval lower=round(typical-(sigma*coalesce(spread, 0)), 1), typical=round(typical, 1), spread=round(coalesce(spread, 0), 1)\n"
+        '| eval season_state=case(samples<`exec_health_season_samples`, "LEARNING", spread>0 AND events<lower AND typical>10, "BELOW", 1=1, "OK")'
+    )
+
+
+def index_season_core() -> str:
+    """Last complete hour per index vs the same hour on earlier days."""
+    return (
+        "| tstats count as events where index=`exec_health_idx` earliest=-8d@h latest=@h by _time span=1h index\n"
+        '| eval hour=strftime(_time, "%H"), closed=if(_time<relative_time(now(), "@h"), 1, 0)\n'
+        "| eventstats avg(eval(if(closed=1, events, null()))) as typical, stdev(eval(if(closed=1, events, null()))) as spread, count(eval(closed=1)) as samples by index hour\n"
+        '| where _time>=relative_time(now(), "-1h@h") AND _time<relative_time(now(), "@h")\n'
+        "| eval sigma=`exec_health_sigma`\n"
+        "| eval lower=round(typical-(sigma*coalesce(spread, 0)), 1), typical=round(typical, 1), spread=round(coalesce(spread, 0), 1)\n"
+        '| eval season_state=case(samples<`exec_health_season_samples`, "LEARNING", spread>0 AND events<lower AND typical>10, "BELOW", 1=1, "OK")'
+    )
+
+
+def host_liveness_findings() -> str:
+    """One finding per host: learned heartbeat, stopped input, or the fixed cutoff.
+
+    A learned quiet heartbeat replaces the fixed host-down row. A host that is
+    still on its usual cadence, with this hour below that hour's own level and
+    events still arriving, is a stopped input. Hosts still learning stay on the
+    fixed cutoff and the 24-hour volume check.
+    """
+    return (
+        """| tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) earliest=-24h latest=now by index host
+| eval kind=if(index="_internal", "heartbeat", "data")
+| stats max(eval(if(kind="data", last_seen, null()))) as last_data, max(eval(if(kind="heartbeat", last_seen, null()))) as last_heartbeat by host
+| eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat
+| eval state=case(isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "HEARTBEAT ONLY", data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "DATA SILENT", (isnull(last_data) OR data_age_sec > `exec_health_silence_sec`) AND (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_heartbeat_sec`), "HOST DOWN", 1=1, "OK")
+| append [
+"""
+        + heartbeat_learned_core()
+        + """
+| eval hb_ready=ready, hb_band=heartbeat_band, hb_gap=current_gap, hb_typical=typical_gap, hb_bound=bound_sec
+| fields host hb_ready hb_band hb_gap hb_typical hb_bound
+]
+| append [
+"""
+        + host_season_core()
+        + """
+| eval season_events=events, season_typical=typical, season_lower=lower, season_samples=samples, season_hour=hour, season_band=season_state
+| fields host season_events season_typical season_lower season_samples season_hour season_band
+]
+| stats max(data_age_sec) as data_age_sec, max(heartbeat_age_sec) as heartbeat_age_sec, max(hb_ready) as hb_ready, max(hb_gap) as hb_gap, max(hb_typical) as hb_typical, max(hb_bound) as hb_bound, max(season_events) as season_events, max(season_typical) as season_typical, max(season_lower) as season_lower, values(state) as state, values(hb_band) as hb_band, values(season_band) as season_band, values(season_hour) as season_hour by host
+| eval keep_fixed=if(state="DATA SILENT" OR state="HEARTBEAT ONLY" OR state="HOST DOWN", 1, 0)
+| eval keep_fixed=if(hb_ready=1 AND hb_band="QUIET", 0, keep_fixed)
+| eval keep_fixed=if(hb_ready=1 AND hb_band="ON PATTERN" AND state="HOST DOWN", 0, keep_fixed)
+| eval issue=case(hb_band="QUIET", "Heartbeat gap outside this host's usual pattern", hb_band="ON PATTERN" AND season_band="BELOW" AND season_events>0, "Host is phoning home, but this hour is below its usual ingest", keep_fixed=1 AND state="HOST DOWN", "Host down — no heartbeat and no indexed data", keep_fixed=1, "Host data silent while heartbeat is fresh", 1=1, null())
+| where isnotnull(issue)
+| eval severity="RED", entity=host
+| eval evidence=case(hb_band="QUIET", "current_gap_sec="+tostring(hb_gap)+", typical_gap_sec="+tostring(hb_typical)+", bound_sec="+tostring(hb_bound), season_band="BELOW" AND hb_band="ON PATTERN", "hour="+season_hour+", events="+tostring(season_events)+", typical="+tostring(season_typical)+", lower="+tostring(season_lower)+", heartbeat=on pattern", 1=1, "state="+state+", data_age_sec="+tostring(data_age_sec)+", heartbeat_age_sec="+tostring(heartbeat_age_sec))
+| eval suggested_fix=case(hb_band="QUIET", "This host's _internal gap is longer than its own usual gap. Check power, network, and splunkd. Do not remove the host from this app.", season_band="BELOW" AND hb_band="ON PATTERN", "The host is still phoning home on its usual cadence, but indexed events for this hour are below the same hour over the last week. Check the input, outputs.conf, and blocked queues. Hosts with fewer than a week of this hour stay on the 24-hour baseline.", state="HOST DOWN", "The host is not phoning home and not sending data. Check power, network, and splunkd. Do not remove the host from this app.", 1=1, "The UF is up but indexed data stopped. Check outputs.conf, blocked queues, sourcetype transforms, and the destination index. Restart the forwarder only after change control.")
+| eval fix_type=case(hb_band="QUIET", "runbook_heartbeat_gap", season_band="BELOW" AND hb_band="ON PATTERN", "runbook_host_season", state="HOST DOWN", "runbook_host_down", 1=1, "runbook_uf")
+| eval proposed_config=case(hb_band="QUIET" OR state="HOST DOWN", "none — human restores the endpoint", season_band="BELOW" AND hb_band="ON PATTERN", "none — human repairs the forwarder or input", 1=1, "none — human repairs the UF pipeline"), action="Review"
+| eval _rank=case(hb_band="QUIET", 1, season_band="BELOW" AND hb_band="ON PATTERN", 2, state="HOST DOWN", 3, 1=1, 4)
+| sort 0 _rank host
+| head 40
+| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+"""
+    )
+
+
+def index_season_findings() -> str:
+    return index_season_core() + r"""
+| where season_state="BELOW" AND events>0
+| eval issue="Index volume below the usual level for this hour", severity="RED", entity=index, evidence="hour="+hour+", events="+tostring(events)+", typical="+tostring(typical)+", lower="+tostring(lower)+", samples="+tostring(samples), suggested_fix="Compare this index at this hour with the same hour on earlier days. A flat 7-day average can call a normal night a drop. This check does not. An index with fewer than 6 days of this hour stays on the 7-day moving average.", fix_type="runbook_index_season", proposed_config="none — human reviews the index sources", action="Review"
+| head 25
+| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+"""
+
+
 def dq_agent_findings_core() -> str:
     """Diagnose Splunk Health traffic lights vs learned baselines.
 
@@ -914,23 +1195,12 @@ def dq_agent_findings_core() -> str:
 """
         + host_findings
         + "]\n| append [\n"
+        + index_season_findings()
+        + "]\n| append [\n"
         + hec_findings
+        + "]\n| append [\n"
+        + host_liveness_findings()
         + r"""
-]
-| append [
-    | tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) earliest=-24h latest=now by index host
-    | eval kind=if(index="_internal", "heartbeat", "data")
-    | stats max(eval(if(kind="data", last_seen, null()))) as last_data, max(eval(if(kind="heartbeat", last_seen, null()))) as last_heartbeat by host
-    | eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat
-    | eval state=case(isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "HEARTBEAT ONLY", data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "DATA SILENT", (isnull(last_data) OR data_age_sec > `exec_health_silence_sec`) AND (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_heartbeat_sec`), "HOST DOWN", 1=1, "OK")
-    | where state="DATA SILENT" OR state="HEARTBEAT ONLY" OR state="HOST DOWN"
-    | eval issue=case(state="HOST DOWN", "Host down — no heartbeat and no indexed data", 1=1, "Host data silent while heartbeat is fresh")
-    | eval severity="RED", entity=host, evidence="state="+state+", data_age_sec="+tostring(data_age_sec)+", heartbeat_age_sec="+tostring(heartbeat_age_sec)
-    | eval suggested_fix=case(state="HOST DOWN", "The host is not phoning home and not sending data. Check power, network, and splunkd. Do not remove the host from this app.", 1=1, "The UF is up but indexed data stopped. Check outputs.conf, blocked queues, sourcetype transforms, and the destination index. Restart the forwarder only after change control.")
-    | eval fix_type=if(state="HOST DOWN", "runbook_host_down", "runbook_uf")
-    | eval proposed_config=if(state="HOST DOWN", "none — human restores the endpoint", "none — human repairs the UF pipeline"), action="Review"
-    | head 40
-    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
 ]
 | append [
     search `exec_health_health_report` earliest=-15m
@@ -1286,6 +1556,25 @@ def host_state_counts(clause: str) -> str:
 
 Q_STATE_COUNTS = host_state_counts("host=$host_filter$")
 
+Q_HEARTBEAT_LEARNED = heartbeat_learned_core("host=$host_filter$") + r"""
+| eval usual_gap=tostring(typical_gap, "duration"), current=tostring(current_gap, "duration"), bound=if(isnotnull(bound_sec), tostring(bound_sec, "duration"), "n/a")
+| eval _color_rank=case(heartbeat_band="QUIET", 1, heartbeat_band="LEARNING", 2, 1=1, 3)
+| table host, usual_gap, current, bound, samples, heartbeat_band, _color_rank
+| sort _color_rank, host
+"""
+
+Q_HOST_SEASON = host_season_core("host=$host_filter$") + r"""
+| eval _color_rank=case(season_state="BELOW", 1, season_state="LEARNING", 2, 1=1, 3)
+| table host, hour, events, typical, lower, samples, season_state, _color_rank
+| sort _color_rank, host
+"""
+
+Q_INDEX_SEASON = index_season_core() + r"""
+| eval _color_rank=case(season_state="BELOW", 1, season_state="LEARNING", 2, 1=1, 3)
+| table index, hour, events, typical, lower, samples, season_state, _color_rank
+| sort _color_rank, index
+"""
+
 Q_HEALTH_FEATURES = (
     Q_HEALTH_BY_FEATURE
     + "\n"
@@ -1495,7 +1784,14 @@ Q_DQ_AGENT_FINDINGS = dq_agent_findings_core() + r"""
 """.rstrip() + DECISION_STATUS + r"""
 | eval action=if(status="open", "Review", "Resolved")
 | eval agent_thought="OBSERVE: "+issue+" on "+entity+". INVESTIGATE: "+coalesce(tool_plan, "learned baselines")+". TOOLS: fwdType="+coalesce(tool_fwdType, "n/a")+" conn="+coalesce(tool_conn, "n/a")+" err_component="+coalesce(tool_err_component, "none")+" err_count="+coalesce(tostring(tool_err_count), "0")+". HYPOTHESIZE: "+coalesce(likely_cause, "needs human review")+" (confidence "+coalesce(confidence, "n/a")+"). PROPOSE: "+suggested_fix+". ACT: wait for human APPROVE or DISMISS — never change Splunk unattended."
-| eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Reply with root cause, confidence, and step-by-step admin actions. Do not request secrets or HEC token values."
+| lookup dq_agent_config_samples fix_type OUTPUT sample AS cfg_sample, check_command AS cfg_cmd, check_search AS cfg_search
+| eval cfg_sample=substr(replace(replace(replace(replace(coalesce(cfg_sample, "none"), "@@", " ; "), "\|", " / "), "`", " "), "\$", " "), 1, 700)
+| eval cfg_cmd=substr(replace(replace(replace(coalesce(cfg_cmd, "none"), "\|", " / "), "`", " "), "\$", " "), 1, 300)
+| eval cfg_search=substr(replace(replace(replace(coalesce(cfg_search, "none"), "\|", " / "), "`", " "), "\$", " "), 1, 500)
+""" + "\n| eval cfg_sample=replace(cfg_sample, \"\\\"\", \" \")\n| eval cfg_cmd=replace(cfg_cmd, \"\\\"\", \" \")\n| eval cfg_search=replace(cfg_search, \"\\\"\", \" \")\n" + r"""
+| eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Sample config to validate: "+cfg_sample+". Host check to validate: "+cfg_cmd+". Splunk check to validate: "+cfg_search+". Reply with root cause, confidence, and step-by-step admin actions. Then validate the sample config and both checks: say whether each would confirm this issue and is safe to hand to an admin. End with exactly three lines and nothing after them. SAMPLE_CHECK: pass or fail, then a short reason. FIX_CHECK: pass or fail, then a short reason. SUPPORT_TICKET: yes or no, then a short reason. Use SUPPORT_TICKET yes only when the next step is to open a Splunk support ticket. Do not request secrets or HEC token values."
+| eval ai_brief=replace(replace(replace(replace(ai_brief, "\|", " / "), "`", " "), "\$", " "), "[\r\n]+", " ")
+""" + "\n| eval ai_brief=replace(ai_brief, \"\\\"\", \" \")\n| eval ai_brief=substr(ai_brief, 1, 5800)\n" + r"""
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank
 | sort _color_rank, issue, entity
@@ -2111,6 +2407,33 @@ Q_DQ_AI_ASK_WRITE = r"""
 | table requested_at, finding_id, provider, status, _color_rank
 """
 
+# A support ticket is drafted only when the person clicks Generate. The reply is
+# returned to the page and is not written over the suggested fix.
+Q_DQ_AI_TICKET = r"""
+| makeresults
+| eval ask="$tok_ai_ask$", finding_id="$tok_finding_id$", entity="$tok_entity$", issue="$tok_issue$", facts="$tok_ai_brief$", stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
+| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
+| eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
+| eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
+| eval endpoint=if(used_ui=0, "`exec_health_ai_endpoint`", coalesce(endpoint, "none"))
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
+| where ask="ask" AND finding_id!="none" AND finding_id!="" AND finding_id!="placeholder" AND mode="provider" AND provider!="none" AND provider!="" AND key_ok=1
+| lookup dq_agent_ai_providers provider OUTPUT default_endpoint
+| eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
+| eval ai_brief="Write a Splunk Support ticket a person can copy and paste. Use only the facts below. Do not invent counts, dates, host names, or searches. If a number or date is not in the facts, write not measured. Do not include secrets, certificates, or HEC token values. Reply with only the markdown below, and put each heading on its own line. For Estate evidence and Measured effect, fill the parentheses with the collection method, the date, and the count. Under Estate evidence, include one sample search when the facts contain a check search; otherwise write No sample search applies. Facts: "+facts+". Ticket: ## Subject. ## Environment. ## Summary. ## Estate evidence (how it was collected, date, count). ## Measured effect (what was measured, time window, how many items). ## Documentation we relied on. ## Questions for Splunk. ## Impact. ## What we have not verified."
+| eval is_ping=0
+| derekaiping
+| eval ticket=if(ai_result="replied", ai_reply, "none")
+| eval ticket_error=if(ai_result="replied", "none", coalesce(ai_error, "no reply"))
+| fields - api_key
+| table ticket, ticket_error
+"""
+
 Q_DQ_AI_LIST_BUTTON = r"""
 | makeresults
 | eval _pressed=if("$tok_ai_list$"="show", 1, 0)
@@ -2711,7 +3034,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.56"
+APP_VERSION = "1.7.75"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3033,6 +3356,114 @@ def render_savedsearches() -> str:
 
 
 
+# Indexes named in lookups/feed_catalog.csv. An empty catalog searches a name that
+# matches nothing, so these panels never fall through to every index.
+def _catalog_indexes(state_clause: str) -> str:
+    return (
+        '[ | inputlookup feed_catalog where kind="index" AND (' + state_clause + ') '
+        '| fields index '
+        '| appendpipe [ | stats count | where count=0 | eval index="__no_feed_catalog__" ] '
+        '| fields index | format ]'
+    )
+
+
+_FEED_STATES = 'expected_state="active" OR expected_state="catchall" OR expected_state="disabled_expected"'
+
+Q_FEED_CATALOG = (
+    "| tstats count max(_time) as last_epoch min(_time) as first_epoch where earliest=-30d@d latest=now "
+    + _catalog_indexes(_FEED_STATES)
+    + " by index sourcetype source\n"
+    + r"""| lookup feed_catalog index OUTPUT expected_sourcetype expected_state min_silence_minutes notes
+| where isnotnull(expected_state) AND expected_state!=""
+| append [
+    | inputlookup feed_catalog where kind="index"
+    | where expected_state="active" OR expected_state="catchall" OR expected_state="disabled_expected"
+    | eval is_stub=1
+    | table index is_stub
+]
+| eventstats count as n by index
+| where NOT (n>1 AND is_stub=1)
+| eventstats max(last_epoch) as index_last by index
+| lookup feed_catalog index OUTPUT expected_sourcetype expected_state min_silence_minutes notes
+| eval thr=tonumber(min_silence_minutes)
+| eval silent_min=if(isnotnull(last_epoch), round((now()-last_epoch)/60), null())
+| eval index_silent_min=if(isnotnull(index_last), round((now()-index_last)/60), null())
+| eval status=case(expected_state="catchall", "In the catch-all", isnull(last_epoch), "No events in 30 days", expected_state="disabled_expected", "Turned off on purpose", isnotnull(thr) AND index_silent_min>thr, "Gone quiet", isnotnull(thr) AND silent_min>thr, "Source gone quiet", expected_sourcetype!="" AND sourcetype!=expected_sourcetype, "Wrong sourcetype", isnotnull(first_epoch) AND first_epoch>relative_time(now(), "-7d"), "New this week", 1=1, "Healthy")
+| eval last_event=strftime(last_epoch, "%F %T"), first_event=strftime(first_epoch, "%F %T")
+| eval _color_rank=case(status="Gone quiet" OR status="No events in 30 days" OR status="Wrong sourcetype", 1, status="Source gone quiet" OR status="New this week" OR status="In the catch-all", 2, 1=1, 3)
+| table index sourcetype source status last_event silent_min expected_sourcetype thr count first_event notes _color_rank
+| sort _color_rank index -count
+"""
+)
+
+Q_EMPTY_HOURS = (
+    "| tstats count where earliest=-7d@h latest=@h "
+    + _catalog_indexes('expected_state="active"')
+    + " by _time index span=1h\n"
+    + r"""| timechart span=1h sum(count) as count by index limit=0
+| fillnull value=0
+| untable _time index count
+| stats count as hours, count(eval(count=0)) as empty_hours, max(eval(if(count=0, _time, null()))) as last_empty by index
+| eval last_empty=if(isnotnull(last_empty), strftime(last_empty, "%F %T"), "")
+| eval empty_pct=if(hours>0, round(100*empty_hours/hours, 1), 0)
+| append [
+    | inputlookup feed_catalog where kind="index" AND expected_state="active"
+    | eval hours=round((relative_time(now(), "@h")-relative_time(now(), "-7d@h"))/3600, 0), empty_hours=hours, empty_pct=100, last_empty="", is_stub=1
+    | table index hours empty_hours empty_pct last_empty is_stub
+]
+| eventstats count as n by index
+| where NOT (n>1 AND is_stub=1)
+| fields - n is_stub
+| where index!="__no_feed_catalog__"
+| eval _color_rank=if(empty_hours>0, 2, 3)
+| sort 0 -empty_hours index
+| table index hours empty_hours empty_pct last_empty _color_rank
+"""
+)
+
+Q_QUARANTINE_DAILY = (
+    "| tstats count where earliest=-7d@d latest=now "
+    + _catalog_indexes('expected_state="catchall"')
+    + " by _time sourcetype span=1d\n"
+    + "| timechart span=1d sum(count) by sourcetype limit=15"
+)
+
+Q_QUARANTINE_ROWS = (
+    "| tstats count max(_time) as last_epoch min(_time) as first_epoch where earliest=-7d@d latest=now "
+    + _catalog_indexes('expected_state="catchall"')
+    + " by index sourcetype source\n"
+    + r"""| where index!="__no_feed_catalog__"
+| eval last_event=strftime(last_epoch, "%F %T"), first_event=strftime(first_epoch, "%F %T")
+| sort 0 index -count
+| table index sourcetype source count first_event last_event
+"""
+)
+
+Q_HEC_CONF_LOAD = r"""
+search index=_internal sourcetype=splunkd component=HttpInputDataHandler "Failed to load HEC token configuration"
+| timechart span=1d count by host limit=10
+""".strip()
+
+Q_PARSE_LINEBREAK = r"""
+search index=_internal sourcetype=splunkd component=LineBreakingProcessor log_level=WARN
+| rex field=_raw "data_source=\"(?<data_source>[^\"]*)\".*data_sourcetype=\"(?<data_sourcetype>[^\"]*)\""
+| stats count by data_source data_sourcetype
+| sort 0 -count
+| eval _color_rank=1
+| table data_source data_sourcetype count _color_rank
+""".strip()
+
+Q_PARSE_TIME = r"""
+search index=_internal sourcetype=splunkd component=DateParserVerbose log_level=WARN
+| rex field=_raw "Context:\s*(?<context>.{0,160})"
+| stats count by context
+| sort 0 -count
+| head 50
+| eval _color_rank=1
+| table context count _color_rank
+""".strip()
+
+
 def emit_catalog() -> None:
     """Named searches the HTML pages may run. The REST handler only ever runs a
     name from this file, never SPL from the browser, and only the entries marked
@@ -3049,10 +3480,13 @@ def emit_catalog() -> None:
         "areas": entry(exec_area_rollup(), "-15m", "now", count=20),
         "license_daily": entry(Q_LICENSE_DAILY, "-15d@d", "@d", count=30),
         "live": entry(Q_LIVE, "-15m", "now", count=5),
-        "agent_counts": entry(Q_DQ_AGENT_FINDINGS + "\n" + EXEC_AGENT_COUNTS, "-24h", "now", count=5),
+        "agent_counts": entry(Q_DQ_AGENT_FINDINGS + "\n" + EXEC_AGENT_COUNTS, "-24h", "now", count=5, timeout=120),
         "top_indexes": entry(Q_TOP_INDEXES, "-7d@d", "@d", count=12),
         "state_counts": entry(Q_STATE_COUNTS, "-24h", "now", ["host_filter"], count=10),
         "phone_home": entry(Q_PHONE_HOME, "-24h", "now", ["host_filter"], count=300),
+        "heartbeat_learned": entry(Q_HEARTBEAT_LEARNED, "-7d@h", "@h", ["host_filter"], count=300, timeout=120),
+        "host_season": entry(Q_HOST_SEASON, "-8d@h", "@h", ["host_filter"], count=300, timeout=120),
+        "index_season": entry(Q_INDEX_SEASON, "-8d@h", "@h", count=100, timeout=120),
         "latency": entry(Q_LATENCY, "-15m@m", "now", ["host_filter"], count=300),
         "baseline": entry(Q_BASELINE_ALL, "-25h@m", "@m", ["host_filter"], count=300, timeout=120),
         "features": entry(Q_HEALTH_FEATURES, "-15m", "now", count=100),
@@ -3065,6 +3499,13 @@ def emit_catalog() -> None:
         "hec_errors": entry(Q_HEC_ERRORS, "-4h", "now", count=100),
         "hec_input_errors": entry(Q_HEC_INPUT_ERRORS, "-4h", "now", count=100),
         "hec_flow": entry(Q_HEC_FLOW, "-4h", "now", count=80),
+        "hec_conf_load": entry(Q_HEC_CONF_LOAD, "-7d@d", "now", count=200),
+        "parse_linebreak": entry(Q_PARSE_LINEBREAK, "-24h", "now", count=100),
+        "parse_time": entry(Q_PARSE_TIME, "-24h", "now", count=50),
+        "feed_catalog": entry(Q_FEED_CATALOG, "-30d@d", "now", count=500, timeout=120),
+        "empty_hours": entry(Q_EMPTY_HOURS, "-7d@h", "@h", count=100, timeout=120),
+        "quarantine_daily": entry(Q_QUARANTINE_DAILY, "-7d@d", "now", count=200, timeout=120),
+        "quarantine_rows": entry(Q_QUARANTINE_ROWS, "-7d@d", "now", count=200, timeout=120),
         "sc4s_time": entry(Q_SC4S_TIME, "-4h", "now", count=400),
         "sc4s_hosts": entry(Q_SC4S_HOSTS, "-4h", "now", count=100),
         "sc4s_errors": entry(Q_SC4S_ERRORS, "-4h", "now", count=100),
@@ -3075,19 +3516,24 @@ def emit_catalog() -> None:
         "edge_logs": entry(Q_EDGE_LOGS, "-4h", "now", count=100),
         "indexed": entry(Q_INDEXED_COMPARE, "-4h", "now", count=300),
         "topo_paths": entry(Q_TOPO_PATHS, "-4h", "now", count=100, timeout=120),
+        "topo_map": entry(Q_TOPO_MAP, "-24h", "now", count=500, timeout=120),
+        "topo_macro": entry(Q_TOPO_MACRO, "-24h", "now", count=240, timeout=120),
+        "topo_detail": entry(Q_TOPO_DETAIL, "-24h", "now", ["tok_topo_environment", "tok_topo_family", "tok_topo_ingest", "tok_topo_index"], count=300, timeout=120),
+        "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_category", "tok_topo_network", "tok_topo_ingest", "tok_topo_index", "tok_topo_endpoint"], count=200, timeout=120),
         "tcpin": entry(Q_TCPIN_PATHS, "-4h", "now", count=80),
         "topo_src_stats": entry(Q_TOPO_SRC_STATS, "-4h", "now", ["tok_data_source"], count=5),
         "topo_src_trend": entry(Q_TOPO_SRC_TREND, "-25h@m", "@m", ["tok_data_source"], count=120),
         "topo_src_outliers": entry(Q_TOPO_SRC_OUTLIERS, "-25h@m", "@m", ["tok_data_source"], count=50),
         "agent_queue": entry(asked + "\n" + Q_DQ_QUEUE_VIEW + "\n| rename _finding_id AS finding_ref, _ai_brief AS ai_brief_text", "-24h", "now", gate, count=100, timeout=120),
-        "agent_status": entry(asked + "\n" + Q_DQ_AGENT_STATUS, "-24h", "now", gate, count=5),
-        "agent_selected": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_SUGGESTION, "-24h", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5),
-        "agent_sample": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_CONFIG_SAMPLE, "-24h", "now", ["tok_finding_id"], count=20),
+        "agent_status": entry(asked + "\n" + Q_DQ_AGENT_STATUS, "-24h", "now", gate, count=5, timeout=120),
+        "agent_selected": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_SUGGESTION, "-24h", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5, timeout=120),
+        "agent_sample": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_CONFIG_SAMPLE, "-24h", "now", ["tok_finding_id"], count=20, timeout=120),
         "agent_replies": entry(Q_DQ_AI_REPLIES, "0", "now", ["tok_finding_id", "tok_ai_ask"], count=5),
         "agent_list": entry(Q_DQ_AI_LIST, "0", "now", ["tok_ai_list"], count=100),
         "agent_recorded": entry(Q_DQ_RECORDED_READ, "0", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5),
         "decide": entry(Q_DQ_SAVE_DECISION, "0", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5, timeout=60, write=True),
         "ask": entry(Q_DQ_AI_ASK_WRITE, "0", "now", ["tok_ai_ask", "tok_cell", "tok_finding_id", "tok_entity", "tok_issue", "tok_ai_brief"], count=5, timeout=150, write=True),
+        "ticket": entry(Q_DQ_AI_TICKET, "0", "now", ["tok_ai_ask", "tok_finding_id", "tok_entity", "tok_issue", "tok_ai_brief"], count=5, timeout=150, write=True),
         "ai_current": entry(Q_DQ_AI_CONN_TEST, "0", "now", count=5),
         "ai_providers": entry("| inputlookup dq_agent_ai_providers | table provider, provider_label, default_endpoint, notes", "0", "now", count=20),
         "ai_models": entry(Q_DQ_AI_MODELS, "0", "now", ["tok_cfg_provider"], count=50),
@@ -3110,7 +3556,7 @@ def main() -> None:
     SAVEDSEARCHES.write_text(render_savedsearches(), encoding="utf-8")
     print(f"wrote {SAVEDSEARCHES.relative_to(ROOT)}")
     pages = [
-        ("executive_overview.xml", "Splunk Health Derek+", "executive.html"),
+        ("executive_overview.xml", "Executive overview", "executive.html"),
         ("host_heartbeat.xml", "Host Heartbeat & Instance Health", "host.html"),
         ("hec_performance.xml", "HEC Token Performance", "hec.html"),
         ("sc4s_edge.xml", "SC4S Syslog & Edge/Ingest Processors", "sc4s.html"),

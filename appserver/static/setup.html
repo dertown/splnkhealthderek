@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.75">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>AI provider setup</h1>
     <p class="tagline">Choose a provider and model, paste the API key, and save. The key is stored in the KV Store on this search head and is never written into the app. Leave the key blank to keep the stored one. Saving also runs the connection test.</p>
-    <div class="hero-meta"><a id="home" href="#">Summary</a><span>·</span><a id="agent" href="#">Data Quality Agent</a></div>
+    <div class="hero-meta"><a id="home" href="#">Executive overview</a><span>·</span><a id="agent" href="#">Data Quality Agent</a></div>
   </div>
   <div class="panel">
     <div class="controls">
@@ -21,10 +21,10 @@
     </div>
     <p class="note" id="status"></p>
   </div>
-  <div class="section"><h2 class="section-title">Saved settings and connection test</h2><div id="current"></div></div>
-  <div class="section"><h2 class="section-title">Supported providers</h2><div id="providers"></div></div>
+  <div class="section"><h2 class="section-title" data-help="The provider and model currently saved, and whether the last connection test worked. The API key is stored on this search head and is not shown again.">Saved settings and connection test</h2><div id="current"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Providers this app can call, with the default address and any note about that provider.">Supported providers</h2><div id="providers"></div></div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.75"></script>
 <script>
 (function () {
   Health.link('home', 'executive_overview');

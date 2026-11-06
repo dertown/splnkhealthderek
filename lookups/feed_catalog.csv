@@ -1,0 +1,5 @@
+kind,index,expected_sourcetype,expected_state,min_silence_minutes,notes
+index,_internal,splunkd,disabled_expected,60,"Example of a feed you expect to be off. Copy this row, set the state to active, and name the index and sourcetype you expect. This example is not counted as a problem."
+index,quarantine,,catchall,60,"Catch-all index. Delete this row if this stack does not use an index named quarantine."
+index,lastchance,,catchall,60,"Catch-all index. Delete this row if this stack does not use an index named lastchance."
+index,main,,catchall,60,"Catch-all only when unexpected data lands in main. Delete this row when main is a normal index."

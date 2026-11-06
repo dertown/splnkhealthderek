@@ -6,6 +6,27 @@ var Charts = (function () {
     return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  function labelFont(name) {
+    var n = String(name).length;
+    if (n <= 8) return 16;
+    if (n <= 14) return 14;
+    if (n <= 22) return 13;
+    if (n <= 32) return 12;
+    return 11;
+  }
+
+  function labelPx(name, size) {
+    return Math.ceil(String(name).length * (size || labelFont(name)) * 0.68);
+  }
+
+  function fitText(name, room) {
+    var size = labelFont(name);
+    var text = String(name);
+    if (labelPx(text, size) <= room) return { text: text, size: size };
+    while (text.length > 1 && labelPx(text + '\u2026', size) > room) text = text.slice(0, -1);
+    return { text: text + '\u2026', size: size };
+  }
+
   function el(node, svg) {
     node.innerHTML = '<div class="chart">' + svg + '</div>';
   }
@@ -96,11 +117,24 @@ var Charts = (function () {
         });
       });
     }
-    var height = Math.max.apply(null, names.map(function (list) { return list.length; })) * 28 + 20;
-    var width = 760, colWidth = width / columns.length;
+    var gap = 72;
+    var rooms = names.map(function (list) {
+      var room = 72;
+      list.forEach(function (name) { room = Math.max(room, labelPx(name) + 12); });
+      return Math.min(room, 360);
+    });
+    var xAt = [];
+    var cursor = 16;
+    rooms.forEach(function (room) {
+      xAt.push(cursor);
+      cursor += room + gap;
+    });
+    var width = Math.max(880, cursor - gap + 20);
+    var rowH = 40;
+    var height = Math.max.apply(null, names.map(function (list) { return list.length; })) * rowH + 28;
     var pos = names.map(function (list) {
       var map = {};
-      list.forEach(function (name, index) { map[name] = 16 + index * 28; });
+      list.forEach(function (name, index) { map[name] = 24 + index * rowH; });
       return map;
     });
     var hot = {};
@@ -111,8 +145,11 @@ var Charts = (function () {
       });
     }
     function curve(stage, y1, y2) {
-      return 'M ' + (colWidth * stage + 150) + ' ' + y1 + ' C ' + (colWidth * stage + colWidth / 2 + 75) + ' ' + y1
-        + ', ' + (colWidth * (stage + 1) - colWidth / 2 + 10) + ' ' + y2 + ', ' + (colWidth * (stage + 1) + 10) + ' ' + y2;
+      var x1 = xAt[stage] + rooms[stage] + 8;
+      var x2 = xAt[stage + 1] - 16;
+      if (x2 < x1 + 24) x2 = x1 + 24;
+      var mid = (x1 + x2) / 2;
+      return 'M ' + x1 + ' ' + y1 + ' C ' + mid + ' ' + y1 + ', ' + mid + ' ' + y2 + ', ' + x2 + ' ' + y2;
     }
     function drawLinks(match, color, opacity) {
       var out = '';
@@ -133,27 +170,28 @@ var Charts = (function () {
           var parts = key.split('\n');
           out += '<path d="' + curve(stage, pos[stage][parts[0]], pos[stage + 1][parts[1]])
             + '" stroke="' + color + '" stroke-opacity="' + opacity + '" stroke-width="'
-            + Math.max(1, links[key] / max * 10) + '" fill="none"/>';
+            + Math.max(1.25, Math.min(4, links[key] / max * 4)) + '" fill="none" stroke-linecap="butt"/>';
         });
       }
       return out;
     }
-    var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%">';
+    var hostColor = selected ? tint(selected) : '#58a6ff';
+    var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%" style="min-width:' + width + 'px" role="img">';
     if (!selected) svg += drawLinks(null, '#58a6ff', '0.35');
     else {
       svg += drawLinks(false, '#58a6ff', '0.12');
-      svg += drawLinks(true, '#58a6ff', '0.95');
+      svg += drawLinks(true, hostColor, '0.95');
     }
     names.forEach(function (list, stage) {
       list.forEach(function (name) {
         var onPath = !selected || hot[stage + '\n' + name];
         var fill = !selected || onPath ? '#e6edf3' : '#6e7681';
-        if (selected && stage === 0 && name === selected) fill = '#58a6ff';
-        else if (selected && onPath) fill = '#79c0ff';
+        if (selected && onPath) fill = hostColor;
         var pick = stage === 0 ? ' data-pick="' + esc(name).replace(/"/g, '&quot;') + '"' : '';
         var weight = selected && onPath ? ' font-weight="700"' : '';
-        svg += '<text x="' + (colWidth * stage + 10) + '" y="' + (pos[stage][name] + 4) + '" fill="' + fill
-          + '" font-size="12"' + weight + pick + '>' + esc(name) + '</text>';
+        var fitted = fitText(name, rooms[stage] - 8);
+        svg += '<text x="' + xAt[stage] + '" y="' + (pos[stage][name] + 4) + '" fill="' + fill
+          + '" font-size="' + fitted.size + '"' + weight + pick + '><title>' + esc(name) + '</title>' + esc(fitted.text) + '</text>';
       });
     });
     svg += '</svg>';
@@ -166,5 +204,444 @@ var Charts = (function () {
     }
   }
 
-  return { line: line, pie: pie, flow: flow };
+  function topology(node, rows, columns, headers, valueKey, selected, onPick, onHover) {
+    if (!rows.length) { node.innerHTML = '<p class="note">No flows for this selection.</p>'; return; }
+    selected = selected || {};
+    var keys = Object.keys(selected);
+    function hotRow(row) {
+      if (!keys.length) return false;
+      for (var i = 0; i < keys.length; i++) {
+        if (String(row[keys[i]] || 'unknown') !== String(selected[keys[i]])) return false;
+      }
+      return true;
+    }
+    var stages = columns.map(function () { return {}; });
+    rows.forEach(function (row) {
+      columns.forEach(function (col, index) {
+        var name = row[col] || 'unknown';
+        stages[index][name] = (stages[index][name] || 0) + (Number(row[valueKey]) || 0);
+      });
+    });
+    var names = stages.map(function (stage, index) {
+      var list = Object.keys(stage).sort(function (a, b) { return stage[b] - stage[a]; }).slice(0, 12);
+      if (selected[columns[index]] && list.indexOf(selected[columns[index]]) < 0) list.push(selected[columns[index]]);
+      rows.forEach(function (row) {
+        if (!hotRow(row)) return;
+        var name = row[columns[index]] || 'unknown';
+        if (list.indexOf(name) < 0) list.push(name);
+      });
+      return list;
+    });
+    var height = Math.max.apply(null, names.map(function (list) { return list.length; })) * 28 + 46;
+    var width = 960, colWidth = width / columns.length;
+    var pos = names.map(function (list) {
+      var map = {};
+      list.forEach(function (name, index) { map[name] = 42 + index * 28; });
+      return map;
+    });
+    function curve(stage, y1, y2) {
+      return 'M ' + (colWidth * stage + 168) + ' ' + y1 + ' C ' + (colWidth * stage + colWidth / 2 + 80) + ' ' + y1
+        + ', ' + (colWidth * (stage + 1) - colWidth / 2 + 8) + ' ' + y2 + ', ' + (colWidth * (stage + 1) + 8) + ' ' + y2;
+    }
+    function blurb(col, name, value) {
+      var amount = Math.round(value).toLocaleString() + ' events in the last 24 hours';
+      if (col === 'network' && /\/24$/.test(name)) return 'CIDR ' + name + '. ' + amount + '. Click to filter the panels below.';
+      if (col === 'network') return name + ' is a host name, not an IP address, so it is not grouped into a CIDR. ' + amount + '. Click to filter the panels below.';
+      if (col === 'category') return name + '. Click to expand its CIDR ranges and ingest paths. ' + amount + '.';
+      return name + '. ' + amount + '. Click to filter the panels below.';
+    }
+    var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%">';
+    for (var stage = 0; stage < columns.length - 1; stage++) {
+      var links = {}, hotLinks = {};
+      rows.forEach(function (row) {
+        var from = row[columns[stage]] || 'unknown';
+        var to = row[columns[stage + 1]] || 'unknown';
+        if (pos[stage][from] === undefined || pos[stage + 1][to] === undefined) return;
+        var key = from + '\n' + to;
+        var amount = Number(row[valueKey]) || 0;
+        links[key] = (links[key] || 0) + amount;
+        if (hotRow(row)) hotLinks[key] = (hotLinks[key] || 0) + amount;
+      });
+      var amounts = Object.keys(links).map(function (key) { return links[key]; });
+      var max = Math.max.apply(null, amounts.concat([1]));
+      Object.keys(links).forEach(function (key) {
+        var parts = key.split('\n');
+        var hot = !!hotLinks[key];
+        var opacity = !keys.length ? '0.45' : (hot ? '0.95' : '0.12');
+        svg += '<path d="' + curve(stage, pos[stage][parts[0]], pos[stage + 1][parts[1]])
+          + '" stroke="#58a6ff" stroke-opacity="' + opacity + '" stroke-width="'
+          + Math.max(1.5, links[key] / max * 14) + '" fill="none"><title>'
+          + esc(parts[0] + ' → ' + parts[1] + ', ' + Math.round(links[key]).toLocaleString() + ' events')
+          + '</title></path>';
+      });
+    }
+    names.forEach(function (list, stage) {
+      svg += '<text x="' + (colWidth * stage + 8) + '" y="18" fill="#8b949e" font-size="11">' + esc(headers[stage] || columns[stage]) + '</text>';
+      list.forEach(function (name) {
+        var onPath = !keys.length || rows.some(function (row) {
+          return hotRow(row) && (row[columns[stage]] || 'unknown') === name;
+        });
+        var chosen = selected[columns[stage]] === name;
+        var fill = chosen ? '#58a6ff' : (onPath ? '#e6edf3' : '#6e7681');
+        var shown = name.length > 28 ? name.slice(0, 26) + '…' : name;
+        var tip = blurb(columns[stage], name, stages[stage][name] || 0);
+        var attr = encodeURIComponent(columns[stage] + '\n' + name);
+        svg += '<g data-node="' + attr + '">';
+        svg += '<title>' + esc(tip) + '</title>';
+        svg += '<text x="' + (colWidth * stage + 8) + '" y="' + (pos[stage][name] + 4) + '" fill="' + fill
+          + '" font-size="12"' + (onPath && keys.length ? ' font-weight="700"' : '') + ' style="cursor:pointer">'
+          + esc(shown) + '</text></g>';
+      });
+    });
+    svg += '</svg>';
+    el(node, svg);
+    Array.prototype.forEach.call(node.querySelectorAll('g[data-node]'), function (group) {
+      var parts = decodeURIComponent(group.getAttribute('data-node')).split('\n');
+      var col = parts[0];
+      var name = parts.slice(1).join('\n');
+      var tip = group.querySelector('title');
+      group.addEventListener('mouseover', function () { if (onHover && tip) onHover(tip.textContent); });
+      group.addEventListener('click', function () { if (onPick) onPick(col, name); });
+    });
+  }
+
+  function compact(value) {
+    var n = Number(value) || 0;
+    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 10000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+    return Math.round(n).toLocaleString();
+  }
+
+  function mono(name) {
+    var parts = String(name).replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/);
+    if (parts.length >= 2 && parts[1]) return (parts[0].charAt(0) + parts[1].charAt(0)).toUpperCase();
+    var letters = String(name).replace(/[^A-Za-z0-9]/g, '');
+    return (letters.slice(0, 2) || '•').toUpperCase();
+  }
+
+  function tint(name) {
+    var palette = ['#3dd6c6', '#4c8dff', '#7c5cff', '#3fb950', '#d29922', '#f778ba', '#79c0ff', '#ff7b72'];
+    var hash = 0;
+    for (var i = 0; i < name.length; i++) hash = (hash + name.charCodeAt(i) * (i + 1)) % palette.length;
+    return palette[hash];
+  }
+
+  function rollup(rows, key, totalKey) {
+    var map = {};
+    rows.forEach(function (row) {
+      var name = row[key] || 'unknown';
+      if (!map[name]) map[name] = { events: 0, total: 0 };
+      map[name].events += Number(row.events) || 0;
+      var total = Number(totalKey ? row[totalKey] : 0) || 0;
+      if (total > map[name].total) map[name].total = total;
+    });
+    return Object.keys(map).map(function (name) {
+      return { name: name, events: map[name].total || map[name].events };
+    }).sort(function (a, b) { return b.events - a.events; });
+  }
+
+  function flowFan(node, rows, selected, onPick, onHover, view) {
+    if (!rows.length) { node.innerHTML = '<p class="note">No sources sent data in this window.</p>'; return; }
+    selected = selected || {};
+    view = view || {};
+    var hostLimit = view.hostLimit || 8;
+    var sourceLimit = view.sourceLimit || 8;
+    var indexLimit = view.indexLimit || 5;
+    var hosts = rollup(rows, 'data_source', view.hostTotal);
+    var sources = rollup(rows, 'endpoint', view.sourceTotal);
+    var indexes = rollup(rows, 'splunk_index', view.indexTotal);
+    var methods = rollup(rows, 'ingest_method', view.methodTotal);
+    var methodOrder = ['UF', 'HF', 'HEC', 'SC4S', 'Edge Processor', 'Syslog', 'NetFlow / IPFIX', 'Other TCP', 'Other'];
+    methods.sort(function (a, b) {
+      var ia = methodOrder.indexOf(a.name); if (ia < 0) ia = 20;
+      var ib = methodOrder.indexOf(b.name); if (ib < 0) ib = 20;
+      if (ia !== ib) return ia - ib;
+      return b.events - a.events;
+    });
+    function take(list, limit, pin) {
+      var shown = list.slice(0, limit);
+      if (!pin) return shown;
+      list.forEach(function (item) {
+        if (item.name === pin && !shown.some(function (kept) { return kept.name === pin; })) shown.push(item);
+      });
+      return shown;
+    }
+    var showHosts = take(hosts, hostLimit, view.pinHost);
+    var hostExtra = hosts.length - showHosts.length;
+    var hostNames = showHosts.map(function (item) { return item.name; });
+    if (selected.host && selected.host !== '__more__' && hostNames.indexOf(selected.host) < 0) {
+      showHosts = showHosts.concat([{ name: selected.host, events: 0 }]);
+    }
+    var showSources = take(sources, sourceLimit, view.pinSource);
+    var sourceExtra = sources.length - showSources.length;
+    var sourceNames = showSources.map(function (item) { return item.name; });
+    if (selected.endpoint && selected.endpoint !== '__more__' && sourceNames.indexOf(selected.endpoint) < 0) {
+      showSources = showSources.concat([{ name: selected.endpoint, events: 0 }]);
+    }
+    var right = take(indexes, indexLimit, view.pinIndex);
+    if (selected.index && !right.some(function (item) { return item.name === selected.index; })) {
+      right = right.concat([{ name: selected.index, events: 0 }]);
+    }
+    var rowH = 46;
+    var nHost = showHosts.length + (hostExtra > 0 ? 1 : 0);
+    var nSource = showSources.length + (sourceExtra > 0 ? 1 : 0);
+    var body = Math.max(nHost, methods.length, nSource, right.length, 4) * rowH;
+    var height = 96 + body;
+    var listTop = 100;
+    var gutter = 64;
+    var hostRoom = 96;
+    showHosts.forEach(function (item) { hostRoom = Math.max(hostRoom, labelPx(item.name) + 8); });
+    if (hostExtra > 0) hostRoom = Math.max(hostRoom, labelPx('+' + hostExtra) + 8);
+    hostRoom = Math.min(hostRoom, 320);
+    var methodRoom = 88;
+    methods.forEach(function (item) { methodRoom = Math.max(methodRoom, labelPx(item.name) + 8); });
+    methodRoom = Math.min(methodRoom, 220);
+    var sourceRoom = 96;
+    showSources.forEach(function (item) { sourceRoom = Math.max(sourceRoom, labelPx(item.name) + 8); });
+    if (sourceExtra > 0) sourceRoom = Math.max(sourceRoom, labelPx('+' + sourceExtra) + 8);
+    sourceRoom = Math.min(sourceRoom, 320);
+    var indexRoom = 88;
+    right.forEach(function (item) { indexRoom = Math.max(indexRoom, labelPx(item.name) + 8); });
+    indexRoom = Math.min(indexRoom, 280);
+    var hostLabelX = 42;
+    var methX = hostLabelX + hostRoom + gutter;
+    var methLabelX = methX + 16;
+    var srcX = methLabelX + methodRoom + gutter;
+    var srcLabelX = srcX + 34;
+    var idxX = srcLabelX + sourceRoom + gutter;
+    var idxLabelX = idxX + 16;
+    var width = Math.max(1100, idxLabelX + indexRoom + 24);
+    function yAt(i, count) {
+      var start = listTop + Math.max(0, body - count * rowH) / 2;
+      return start + i * rowH + 10;
+    }
+    var hostY = {}, methY = {}, srcY = {}, idxY = {};
+    showHosts.forEach(function (item, i) { hostY[item.name] = yAt(i, nHost); });
+    methods.forEach(function (item, i) { methY[item.name] = yAt(i, methods.length); });
+    showSources.forEach(function (item, i) { srcY[item.name] = yAt(i, nSource); });
+    right.forEach(function (item, i) { idxY[item.name] = yAt(i, right.length); });
+    function choosing() { return !!(selected.endpoint || selected.ingest || selected.index || selected.network || selected.host); }
+    function hotRow(row) {
+      if (!choosing()) return true;
+      var source = row.endpoint || 'unknown';
+      var host = row.data_source || 'unknown';
+      if (selected.endpoint === '__more__') return sourceNames.indexOf(source) < 0;
+      if (selected.host === '__more__') return hostNames.indexOf(host) < 0;
+      if (selected.endpoint && source !== selected.endpoint) return false;
+      if (selected.host && host !== selected.host) return false;
+      if (selected.network && (row.network || 'unknown') !== selected.network) return false;
+      if (selected.ingest && (row.ingest_method || 'Other') !== selected.ingest) return false;
+      if (selected.index && (row.splunk_index || 'unknown') !== selected.index) return false;
+      return true;
+    }
+    function addLink(bucket, key, amount, hot, host) {
+      if (!bucket[key]) bucket[key] = { events: 0, hot: 0, hosts: {} };
+      bucket[key].events += amount;
+      if (hot) bucket[key].hot += amount;
+      bucket[key].hosts[host] = (bucket[key].hosts[host] || 0) + amount;
+    }
+    function remember(bag, name, host, amount) {
+      if (!bag[name]) bag[name] = {};
+      bag[name][host] = (bag[name][host] || 0) + amount;
+    }
+    function dominant(bag) {
+      var best = '';
+      var bestN = -1;
+      Object.keys(bag || {}).forEach(function (name) {
+        if (bag[name] > bestN) { best = name; bestN = bag[name]; }
+      });
+      return best;
+    }
+    var hostLinks = {}, methodLinks = {}, indexLinks = {};
+    var methodHosts = {}, sourceHosts = {}, indexHosts = {};
+    var hotIngest = {}, hotSource = {}, hotIndex = {};
+    rows.forEach(function (row) {
+      var host = row.data_source || 'unknown';
+      var method = row.ingest_method || 'Other';
+      var source = row.endpoint || 'unknown';
+      var index = row.splunk_index || 'unknown';
+      var amount = Number(row.events) || 0;
+      var hot = hotRow(row);
+      remember(methodHosts, method, host, amount);
+      remember(sourceHosts, source, host, amount);
+      remember(indexHosts, index, host, amount);
+      if (hot) { hotIngest[method] = 1; hotSource[source] = 1; hotIndex[index] = 1; }
+      if (hostY[host] !== undefined && methY[method] !== undefined) addLink(hostLinks, host + '\n' + method, amount, hot, host);
+      if (methY[method] !== undefined && srcY[source] !== undefined) addLink(methodLinks, method + '\n' + source, amount, hot, host);
+      if (srcY[source] !== undefined && idxY[index] !== undefined) addLink(indexLinks, source + '\n' + index, amount, hot, host);
+    });
+    function chosenHost() {
+      return selected.host && selected.host !== '__more__' ? selected.host : '';
+    }
+    function pathColor(feeding, hot) {
+      var host = chosenHost();
+      if (host) return hot ? tint(host) : '#6e7681';
+      if (choosing() && !hot) return '#6e7681';
+      return feeding ? tint(feeding) : '#8b949e';
+    }
+    function linkMax(links) {
+      var max = 1;
+      Object.keys(links).forEach(function (key) { if (links[key].events > max) max = links[key].events; });
+      return max;
+    }
+    function curve(x1, y1, x2, y2) {
+      var mid = (x1 + x2) / 2;
+      return 'M ' + x1 + ' ' + y1 + ' C ' + mid + ' ' + y1 + ', ' + mid + ' ' + y2 + ', ' + x2 + ' ' + y2;
+    }
+    function drawLinks(links, y1, y2, x1, x2, fromCol, toCol) {
+      var max = linkMax(links);
+      Object.keys(links).forEach(function (key) {
+        var parts = key.split('\n');
+        var hot = links[key].hot > 0;
+        var dim = choosing() && !hot;
+        var color = pathColor(dominant(links[key].hosts), hot);
+        var opacity = dim ? '0.12' : '0.75';
+        svg += '<path class="flow-link" data-from="' + encodeURIComponent(fromCol + '\n' + parts[0])
+          + '" data-to="' + encodeURIComponent(toCol + '\n' + parts[1])
+          + '" data-rest="' + opacity + '" data-stroke="' + color + '" d="' + curve(x1, y1[parts[0]], x2, y2[parts[1]])
+          + '" stroke="' + color + '" stroke-width="'
+          + Math.max(1.2, links[key].events / max * 4).toFixed(2)
+          + '" stroke-opacity="' + opacity + '" fill="none"/>';
+      });
+    }
+    var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%" style="min-width:' + width + 'px" role="img">';
+    svg += '<text x="8" y="42" fill="#e6edf3" font-size="32" font-weight="700">' + esc(compact(hosts.length)) + '</text>';
+    var headers = view.headers || ['HOSTS', 'INGESTION PATH', 'SOURCETYPE', 'INDEX'];
+    svg += '<text x="8" y="62" fill="#8b949e" font-size="11">' + esc(headers[0]) + '</text>';
+    svg += '<text x="' + methLabelX + '" y="62" fill="#8b949e" font-size="11">' + esc(headers[1]) + '</text>';
+    svg += '<text x="' + srcLabelX + '" y="62" fill="#8b949e" font-size="11">' + esc(headers[2]) + '</text>';
+    svg += '<text x="' + idxLabelX + '" y="62" fill="#8b949e" font-size="11">' + esc(headers[3]) + '</text>';
+    drawLinks(hostLinks, hostY, methY, hostLabelX + hostRoom + 6, methX - 12, 'host', 'ingest_method');
+    drawLinks(methodLinks, methY, srcY, methLabelX + methodRoom + 6, srcX - 12, 'ingest_method', 'endpoint');
+    drawLinks(indexLinks, srcY, idxY, srcLabelX + sourceRoom + 6, idxX - 12, 'endpoint', 'splunk_index');
+    showHosts.forEach(function (item) {
+      var y = hostY[item.name];
+      var color = tint(item.name);
+      var on = selected.host === item.name;
+      var fitted = fitText(item.name, hostRoom);
+      svg += '<g data-node="' + encodeURIComponent('host\n' + item.name) + '" style="cursor:pointer">';
+      var hostTip = view.hostTitle ? view.hostTitle(item) : ('Host ' + item.name + '. ' + Math.round(item.events).toLocaleString() + ' events in the last 24 hours. Click to follow this host through its ingestion path.');
+      svg += '<title>' + esc(hostTip) + '</title>';
+      svg += '<rect x="8" y="' + (y - 14) + '" width="26" height="26" rx="6" fill="' + color + '" fill-opacity="0.18" stroke="' + color + '"/>';
+      svg += '<text x="21" y="' + (y + 4) + '" text-anchor="middle" fill="' + color + '" font-size="10" font-weight="700">' + esc(mono(item.name)) + '</text>';
+      svg += '<text x="' + hostLabelX + '" y="' + (y + 4) + '" fill="' + (on ? color : '#e6edf3') + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
+      svg += '</g>';
+    });
+    if (hostExtra > 0) {
+      var yHostMore = yAt(showHosts.length, nHost);
+      var moreHost = fitText('+' + hostExtra, hostRoom);
+      svg += '<g data-node="' + encodeURIComponent('host\n__more__') + '" style="cursor:pointer">';
+      svg += '<title>' + esc('+' + hostExtra + ' hosts are not drawn. Click to load them below.') + '</title>';
+      svg += '<text x="' + hostLabelX + '" y="' + (yHostMore + 4) + '" fill="' + (selected.host === '__more__' ? '#3dd6c6' : '#8b949e') + '" font-size="' + moreHost.size + '" font-weight="700">' + esc(moreHost.text) + '</text>';
+      svg += '</g>';
+    }
+    methods.forEach(function (item) {
+      var y = methY[item.name];
+      var hot = !!hotIngest[item.name];
+      var color = pathColor(dominant(methodHosts[item.name]), hot);
+      var on = selected.ingest === item.name || (!!chosenHost() && hot);
+      var fitted = fitText(item.name, methodRoom);
+      svg += '<g data-node="' + encodeURIComponent('ingest_method\n' + item.name) + '" style="cursor:pointer">';
+      var methodTip = view.methodTitle ? view.methodTitle(item) : ('Ingestion path ' + item.name + '. ' + Math.round(item.events).toLocaleString() + ' events. Click to filter this path.');
+      svg += '<title>' + esc(methodTip) + '</title>';
+      svg += '<circle cx="' + methX + '" cy="' + y + '" r="5" fill="' + color + '"/>';
+      svg += '<text x="' + methLabelX + '" y="' + (y - 2) + '" fill="' + color + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
+      svg += '<text x="' + methLabelX + '" y="' + (y + 16) + '" fill="' + (hot ? color : '#8b949e') + '" font-size="11">' + esc(compact(item.events)) + '</text>';
+      svg += '</g>';
+    });
+    showSources.forEach(function (item) {
+      var y = srcY[item.name];
+      var hot = !!hotSource[item.name];
+      var color = pathColor(dominant(sourceHosts[item.name]), hot);
+      var on = selected.endpoint === item.name || (!!chosenHost() && hot);
+      var fitted = fitText(item.name, sourceRoom);
+      svg += '<g data-node="' + encodeURIComponent('endpoint\n' + item.name) + '" style="cursor:pointer">';
+      var sourceTip = view.sourceTitle ? view.sourceTitle(item) : (item.name + '. ' + Math.round(item.events).toLocaleString() + ' events. A known product keeps its name; otherwise this is the sourcetype. Click to follow it to the index.');
+      svg += '<title>' + esc(sourceTip) + '</title>';
+      svg += '<rect x="' + srcX + '" y="' + (y - 14) + '" width="26" height="26" rx="6" fill="' + color + '" fill-opacity="0.18" stroke="' + color + '"/>';
+      svg += '<text x="' + (srcX + 13) + '" y="' + (y + 4) + '" text-anchor="middle" fill="' + color + '" font-size="10" font-weight="700">' + esc(mono(item.name)) + '</text>';
+      svg += '<text x="' + srcLabelX + '" y="' + (y + 4) + '" fill="' + color + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
+      svg += '</g>';
+    });
+    if (sourceExtra > 0) {
+      var ySourceMore = yAt(showSources.length, nSource);
+      var moreSource = fitText('+' + sourceExtra, sourceRoom);
+      svg += '<g data-node="' + encodeURIComponent('endpoint\n__more__') + '" style="cursor:pointer">';
+      svg += '<title>' + esc('+' + sourceExtra + ' sourcetypes are not drawn. Click to load them below.') + '</title>';
+      svg += '<text x="' + srcLabelX + '" y="' + (ySourceMore + 4) + '" fill="' + (selected.endpoint === '__more__' ? '#3dd6c6' : '#8b949e') + '" font-size="' + moreSource.size + '" font-weight="700">' + esc(moreSource.text) + '</text>';
+      svg += '</g>';
+    }
+    right.forEach(function (item) {
+      var y = idxY[item.name];
+      var hot = !!hotIndex[item.name];
+      var color = pathColor(dominant(indexHosts[item.name]), hot);
+      var on = selected.index === item.name || (!!chosenHost() && hot);
+      var fitted = fitText(item.name, indexRoom);
+      svg += '<g data-node="' + encodeURIComponent('splunk_index\n' + item.name) + '" style="cursor:pointer">';
+      var indexTip = view.indexTitle ? view.indexTitle(item) : ('Index ' + item.name + '. ' + Math.round(item.events).toLocaleString() + ' events. Click to filter the flow.');
+      svg += '<title>' + esc(indexTip) + '</title>';
+      svg += '<circle cx="' + idxX + '" cy="' + y + '" r="5" fill="' + color + '"/>';
+      svg += '<text x="' + idxLabelX + '" y="' + (y - 2) + '" fill="' + color + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
+      svg += '<text x="' + idxLabelX + '" y="' + (y + 16) + '" fill="' + (hot ? color : '#8b949e') + '" font-size="11">' + esc(compact(item.events)) + '</text>';
+      svg += '</g>';
+    });
+    svg += '</svg>';
+    node.innerHTML = '<div class="chart fan">' + svg + '</div>';
+    var field = { host: 'data_source', ingest_method: 'ingest_method', endpoint: 'endpoint', splunk_index: 'splunk_index' };
+    function nodeKey(col, name) { return col + '\n' + name; }
+    function restoreFlow() {
+      Array.prototype.forEach.call(node.querySelectorAll('path.flow-link'), function (path) {
+        path.setAttribute('stroke', path.getAttribute('data-stroke'));
+        path.setAttribute('stroke-opacity', path.getAttribute('data-rest'));
+      });
+      Array.prototype.forEach.call(node.querySelectorAll('g[data-node]'), function (group) {
+        group.setAttribute('opacity', '1');
+      });
+    }
+    function highlightFlow(col, name) {
+      if (!name || name === '__more__' || !field[col]) { restoreFlow(); return; }
+      var keep = {};
+      rows.forEach(function (row) {
+        var host = row.data_source || 'unknown';
+        var method = row.ingest_method || 'Other';
+        var source = row.endpoint || 'unknown';
+        var index = row.splunk_index || 'unknown';
+        var value = { host: host, ingest_method: method, endpoint: source, splunk_index: index }[col];
+        if (value !== name) return;
+        keep[nodeKey('host', host)] = 1;
+        keep[nodeKey('ingest_method', method)] = 1;
+        keep[nodeKey('endpoint', source)] = 1;
+        keep[nodeKey('splunk_index', index)] = 1;
+      });
+      var color = tint(name);
+      Array.prototype.forEach.call(node.querySelectorAll('path.flow-link'), function (path) {
+        var from = decodeURIComponent(path.getAttribute('data-from'));
+        var to = decodeURIComponent(path.getAttribute('data-to'));
+        var hot = keep[from] && keep[to];
+        path.setAttribute('stroke', hot ? color : '#2d3a4f');
+        path.setAttribute('stroke-opacity', hot ? '0.95' : '0.08');
+      });
+      Array.prototype.forEach.call(node.querySelectorAll('g[data-node]'), function (group) {
+        var key = decodeURIComponent(group.getAttribute('data-node'));
+        var parts = key.split('\n');
+        var hot = parts[1] !== '__more__' && keep[key];
+        group.setAttribute('opacity', hot ? '1' : '0.18');
+      });
+    }
+    var fan = node.querySelector('.fan');
+    if (fan) fan.addEventListener('mouseleave', restoreFlow);
+    Array.prototype.forEach.call(node.querySelectorAll('g[data-node]'), function (group) {
+      var parts = decodeURIComponent(group.getAttribute('data-node')).split('\n');
+      var col = parts[0];
+      var name = parts.slice(1).join('\n');
+      var tip = group.querySelector('title');
+      group.addEventListener('mouseover', function () {
+        highlightFlow(col, name);
+        if (onHover && tip) onHover(tip.textContent);
+      });
+      group.addEventListener('click', function () { if (onPick) onPick(col, name); });
+    });
+  }
+
+  return { line: line, pie: pie, flow: flow, topology: topology, sourceFan: flowFan };
 })();

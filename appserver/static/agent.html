@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.75">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>Derek+ Data Quality Agent</h1>
-    <p class="tagline">Click a row to select it and ask the saved AI provider for a suggested fix. Click Approve or Dismiss in the row to record the decision. The app never changes Splunk.</p>
-    <div class="hero-meta"><a id="home" href="#">Summary</a><span>·</span><a id="setup" href="#">AI provider setup</a></div>
+    <p class="tagline">Click a row to select it and ask the saved AI provider for a suggested fix. When a provider is saved, it also checks the sample config and the fix check. If the suggestion is to open a support ticket, Generate fills a ticket you can copy. Click Approve or Dismiss in the row to record the decision. The app never changes Splunk and never files the ticket.</p>
+    <div class="hero-meta"><a id="home" href="#">Executive overview</a><span>·</span><a id="setup" href="#">AI provider setup</a></div>
   </div>
   <div class="controls">
     <label class="fld">Filter<input id="filter" value="all" maxlength="64"></label>
@@ -18,24 +18,118 @@
     <span class="note" id="status"></span>
   </div>
   <div class="stats-row" id="stats"></div>
-  <div class="section"><h2 class="section-title">Work queue — click a row, or Approve / Dismiss in the row</h2><div id="queue"></div></div>
-  <div class="section"><h2 class="section-title">Selected suggestion</h2><div id="selected"></div></div>
-  <div class="section"><h2 class="section-title">Sample config and fix check</h2><div id="sample"></div></div>
-  <div class="section"><h2 class="section-title">AI suggested fix</h2><div id="replies"><p class="note">Click a row in the work queue.</p></div></div>
-  <div class="section"><h2 class="section-title">Recorded decision</h2><div id="recorded"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Open problems. Click a row to ask the saved AI provider. Click Approve or Dismiss in that row to record your decision. Closed rows do nothing. The app does not change Splunk.">Work queue — click a row, or Approve / Dismiss in the row</h2><div id="queue"></div></div>
+  <div class="section"><h2 class="section-title" data-help="The problem you clicked, with the evidence stored for it.">Selected suggestion</h2><div id="selected"></div></div>
+  <div class="section"><h2 class="section-title" data-help="A sample of the config to change, plus a check you can run on the host and a check you can run in Splunk. If an AI provider is saved, it checks the sample and both checks. Nothing is applied.">Sample config and fix check</h2><p class="note check" id="sampleCheck">Select a row. If an AI provider is saved, it validates the sample and the fix check.</p><div id="sample"></div></div>
+  <div class="section"><h2 class="section-title" data-help="The provider's reply for the row you clicked. Click the Fix cell in the queue to ask again. Leave the key blank on the setup page to keep the key already saved.">AI suggested fix</h2><div id="replies"><p class="note">Click a row in the work queue.</p></div></div>
+  <div class="section" id="ticketSection" hidden>
+    <h2 class="section-title" data-help="A ticket you can copy when the suggestion says to open one with Splunk. Generate fills it from this finding. Copy puts it on the clipboard. Nothing is filed.">Support ticket</h2>
+    <p class="note">The suggestion is to open a Splunk support ticket. Generate fills the template from this finding. Copy it. Nothing is sent.</p>
+    <button class="btn" id="ticketBtn" type="button">Generate support ticket</button>
+    <button class="btn secondary" id="copyTicket" type="button">Copy</button>
+    <span class="note" id="ticketNote"></span>
+    <textarea class="ticket" id="ticket" readonly spellcheck="false"></textarea>
+  </div>
+  <div class="section"><h2 class="section-title" data-help="The Approve or Dismiss stored for this problem, and when it was recorded.">Recorded decision</h2><div id="recorded"></div></div>
   <div class="section">
-    <h2 class="section-title">All AI suggestions</h2>
+    <h2 class="section-title" data-help="Every AI reply saved for the queue. Use the button to hide the list. The API key is never included.">All AI suggestions</h2>
     <button class="btn secondary" id="toggle">Hide the list</button>
     <div id="list"></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.75"></script>
 <script>
 (function () {
   Health.link('home', 'executive_overview');
   Health.link('setup', 'ai_provider_setup');
   var current = null;
+  var detail = null;
+  var sampleRows = [];
+  var aiReady = false;
   var listShown = true;
+
+  function markerMap(text) {
+    var found = {};
+    String(text || '').split('\n').forEach(function (line) {
+      var match = line.match(/^(SAMPLE_CHECK|FIX_CHECK|SUPPORT_TICKET):\s*(pass|fail|yes|no)\b\s*(.*)$/i);
+      if (match) found[match[1].toUpperCase()] = { value: match[2].toLowerCase(), note: match[3].replace(/^[\s\-—:]+/, '') };
+    });
+    return found;
+  }
+
+  function sampleLine(part) {
+    var hit = sampleRows.filter(function (row) { return row.part === part; })[0];
+    return hit ? hit.text : '';
+  }
+
+  function wantsTicket(markers, texts) {
+    if (markers.SUPPORT_TICKET) return markers.SUPPORT_TICKET.value === 'yes';
+    return /support ticket|splunk support|open a (support )?(case|ticket)|raise this with splunk/i.test(texts.join('\n'));
+  }
+
+  function localTicket() {
+    var row = detail || {};
+    var date = new Date().toISOString().slice(0, 10);
+    var search = sampleLine('Check in Splunk');
+    var evidence = row.evidence || 'not measured';
+    var lines = [
+      '## Subject',
+      (row.issue || 'Splunk health finding') + ' — ' + (row.entity || 'environment'),
+      '',
+      '## Environment',
+      'Search head running Splunk Health Derek+. Entity: ' + (row.entity || 'not recorded') + '.',
+      '',
+      '## Summary',
+      [row.issue, row.likely_cause, row.suggested_fix].filter(Boolean).join('. '),
+      '',
+      '## Estate evidence (health finding on this search head, ' + date + ', 1 finding)',
+      evidence,
+      search ? search : 'No sample search applies.',
+      '',
+      '## Measured effect (evidence stored with the finding, last 24 hours, this entity)',
+      evidence,
+      '',
+      '## Documentation we relied on',
+      'Derek+ playbook ' + (row.playbook_name || 'not recorded') + '. ' + (row.where_to_act || ''),
+      '',
+      '## Questions for Splunk',
+      'Does this match a known product issue, and what should we collect or change next?',
+      '',
+      '## Impact',
+      (row.severity || 'Unrated') + ' on ' + (row.entity || 'the environment') + '.',
+      '',
+      '## What we have not verified',
+      'This draft uses the health finding only. Counts in the headings are this finding, not a separate estate recount.'
+    ];
+    return lines.join('\n');
+  }
+
+  function showChecks(markers, state) {
+    var el = document.getElementById('sampleCheck');
+    if (!aiReady || state === 'off') {
+      el.textContent = 'The AI provider is not saved, so the sample config and fix check were not validated.';
+      return;
+    }
+    if (state !== 'done') {
+      el.textContent = 'Asking the AI to validate the sample config and the fix check.';
+      return;
+    }
+    function line(label, item) {
+      if (!item) return label + ': not returned. Click the Fix cell to ask again.';
+      return label + ': ' + item.value + (item.note ? ' — ' + item.note : '');
+    }
+    el.textContent = line('Sample config', markers.SAMPLE_CHECK) + '\n' + line('Fix check', markers.FIX_CHECK);
+  }
+
+  function showTicket(markers, texts) {
+    var section = document.getElementById('ticketSection');
+    var wanted = wantsTicket(markers, texts);
+    section.hidden = !wanted;
+    if (!wanted) {
+      document.getElementById('ticket').value = '';
+      document.getElementById('ticketNote').textContent = '';
+    }
+  }
 
   function params() {
     return { tok_ask: (document.getElementById('filter').value || 'all').toLowerCase() };
@@ -69,21 +163,66 @@
 
   function showSelection(row) {
     var find = { tok_finding_id: row.finding_ref, tok_cell: 'none', tok_row_status: row.status };
-    Health.query('agent_selected', find).then(function (rows) { Health.table(document.getElementById('selected'), rows); });
-    Health.query('agent_sample', { tok_finding_id: row.finding_ref }).then(function (rows) { Health.table(document.getElementById('sample'), rows); });
+    detail = null;
+    sampleRows = [];
+    Health.query('agent_selected', find).then(function (rows) {
+      detail = rows[0] || null;
+      Health.table(document.getElementById('selected'), rows);
+      showTicket({}, [row.fix, sampleLine('Splunk Cloud'), detail && detail.suggested_fix]);
+    });
+    Health.query('agent_sample', { tok_finding_id: row.finding_ref }).then(function (rows) {
+      sampleRows = rows;
+      Health.table(document.getElementById('sample'), rows);
+      showTicket({}, [row.fix, sampleLine('Splunk Cloud'), detail && detail.suggested_fix]);
+    });
     Health.query('agent_recorded', find).then(function (rows) { Health.table(document.getElementById('recorded'), rows); });
   }
 
   function ask(row, again) {
     document.getElementById('replies').innerHTML = '<p class="note">Asking the saved provider…</p>';
+    showChecks({}, false);
     Health.act('ask', {
       tok_ai_ask: 'ask', tok_cell: again ? 'fix' : 'none', tok_finding_id: row.finding_ref,
       tok_entity: row.entity || 'none', tok_issue: row.issue || 'none', tok_ai_brief: row.ai_brief_text || 'none'
     }).then(function () {
       return Health.query('agent_replies', { tok_finding_id: row.finding_ref, tok_ai_ask: 'ask' });
     }).then(function (rows) {
+      var reply = (rows[0] && rows[0].ai_suggested_fix) || '';
+      var markers = markerMap(reply);
+      if (rows[0] && markers.SAMPLE_CHECK) {
+        rows[0].ai_suggested_fix = reply.split('\n').filter(function (line) {
+          return !/^(SAMPLE_CHECK|FIX_CHECK|SUPPORT_TICKET):/i.test(line);
+        }).join('\n').trim();
+      }
       Health.table(document.getElementById('replies'), rows);
+      var answered = rows[0] && (rows[0].from_ai && rows[0].from_ai !== 'none' || /could not answer|playbook fix/i.test(reply));
+      showChecks(markers, answered ? 'done' : 'waiting');
+      showTicket(markers, [reply, row.fix, sampleLine('Splunk Cloud'), detail && detail.suggested_fix]);
     }).catch(function (error) { Health.fail(document.getElementById('replies'), error); });
+  }
+
+  function generateTicket() {
+    var box = document.getElementById('ticket');
+    var note = document.getElementById('ticketNote');
+    note.textContent = '';
+    if (!current) return;
+    if (!aiReady) {
+      box.value = localTicket();
+      return;
+    }
+    box.value = 'Asking the saved provider to draft the ticket…';
+    Health.act('ticket', {
+      tok_ai_ask: 'ask', tok_finding_id: current.finding_ref,
+      tok_entity: current.entity || 'none', tok_issue: current.issue || 'none',
+      tok_ai_brief: current.ai_brief_text || 'none'
+    }).then(function (rows) {
+      var text = rows[0] && rows[0].ticket;
+      box.value = text && text !== 'none' ? text : localTicket();
+      if (!text || text === 'none') note.textContent = 'The provider did not return a ticket, so this draft uses the finding.';
+    }).catch(function () {
+      box.value = localTicket();
+      note.textContent = 'The provider could not be reached, so this draft uses the finding.';
+    });
   }
 
   function onRow(row, column) {
@@ -100,7 +239,27 @@
     ask(row, column === 'fix');
   }
 
+  document.getElementById('ticketBtn').addEventListener('click', generateTicket);
+  document.getElementById('copyTicket').addEventListener('click', function () {
+    var text = document.getElementById('ticket').value;
+    var note = document.getElementById('ticketNote');
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { note.textContent = 'Copied.'; }, function () {
+        document.getElementById('ticket').focus();
+        document.getElementById('ticket').select();
+        note.textContent = 'Select the ticket and copy it.';
+      });
+      return;
+    }
+    document.getElementById('ticket').focus();
+    document.getElementById('ticket').select();
+    note.textContent = 'Select the ticket and copy it.';
+  });
   document.getElementById('apply').addEventListener('click', reload);
+  Health.query('ai_current').then(function (rows) {
+    aiReady = !!(rows[0] && rows[0].ai_status === 'READY');
+  }).catch(function () { aiReady = false; });
   document.getElementById('toggle').addEventListener('click', function () {
     listShown = !listShown;
     this.textContent = listShown ? 'Hide the list' : 'Show the list';

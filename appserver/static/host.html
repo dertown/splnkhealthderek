@@ -3,31 +3,33 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.75">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>Host Heartbeat &amp; Instance Health</h1>
-    <p class="tagline">Whether each host is alive right now: last indexed data against its _internal heartbeat, ingestion latency over the last 15 minutes, and current volume against the 24-hour baseline.</p>
-    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+    <p class="tagline">Whether each host is alive right now. The fixed cutoff stays in place until a host has its own heartbeat gap. The last complete hour is compared with that same hour on earlier days.</p>
+    <div class="hero-meta"><a id="home" href="#">Executive overview</a></div>
   </div>
   <div class="controls">
     <label class="fld">Host filter<input id="host" value="*" pattern="[\w.:*\-]{1,128}"></label>
     <button class="btn" id="apply">Apply</button>
   </div>
   <div class="stats-row" id="stats"></div>
-  <div class="section"><h2 class="section-title">Last data received vs last internal heartbeat</h2><div id="phone"></div></div>
-  <div class="section"><h2 class="section-title">Ingestion latency, last 15 minutes (seconds)</h2><div id="latency"></div></div>
-  <div class="section"><h2 class="section-title">Current volume vs 24-hour baseline</h2><div id="baseline"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Compares the last event a host sent with the last time it phoned home on _internal. A host can be up and still not be sending data. This uses the same cutoff for every host.">Last data received vs last internal heartbeat</h2><div id="phone"></div></div>
+  <div class="section"><h2 class="section-title" data-help="The usual time between this host's _internal events over the last 7 days, and the gap since the last one. Quiet means the current gap is longer than that host's own pattern. Learning means there is not yet a day of history, so the fixed cutoff above still applies.">Heartbeat vs this host's usual gap</h2><div id="heartbeatBand"><p class="note">Loading each host's usual gap.</p></div></div>
+  <div class="section"><h2 class="section-title" data-help="Seconds between the event time and the index time, over the last 15 minutes. A host whose clock is ahead of the indexer is marked separately from one that is simply late.">Ingestion latency, last 15 minutes (seconds)</h2><div id="latency"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Events from this host right now, compared with its own previous 24 hours. The high and low lines are statistical. They are not a fixed number of gigabytes. A new host stays on this check until the same hour has been seen on 6 days.">Current volume vs 24-hour baseline</h2><div id="baseline"></div></div>
+  <div class="section"><h2 class="section-title" data-help="The last complete hour of indexed events, compared with that same hour on earlier days. Below means this hour is under that host's usual level and the host has at least 6 days of this hour. A host that is still phoning home on its usual cadence, with this hour below, is a stopped input rather than a dead host.">Last hour vs the same hour this week</h2><div id="hostSeason"><p class="note">Loading the same-hour baseline.</p></div></div>
   <div class="two">
-    <div class="section"><h2 class="section-title">Splunkd health by feature</h2><div id="features"></div></div>
-    <div class="section"><h2 class="section-title">Instance CPU and memory</h2><div id="intro"></div></div>
+    <div class="section"><h2 class="section-title" data-help="The health report Splunk already keeps for splunkd, one row per feature.">Splunkd health by feature</h2><div id="features"></div></div>
+    <div class="section"><h2 class="section-title" data-help="CPU and memory for this Splunk instance, from introspection.">Instance CPU and memory</h2><div id="intro"></div></div>
   </div>
-  <div class="section"><h2 class="section-title">Blocked ingestion queues</h2><div id="queues"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Ingestion queues that are blocked. A blocked queue stops data from moving through this instance.">Blocked ingestion queues</h2><div id="queues"></div></div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.56"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.75"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.75"></script>
 <script>
 (function () {
   Health.link('home', 'executive_overview');
@@ -52,6 +54,21 @@
       Health.table(document.getElementById('intro'), res[5]);
       Charts.line(document.getElementById('queues'), res[6], '_time', Object.keys(res[6][0] || {}).filter(function (key) { return key !== '_time' && key !== '_span' && key.charAt(0) !== '_'; }).slice(0, 6));
     }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
+    Health.query('heartbeat_learned', params).then(function (rows) {
+      Health.table(document.getElementById('heartbeatBand'), rows, [
+        { key: 'host', label: 'Host' }, { key: 'usual_gap', label: 'Usual gap' },
+        { key: 'current', label: 'Current gap' }, { key: 'bound', label: 'Flag after' },
+        { key: 'samples', label: 'Gaps seen' }, { key: 'heartbeat_band', label: 'Pattern' }
+      ]);
+    }, function (error) { Health.fail(document.getElementById('heartbeatBand'), error); });
+    Health.query('host_season', params).then(function (rows) {
+      Health.table(document.getElementById('hostSeason'), rows, [
+        { key: 'host', label: 'Host' }, { key: 'hour', label: 'Hour' },
+        { key: 'events', label: 'Events' }, { key: 'typical', label: 'Usual for this hour' },
+        { key: 'lower', label: 'Low line' }, { key: 'samples', label: 'Days' },
+        { key: 'season_state', label: 'This hour' }
+      ]);
+    }, function (error) { Health.fail(document.getElementById('hostSeason'), error); });
   }
   document.getElementById('apply').addEventListener('click', load);
   load();

@@ -2,9 +2,10 @@
 
 The browser asks for a search by name. The handler runs only the named searches in
 default/health_queries.json, as the signed-in user, and never SPL sent from the
-browser. A click can only run the four searches marked write=True (record a
-decision, ask the AI provider, save the AI config, test the connection). Nothing
-here changes Splunk configuration.
+browser. A click can only run the five searches marked write=True (record a
+decision, ask the AI provider, draft a support ticket, save the AI config, test
+the connection). Nothing here changes Splunk configuration, and the ticket is
+only text returned to the page.
 """
 from __future__ import annotations
 
@@ -24,6 +25,13 @@ logger = logging.getLogger("healthdash")
 PARAMS = {
     "host_filter": (r"^[\w.:*\-]{1,128}$", "*"),
     "tok_data_source": (r"^[\w.:\-]{1,128}$", "none"),
+    "tok_topo_category": (r"^(?:\*|Windows|Linux|Firewall|Other)$", "*"),
+    "tok_topo_network": (r"^(?:\*|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.0/24|[\w.:\-]{1,128})$", "*"),
+    "tok_topo_ingest": (r"^(?:\*|UF|HF|HEC|SC4S|Edge Processor|Syslog|NetFlow / IPFIX|Other TCP|Other|Universal Forwarder|Heavy Forwarder)$", "*"),
+    "tok_topo_index": (r"^(?:\*|Other indexes|[\w.:\-]{1,128})$", "*"),
+    "tok_topo_environment": (r"^(?:\*|Other sites|[0-9]{1,3}\.[0-9]{1,3}\.0\.0/16|[\w.:\-]{1,128})$", "*"),
+    "tok_topo_family": (r"^(?:\*|Other sourcetypes|[^\"\\`$\r\n|]{1,80})$", "*"),
+    "tok_topo_endpoint": (r"^(?:\*|[^\"\\`$\r\n|]{1,80})$", "*"),
     "tok_finding_id": (r"^(none|[a-fA-F0-9]{8,128})$", "none"),
     "tok_ask": (r"^[a-z0-9 ]{0,64}$", "all"),
     "tok_cell": (r"^(none|approve|dismiss|fix)$", "none"),
@@ -39,7 +47,7 @@ PARAMS = {
     "tok_cfg_save": (r"^save\|[a-z]*\|[A-Za-z0-9._-]*\|[0-9]+$", "save|||0"),
 }
 
-WRITES = {"decide", "ask", "save_config", "conn_test"}
+WRITES = {"decide", "ask", "ticket", "save_config", "conn_test"}
 TOKEN_RE = re.compile(r"\$([a-z_]+)\$")
 
 

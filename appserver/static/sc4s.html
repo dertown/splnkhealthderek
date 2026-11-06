@@ -3,33 +3,33 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.56">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.75">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>SC4S Syslog &amp; Edge/Ingest Processors</h1>
     <p class="tagline">Syslog volume per source, and Edge Processor traffic in against traffic out. Filter efficiency is the share of events that do not leave the processor.</p>
-    <div class="hero-meta"><a id="home" href="#">Summary</a></div>
+    <div class="hero-meta"><a id="home" href="#">Executive overview</a></div>
   </div>
   <div class="stats-row" id="stats"></div>
   <div class="two">
-    <div class="section"><h2 class="section-title">SC4S / syslog events</h2><div id="sc4s"></div></div>
-    <div class="section"><h2 class="section-title">Events reaching indexers</h2><div id="indexed"></div></div>
+    <div class="section"><h2 class="section-title" data-help="How much syslog SC4S received over the last few hours.">SC4S / syslog events</h2><div id="sc4s"></div></div>
+    <div class="section"><h2 class="section-title" data-help="How much of that data reached the indexers. A gap between the two charts is data that did not get indexed.">Events reaching indexers</h2><div id="indexed"></div></div>
   </div>
   <div class="two">
-    <div class="section"><h2 class="section-title">Events per syslog source</h2><div id="hosts"></div></div>
-    <div class="section"><h2 class="section-title">SC4S issues</h2><div id="errors"></div></div>
+    <div class="section"><h2 class="section-title" data-help="Syslog volume by the host or address that sent it.">Events per syslog source</h2><div id="hosts"></div></div>
+    <div class="section"><h2 class="section-title" data-help="Errors SC4S wrote to its own logs.">SC4S issues</h2><div id="errors"></div></div>
   </div>
-  <div class="section"><h2 class="section-title">Edge Processor in vs out</h2><div id="edge"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Events that entered the Edge Processor against events that left it. The share that does not leave is what the processor filtered.">Edge Processor in vs out</h2><div id="edge"></div></div>
   <div class="two">
-    <div class="section"><h2 class="section-title">Edge queue fill and export errors</h2><div id="queue"></div></div>
-    <div class="section"><h2 class="section-title">Edge / ingest logs</h2><div id="logs"></div></div>
+    <div class="section"><h2 class="section-title" data-help="How full the Edge Processor queues are, and errors while exporting data onward.">Edge queue fill and export errors</h2><div id="queue"></div></div>
+    <div class="section"><h2 class="section-title" data-help="Log lines from Edge Processor and ingest actions.">Edge / ingest logs</h2><div id="logs"></div></div>
   </div>
-  <div class="section"><h2 class="section-title">Blocked ingestion queues</h2><div id="blocked"></div></div>
+  <div class="section"><h2 class="section-title" data-help="Ingestion queues that are blocked. A blocked queue stops data from moving.">Blocked ingestion queues</h2><div id="blocked"></div></div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.56"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.56"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.75"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.75"></script>
 <script>
 (function () {
   Health.link('home', 'executive_overview');
