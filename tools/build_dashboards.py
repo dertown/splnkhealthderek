@@ -801,6 +801,9 @@ Q_TOPO_CLASSIFY = r"""
 | eval octets=split(host, ".")
 | eval o1=coalesce(tonumber(mvindex(octets,0)), -1), o2=coalesce(tonumber(mvindex(octets,1)), -1), o3=coalesce(tonumber(mvindex(octets,2)), -1), o4=coalesce(tonumber(mvindex(octets,3)), -1)
 | eval network=if(mvcount(octets)=4 AND o1>=0 AND o1<=255 AND o2>=0 AND o2<=255 AND o3>=0 AND o3<=255 AND o4>=0 AND o4<=255 AND match(host, "^[0-9.]+"), o1.".".o2.".".o3.".0/24", host)
+| eval labels=split(host, ".")
+| eval environment=case(match(host, "^[0-9.]+$") AND o1>=0 AND o2>=0, o1.".".o2.".0.0/16", mvcount(labels)>=3, mvindex(labels, -2).".".mvindex(labels, -1), 1=1, coalesce(host, "unknown"))
+| eval environment=substr(environment, 1, 80)
 | eval category=case(
     match(sourcetype, "(?i)paloalto|pan:traffic|pan:threat|cisco:asa|cisco:ftd|cisco:firepower|fortinet|fortigate|checkpoint|opsec|pfsense|netscreen|sonicwall|zscaler|meraki|iptables|juniper:firewall"), "Firewall",
     match(source, "(?i)paloalto|fortigate|cisco_asa|checkpoint|firepower"), "Firewall",
@@ -851,6 +854,8 @@ Q_TOPO_CLASSIFY = r"""
     1=1, coalesce(sourcetype, host, "unknown"))
 | eval endpoint=substr(endpoint, 1, 80)
 | eval endpoint_kind=if(endpoint==sourcetype OR endpoint==host, "sourcetype", "product")
+| eval family=case(endpoint_kind="product", endpoint, match(sourcetype, "^[A-Za-z0-9]+[:_]"), replace(sourcetype, "[:_].*", ""), 1=1, coalesce(sourcetype, "unknown"))
+| eval family=substr(family, 1, 40)
 """.strip()
 
 Q_TOPO_MAP = (
@@ -868,6 +873,76 @@ Q_TOPO_MAP = (
     + "\n| rename host as data_source, index as splunk_index"
     + "\n| eval _color_rank=3"
     + "\n| table endpoint, endpoint_kind, category, network, ingest_method, splunk_index, data_source, events, _color_rank"
+)
+
+# Estate summary. A site is the parent domain, or an IPv4 /16. A sourcetype family
+# is a known product, or the prefix before ":" or "_". The long tail is one
+# "Other" node so the counts still include it. The browser drills in from here.
+Q_TOPO_MACRO = (
+    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n"
+    + Q_TOPO_CLASSIFY
+    + "\n"
+    + r"""| eventstats sum(events) as env_total by environment
+| eventstats sum(events) as fam_total by family
+| eventstats sum(events) as idx_total by index
+| sort 0 -env_total environment
+| streamstats dc(environment) as env_rank
+| sort 0 -fam_total family
+| streamstats dc(family) as fam_rank
+| sort 0 -idx_total index
+| streamstats dc(index) as idx_rank
+| eval environment=if(env_rank<=8, environment, "Other sites")
+| eval family=if(fam_rank<=8, family, "Other sourcetypes")
+| eval splunk_index=if(idx_rank<=8, index, "Other indexes")
+| stats sum(events) as events by environment, ingest_method, family, splunk_index
+| eventstats sum(events) as env_events by environment
+| eventstats sum(events) as fam_events by family
+| eventstats sum(events) as idx_events by splunk_index
+| eventstats sum(events) as method_events by ingest_method
+| sort 0 -events
+| head 240
+| rename environment as data_source, family as endpoint
+| eval _color_rank=3
+| table data_source, ingest_method, endpoint, splunk_index, events, env_events, fam_events, idx_events, method_events, _color_rank
+"""
+)
+
+# One site, family, path, or index. "Other *" keeps everything outside the top
+# groups, using the same rank as the summary. The map then draws hosts.
+Q_TOPO_DETAIL = (
+    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n"
+    + Q_TOPO_CLASSIFY
+    + "\n"
+    + r"""| where ("$tok_topo_environment$"="*" OR "$tok_topo_environment$"="Other sites" OR environment="$tok_topo_environment$") AND ("$tok_topo_family$"="*" OR "$tok_topo_family$"="Other sourcetypes" OR family="$tok_topo_family$") AND ("$tok_topo_index$"="*" OR "$tok_topo_index$"="Other indexes" OR index="$tok_topo_index$") AND ("$tok_topo_ingest$"="*" OR ingest_method="$tok_topo_ingest$")
+| eventstats sum(events) as env_total by environment
+| eventstats sum(events) as fam_total by family
+| eventstats sum(events) as idx_total by index
+| sort 0 -env_total environment
+| streamstats dc(environment) as env_rank
+| sort 0 -fam_total family
+| streamstats dc(family) as fam_rank
+| sort 0 -idx_total index
+| streamstats dc(index) as idx_rank
+| where ("$tok_topo_environment$"!="Other sites" OR env_rank>8) AND ("$tok_topo_family$"!="Other sourcetypes" OR fam_rank>8) AND ("$tok_topo_index$"!="Other indexes" OR idx_rank>8)
+| eval endpoint=if(match(sourcetype, "(?i)^(wineventlog|xmlwineventlog)$"), coalesce(source, sourcetype), sourcetype)
+| eval endpoint=substr(coalesce(endpoint, "unknown"), 1, 80)
+| eval endpoint_kind="sourcetype"
+| stats sum(events) as events by endpoint, endpoint_kind, category, network, ingest_method, index, host
+| eventstats sum(events) as st_total by endpoint
+| sort 0 -st_total endpoint -events
+| streamstats count as st_host_rank by endpoint
+| where st_host_rank<=6
+| sort 0 -st_total -events
+| head 400
+| rename host as data_source, index as splunk_index
+| fields - st_total st_host_rank
+| eval _color_rank=3
+| table endpoint, endpoint_kind, category, network, ingest_method, splunk_index, data_source, events, _color_rank
+"""
 )
 
 Q_TOPO_FOCUS_TREND = (
@@ -2846,7 +2921,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.65"
+APP_VERSION = "1.7.71"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3168,6 +3243,114 @@ def render_savedsearches() -> str:
 
 
 
+# Indexes named in lookups/feed_catalog.csv. An empty catalog searches a name that
+# matches nothing, so these panels never fall through to every index.
+def _catalog_indexes(state_clause: str) -> str:
+    return (
+        '[ | inputlookup feed_catalog where kind="index" AND (' + state_clause + ') '
+        '| fields index '
+        '| appendpipe [ | stats count | where count=0 | eval index="__no_feed_catalog__" ] '
+        '| fields index | format ]'
+    )
+
+
+_FEED_STATES = 'expected_state="active" OR expected_state="catchall" OR expected_state="disabled_expected"'
+
+Q_FEED_CATALOG = (
+    "| tstats count max(_time) as last_epoch min(_time) as first_epoch where earliest=-30d@d latest=now "
+    + _catalog_indexes(_FEED_STATES)
+    + " by index sourcetype source\n"
+    + r"""| lookup feed_catalog index OUTPUT expected_sourcetype expected_state min_silence_minutes notes
+| where isnotnull(expected_state) AND expected_state!=""
+| append [
+    | inputlookup feed_catalog where kind="index"
+    | where expected_state="active" OR expected_state="catchall" OR expected_state="disabled_expected"
+    | eval is_stub=1
+    | table index is_stub
+]
+| eventstats count as n by index
+| where NOT (n>1 AND is_stub=1)
+| eventstats max(last_epoch) as index_last by index
+| lookup feed_catalog index OUTPUT expected_sourcetype expected_state min_silence_minutes notes
+| eval thr=tonumber(min_silence_minutes)
+| eval silent_min=if(isnotnull(last_epoch), round((now()-last_epoch)/60), null())
+| eval index_silent_min=if(isnotnull(index_last), round((now()-index_last)/60), null())
+| eval status=case(expected_state="catchall", "catch-all: review", isnull(last_epoch), "NO EVENTS IN WINDOW", expected_state="disabled_expected", "disabled (expected)", isnotnull(thr) AND index_silent_min>thr, "SILENT", isnotnull(thr) AND silent_min>thr, "stale source", expected_sourcetype!="" AND sourcetype!=expected_sourcetype, "SOURCETYPE DRIFT", isnotnull(first_epoch) AND first_epoch>relative_time(now(), "-7d"), "new in last 7d", 1=1, "ok")
+| eval last_event=strftime(last_epoch, "%F %T"), first_event=strftime(first_epoch, "%F %T")
+| eval _color_rank=case(status="SILENT" OR status="NO EVENTS IN WINDOW" OR status="SOURCETYPE DRIFT", 1, status="stale source" OR status="new in last 7d" OR status="catch-all: review", 2, 1=1, 3)
+| table index sourcetype source status last_event silent_min expected_sourcetype thr count first_event notes _color_rank
+| sort _color_rank index -count
+"""
+)
+
+Q_EMPTY_HOURS = (
+    "| tstats count where earliest=-7d@h latest=@h "
+    + _catalog_indexes('expected_state="active"')
+    + " by _time index span=1h\n"
+    + r"""| timechart span=1h sum(count) as count by index limit=0
+| fillnull value=0
+| untable _time index count
+| stats count as hours, count(eval(count=0)) as empty_hours, max(eval(if(count=0, _time, null()))) as last_empty by index
+| eval last_empty=if(isnotnull(last_empty), strftime(last_empty, "%F %T"), "")
+| eval empty_pct=if(hours>0, round(100*empty_hours/hours, 1), 0)
+| append [
+    | inputlookup feed_catalog where kind="index" AND expected_state="active"
+    | eval hours=round((relative_time(now(), "@h")-relative_time(now(), "-7d@h"))/3600, 0), empty_hours=hours, empty_pct=100, last_empty="", is_stub=1
+    | table index hours empty_hours empty_pct last_empty is_stub
+]
+| eventstats count as n by index
+| where NOT (n>1 AND is_stub=1)
+| fields - n is_stub
+| where index!="__no_feed_catalog__"
+| eval _color_rank=if(empty_hours>0, 2, 3)
+| sort 0 -empty_hours index
+| table index hours empty_hours empty_pct last_empty _color_rank
+"""
+)
+
+Q_QUARANTINE_DAILY = (
+    "| tstats count where earliest=-7d@d latest=now "
+    + _catalog_indexes('expected_state="catchall"')
+    + " by _time sourcetype span=1d\n"
+    + "| timechart span=1d sum(count) by sourcetype limit=15"
+)
+
+Q_QUARANTINE_ROWS = (
+    "| tstats count max(_time) as last_epoch min(_time) as first_epoch where earliest=-7d@d latest=now "
+    + _catalog_indexes('expected_state="catchall"')
+    + " by sourcetype source\n"
+    + r"""| where sourcetype!="__no_feed_catalog__" AND source!="__no_feed_catalog__"
+| eval last_event=strftime(last_epoch, "%F %T"), first_event=strftime(first_epoch, "%F %T")
+| sort 0 -count
+| table sourcetype source count first_event last_event
+"""
+)
+
+Q_HEC_CONF_LOAD = r"""
+search index=_internal sourcetype=splunkd component=HttpInputDataHandler "Failed to load HEC token configuration"
+| timechart span=1d count by host limit=10
+""".strip()
+
+Q_PARSE_LINEBREAK = r"""
+search index=_internal sourcetype=splunkd component=LineBreakingProcessor log_level=WARN
+| rex field=_raw "data_source=\"(?<data_source>[^\"]*)\".*data_sourcetype=\"(?<data_sourcetype>[^\"]*)\""
+| stats count by data_source data_sourcetype
+| sort 0 -count
+| eval _color_rank=1
+| table data_source data_sourcetype count _color_rank
+""".strip()
+
+Q_PARSE_TIME = r"""
+search index=_internal sourcetype=splunkd component=DateParserVerbose log_level=WARN
+| rex field=_raw "Context:\s*(?<context>.{0,160})"
+| stats count by context
+| sort 0 -count
+| head 50
+| eval _color_rank=1
+| table context count _color_rank
+""".strip()
+
+
 def emit_catalog() -> None:
     """Named searches the HTML pages may run. The REST handler only ever runs a
     name from this file, never SPL from the browser, and only the entries marked
@@ -3200,6 +3383,13 @@ def emit_catalog() -> None:
         "hec_errors": entry(Q_HEC_ERRORS, "-4h", "now", count=100),
         "hec_input_errors": entry(Q_HEC_INPUT_ERRORS, "-4h", "now", count=100),
         "hec_flow": entry(Q_HEC_FLOW, "-4h", "now", count=80),
+        "hec_conf_load": entry(Q_HEC_CONF_LOAD, "-7d@d", "now", count=200),
+        "parse_linebreak": entry(Q_PARSE_LINEBREAK, "-24h", "now", count=100),
+        "parse_time": entry(Q_PARSE_TIME, "-24h", "now", count=50),
+        "feed_catalog": entry(Q_FEED_CATALOG, "-30d@d", "now", count=500, timeout=120),
+        "empty_hours": entry(Q_EMPTY_HOURS, "-7d@h", "@h", count=100, timeout=120),
+        "quarantine_daily": entry(Q_QUARANTINE_DAILY, "-7d@d", "now", count=200, timeout=120),
+        "quarantine_rows": entry(Q_QUARANTINE_ROWS, "-7d@d", "now", count=200, timeout=120),
         "sc4s_time": entry(Q_SC4S_TIME, "-4h", "now", count=400),
         "sc4s_hosts": entry(Q_SC4S_HOSTS, "-4h", "now", count=100),
         "sc4s_errors": entry(Q_SC4S_ERRORS, "-4h", "now", count=100),
@@ -3211,6 +3401,8 @@ def emit_catalog() -> None:
         "indexed": entry(Q_INDEXED_COMPARE, "-4h", "now", count=300),
         "topo_paths": entry(Q_TOPO_PATHS, "-4h", "now", count=100, timeout=120),
         "topo_map": entry(Q_TOPO_MAP, "-24h", "now", count=500, timeout=120),
+        "topo_macro": entry(Q_TOPO_MACRO, "-24h", "now", count=240, timeout=120),
+        "topo_detail": entry(Q_TOPO_DETAIL, "-24h", "now", ["tok_topo_environment", "tok_topo_family", "tok_topo_ingest", "tok_topo_index"], count=300, timeout=120),
         "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_category", "tok_topo_network", "tok_topo_ingest", "tok_topo_index", "tok_topo_endpoint"], count=200, timeout=120),
         "tcpin": entry(Q_TCPIN_PATHS, "-4h", "now", count=80),
         "topo_src_stats": entry(Q_TOPO_SRC_STATS, "-4h", "now", ["tok_data_source"], count=5),

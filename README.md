@@ -12,11 +12,11 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 
 | View | Purpose |
 | --- | --- |
-| **Splunk Health Derek+** | The summary page: overall GREEN / YELLOW / RED, a status per area that opens its dashboard, the reasons behind each status, open agent findings, GB/day vs 7-day MA, and a pie of the top indexes by license usage |
+| **Splunk Health Derek+** | The summary page: overall GREEN / YELLOW / RED, a status per area that opens its dashboard, the reasons behind each status, open agent findings, GB/day vs 7-day MA, a pie of the top indexes by license usage, and empty hours for indexes marked active in the feed catalog |
 | **Host Heartbeat & Instance Health** | Fleet-wide, right-now liveness: last indexed data vs last `_internal` heartbeat, ingestion latency (`_indextime` − `_time`, last 15m), current volume vs 24-hour 2σ baseline per host, plus splunkd health by feature, CPU/memory, and blocked queues |
-| **HEC Token Performance** | Events per HEC token, 1-hour rolling window, flag if a ~100 eps token sits at 0 for 5+ minutes. Handler errors list the client, token, index, and sourcetype. A flow shows client → HEC token → index, with the sourcetype on the index step |
+| **HEC Token Performance** | Events per HEC token, 1-hour rolling window, flag if a ~100 eps token sits at 0 for 5+ minutes. Handler errors list the client, token, index, and sourcetype. A flow shows client → HEC token → index, with the sourcetype on the index step. Also lists HEC token configuration load failures, line-breaking truncation, and timestamp parse warnings |
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
-| **Data Topology** | One flow: host → ingestion path (UF, HF, HEC, SC4S, or Edge Processor) → sourcetype → index. Named SaaS and security products keep their name when those sourcetypes are present; anything else is shown by sourcetype. Click +N to list hosts or sourcetypes that did not fit. Click a host for its first/latest event and its own 24h trend (liveness stays on Host Heartbeat) |
+| **Data Topology** | The map opens as a summary: site (a shared domain, or an IPv4 /16) → ingestion path → sourcetype family → index. The busiest eight of each are named, and the rest is one Other node whose count still includes that tail. Hover a node to light its path through the map. Click a site, path, family, or index to open the hosts and sourcetypes inside it. Windows stays one family on the summary. Opening it lists the sourcetypes in the index; WinEventLog and XmlWinEventLog are split by the event-log channel in the source. Click Overview to return. Expected feeds come from `lookups/feed_catalog.csv`: silence, sourcetype drift, and sources new in the last 7 days. A catch-all index (`expected_state=catchall`) lists what landed in quarantine. Click a host for its first/latest event and its own 24h trend (liveness stays on Host Heartbeat) |
 | **Derek+ Data Quality Agent** | Agentic loop over health tiles and learned ingest bounds (instance features, silent hosts, search CPU, HEC, SC4S, Edge). When an AI provider is saved, it also checks the sample config and the fix check. If the suggestion is to open a Splunk support ticket, Generate fills a ticket you can copy. A human must click APPROVE or DISMISS before anything is recorded. Nothing is applied, and no ticket is filed. |
 | **Reports** | Timestamped HTML report: one compilation of the statistics collected across the health pages, or a targeted report for a single dashboard |
 | **AI provider setup** | Set AI provider, model, and key in the UI, then SAVE to the search-head config lookup |
@@ -55,7 +55,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.65.spl`.
+3. Upload `dist/splunk_exec_health-1.7.71.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -196,5 +196,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.65.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.71.spl --included-tags private_app
 ```

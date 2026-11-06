@@ -175,18 +175,18 @@ var Charts = (function () {
       }
       return out;
     }
+    var hostColor = selected ? tint(selected) : '#58a6ff';
     var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%" style="min-width:' + width + 'px" role="img">';
     if (!selected) svg += drawLinks(null, '#58a6ff', '0.35');
     else {
       svg += drawLinks(false, '#58a6ff', '0.12');
-      svg += drawLinks(true, '#58a6ff', '0.95');
+      svg += drawLinks(true, hostColor, '0.95');
     }
     names.forEach(function (list, stage) {
       list.forEach(function (name) {
         var onPath = !selected || hot[stage + '\n' + name];
         var fill = !selected || onPath ? '#e6edf3' : '#6e7681';
-        if (selected && stage === 0 && name === selected) fill = '#58a6ff';
-        else if (selected && onPath) fill = '#79c0ff';
+        if (selected && onPath) fill = hostColor;
         var pick = stage === 0 ? ' data-pick="' + esc(name).replace(/"/g, '&quot;') + '"' : '';
         var weight = selected && onPath ? ' font-weight="700"' : '';
         var fitted = fitText(name, rooms[stage] - 8);
@@ -326,24 +326,31 @@ var Charts = (function () {
     return palette[hash];
   }
 
-  function rollup(rows, key) {
+  function rollup(rows, key, totalKey) {
     var map = {};
     rows.forEach(function (row) {
       var name = row[key] || 'unknown';
-      if (!map[name]) map[name] = 0;
-      map[name] += Number(row.events) || 0;
+      if (!map[name]) map[name] = { events: 0, total: 0 };
+      map[name].events += Number(row.events) || 0;
+      var total = Number(totalKey ? row[totalKey] : 0) || 0;
+      if (total > map[name].total) map[name].total = total;
     });
-    return Object.keys(map).map(function (name) { return { name: name, events: map[name] }; })
-      .sort(function (a, b) { return b.events - a.events; });
+    return Object.keys(map).map(function (name) {
+      return { name: name, events: map[name].total || map[name].events };
+    }).sort(function (a, b) { return b.events - a.events; });
   }
 
-  function flowFan(node, rows, selected, onPick, onHover) {
+  function flowFan(node, rows, selected, onPick, onHover, view) {
     if (!rows.length) { node.innerHTML = '<p class="note">No sources sent data in this window.</p>'; return; }
     selected = selected || {};
-    var hosts = rollup(rows, 'data_source');
-    var sources = rollup(rows, 'endpoint');
-    var indexes = rollup(rows, 'splunk_index');
-    var methods = rollup(rows, 'ingest_method');
+    view = view || {};
+    var hostLimit = view.hostLimit || 8;
+    var sourceLimit = view.sourceLimit || 8;
+    var indexLimit = view.indexLimit || 5;
+    var hosts = rollup(rows, 'data_source', view.hostTotal);
+    var sources = rollup(rows, 'endpoint', view.sourceTotal);
+    var indexes = rollup(rows, 'splunk_index', view.indexTotal);
+    var methods = rollup(rows, 'ingest_method', view.methodTotal);
     var methodOrder = ['UF', 'HF', 'HEC', 'SC4S', 'Edge Processor', 'Syslog', 'NetFlow / IPFIX', 'Other TCP', 'Other'];
     methods.sort(function (a, b) {
       var ia = methodOrder.indexOf(a.name); if (ia < 0) ia = 20;
@@ -351,19 +358,27 @@ var Charts = (function () {
       if (ia !== ib) return ia - ib;
       return b.events - a.events;
     });
-    var showHosts = hosts.slice(0, 8);
+    function take(list, limit, pin) {
+      var shown = list.slice(0, limit);
+      if (!pin) return shown;
+      list.forEach(function (item) {
+        if (item.name === pin && !shown.some(function (kept) { return kept.name === pin; })) shown.push(item);
+      });
+      return shown;
+    }
+    var showHosts = take(hosts, hostLimit, view.pinHost);
     var hostExtra = hosts.length - showHosts.length;
     var hostNames = showHosts.map(function (item) { return item.name; });
     if (selected.host && selected.host !== '__more__' && hostNames.indexOf(selected.host) < 0) {
       showHosts = showHosts.concat([{ name: selected.host, events: 0 }]);
     }
-    var showSources = sources.slice(0, 8);
+    var showSources = take(sources, sourceLimit, view.pinSource);
     var sourceExtra = sources.length - showSources.length;
     var sourceNames = showSources.map(function (item) { return item.name; });
     if (selected.endpoint && selected.endpoint !== '__more__' && sourceNames.indexOf(selected.endpoint) < 0) {
       showSources = showSources.concat([{ name: selected.endpoint, events: 0 }]);
     }
-    var right = indexes.slice(0, 5);
+    var right = take(indexes, indexLimit, view.pinIndex);
     if (selected.index && !right.some(function (item) { return item.name === selected.index; })) {
       right = right.concat([{ name: selected.index, events: 0 }]);
     }
@@ -419,12 +434,27 @@ var Charts = (function () {
       if (selected.index && (row.splunk_index || 'unknown') !== selected.index) return false;
       return true;
     }
-    function addLink(bucket, key, amount, hot) {
-      if (!bucket[key]) bucket[key] = { events: 0, hot: 0 };
+    function addLink(bucket, key, amount, hot, host) {
+      if (!bucket[key]) bucket[key] = { events: 0, hot: 0, hosts: {} };
       bucket[key].events += amount;
       if (hot) bucket[key].hot += amount;
+      bucket[key].hosts[host] = (bucket[key].hosts[host] || 0) + amount;
+    }
+    function remember(bag, name, host, amount) {
+      if (!bag[name]) bag[name] = {};
+      bag[name][host] = (bag[name][host] || 0) + amount;
+    }
+    function dominant(bag) {
+      var best = '';
+      var bestN = -1;
+      Object.keys(bag || {}).forEach(function (name) {
+        if (bag[name] > bestN) { best = name; bestN = bag[name]; }
+      });
+      return best;
     }
     var hostLinks = {}, methodLinks = {}, indexLinks = {};
+    var methodHosts = {}, sourceHosts = {}, indexHosts = {};
+    var hotIngest = {}, hotSource = {}, hotIndex = {};
     rows.forEach(function (row) {
       var host = row.data_source || 'unknown';
       var method = row.ingest_method || 'Other';
@@ -432,10 +462,23 @@ var Charts = (function () {
       var index = row.splunk_index || 'unknown';
       var amount = Number(row.events) || 0;
       var hot = hotRow(row);
-      if (hostY[host] !== undefined && methY[method] !== undefined) addLink(hostLinks, host + '\n' + method, amount, hot);
-      if (methY[method] !== undefined && srcY[source] !== undefined) addLink(methodLinks, method + '\n' + source, amount, hot);
-      if (srcY[source] !== undefined && idxY[index] !== undefined) addLink(indexLinks, source + '\n' + index, amount, hot);
+      remember(methodHosts, method, host, amount);
+      remember(sourceHosts, source, host, amount);
+      remember(indexHosts, index, host, amount);
+      if (hot) { hotIngest[method] = 1; hotSource[source] = 1; hotIndex[index] = 1; }
+      if (hostY[host] !== undefined && methY[method] !== undefined) addLink(hostLinks, host + '\n' + method, amount, hot, host);
+      if (methY[method] !== undefined && srcY[source] !== undefined) addLink(methodLinks, method + '\n' + source, amount, hot, host);
+      if (srcY[source] !== undefined && idxY[index] !== undefined) addLink(indexLinks, source + '\n' + index, amount, hot, host);
     });
+    function chosenHost() {
+      return selected.host && selected.host !== '__more__' ? selected.host : '';
+    }
+    function pathColor(feeding, hot) {
+      var host = chosenHost();
+      if (host) return hot ? tint(host) : '#6e7681';
+      if (choosing() && !hot) return '#6e7681';
+      return feeding ? tint(feeding) : '#8b949e';
+    }
     function linkMax(links) {
       var max = 1;
       Object.keys(links).forEach(function (key) { if (links[key].events > max) max = links[key].events; });
@@ -445,38 +488,43 @@ var Charts = (function () {
       var mid = (x1 + x2) / 2;
       return 'M ' + x1 + ' ' + y1 + ' C ' + mid + ' ' + y1 + ', ' + mid + ' ' + y2 + ', ' + x2 + ' ' + y2;
     }
-    function drawLinks(links, y1, y2, x1, x2, color) {
+    function drawLinks(links, y1, y2, x1, x2, fromCol, toCol) {
       var max = linkMax(links);
       Object.keys(links).forEach(function (key) {
         var parts = key.split('\n');
         var hot = links[key].hot > 0;
         var dim = choosing() && !hot;
-        svg += '<path d="' + curve(x1, y1[parts[0]], x2, y2[parts[1]])
-          + '" stroke="' + (hot && choosing() ? '#3dd6c6' : color) + '" stroke-width="'
+        var color = pathColor(dominant(links[key].hosts), hot);
+        var opacity = dim ? '0.12' : '0.75';
+        svg += '<path class="flow-link" data-from="' + encodeURIComponent(fromCol + '\n' + parts[0])
+          + '" data-to="' + encodeURIComponent(toCol + '\n' + parts[1])
+          + '" data-rest="' + opacity + '" data-stroke="' + color + '" d="' + curve(x1, y1[parts[0]], x2, y2[parts[1]])
+          + '" stroke="' + color + '" stroke-width="'
           + Math.max(1.2, links[key].events / max * 4).toFixed(2)
-          + '" stroke-opacity="' + (dim ? '0.1' : '0.7') + '" fill="none"/>';
+          + '" stroke-opacity="' + opacity + '" fill="none"/>';
       });
     }
     var svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" width="100%" style="min-width:' + width + 'px" role="img">';
-    svg += '<defs><linearGradient id="fanIn" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#4c8dff"/><stop offset="1" stop-color="#3dd6c6"/></linearGradient></defs>';
     svg += '<text x="8" y="42" fill="#e6edf3" font-size="32" font-weight="700">' + esc(compact(hosts.length)) + '</text>';
-    svg += '<text x="8" y="62" fill="#8b949e" font-size="11">HOSTS</text>';
-    svg += '<text x="' + methLabelX + '" y="62" fill="#8b949e" font-size="11">INGESTION PATH</text>';
-    svg += '<text x="' + srcLabelX + '" y="62" fill="#8b949e" font-size="11">SOURCETYPE</text>';
-    svg += '<text x="' + idxLabelX + '" y="62" fill="#8b949e" font-size="11">INDEX</text>';
-    drawLinks(hostLinks, hostY, methY, hostLabelX + hostRoom + 6, methX - 12, 'url(#fanIn)');
-    drawLinks(methodLinks, methY, srcY, methLabelX + methodRoom + 6, srcX - 12, '#3dd6c6');
-    drawLinks(indexLinks, srcY, idxY, srcLabelX + sourceRoom + 6, idxX - 12, '#3dd6c6');
+    var headers = view.headers || ['HOSTS', 'INGESTION PATH', 'SOURCETYPE', 'INDEX'];
+    svg += '<text x="8" y="62" fill="#8b949e" font-size="11">' + esc(headers[0]) + '</text>';
+    svg += '<text x="' + methLabelX + '" y="62" fill="#8b949e" font-size="11">' + esc(headers[1]) + '</text>';
+    svg += '<text x="' + srcLabelX + '" y="62" fill="#8b949e" font-size="11">' + esc(headers[2]) + '</text>';
+    svg += '<text x="' + idxLabelX + '" y="62" fill="#8b949e" font-size="11">' + esc(headers[3]) + '</text>';
+    drawLinks(hostLinks, hostY, methY, hostLabelX + hostRoom + 6, methX - 12, 'host', 'ingest_method');
+    drawLinks(methodLinks, methY, srcY, methLabelX + methodRoom + 6, srcX - 12, 'ingest_method', 'endpoint');
+    drawLinks(indexLinks, srcY, idxY, srcLabelX + sourceRoom + 6, idxX - 12, 'endpoint', 'splunk_index');
     showHosts.forEach(function (item) {
       var y = hostY[item.name];
       var color = tint(item.name);
       var on = selected.host === item.name;
       var fitted = fitText(item.name, hostRoom);
       svg += '<g data-node="' + encodeURIComponent('host\n' + item.name) + '" style="cursor:pointer">';
-      svg += '<title>' + esc('Host ' + item.name + '. ' + Math.round(item.events).toLocaleString() + ' events in the last 24 hours. Click to follow this host through its ingestion path.') + '</title>';
+      var hostTip = view.hostTitle ? view.hostTitle(item) : ('Host ' + item.name + '. ' + Math.round(item.events).toLocaleString() + ' events in the last 24 hours. Click to follow this host through its ingestion path.');
+      svg += '<title>' + esc(hostTip) + '</title>';
       svg += '<rect x="8" y="' + (y - 14) + '" width="26" height="26" rx="6" fill="' + color + '" fill-opacity="0.18" stroke="' + color + '"/>';
       svg += '<text x="21" y="' + (y + 4) + '" text-anchor="middle" fill="' + color + '" font-size="10" font-weight="700">' + esc(mono(item.name)) + '</text>';
-      svg += '<text x="' + hostLabelX + '" y="' + (y + 4) + '" fill="' + (on ? '#3dd6c6' : '#e6edf3') + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
+      svg += '<text x="' + hostLabelX + '" y="' + (y + 4) + '" fill="' + (on ? color : '#e6edf3') + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
       svg += '</g>';
     });
     if (hostExtra > 0) {
@@ -489,25 +537,30 @@ var Charts = (function () {
     }
     methods.forEach(function (item) {
       var y = methY[item.name];
-      var on = selected.ingest === item.name;
+      var hot = !!hotIngest[item.name];
+      var color = pathColor(dominant(methodHosts[item.name]), hot);
+      var on = selected.ingest === item.name || (!!chosenHost() && hot);
       var fitted = fitText(item.name, methodRoom);
       svg += '<g data-node="' + encodeURIComponent('ingest_method\n' + item.name) + '" style="cursor:pointer">';
-      svg += '<title>' + esc('Ingestion path ' + item.name + '. ' + Math.round(item.events).toLocaleString() + ' events. Click to filter this path.') + '</title>';
-      svg += '<circle cx="' + methX + '" cy="' + y + '" r="5" fill="' + (on ? '#3dd6c6' : '#8b949e') + '"/>';
-      svg += '<text x="' + methLabelX + '" y="' + (y - 2) + '" fill="' + (on ? '#3dd6c6' : '#e6edf3') + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
-      svg += '<text x="' + methLabelX + '" y="' + (y + 16) + '" fill="#8b949e" font-size="11">' + esc(compact(item.events)) + '</text>';
+      var methodTip = view.methodTitle ? view.methodTitle(item) : ('Ingestion path ' + item.name + '. ' + Math.round(item.events).toLocaleString() + ' events. Click to filter this path.');
+      svg += '<title>' + esc(methodTip) + '</title>';
+      svg += '<circle cx="' + methX + '" cy="' + y + '" r="5" fill="' + color + '"/>';
+      svg += '<text x="' + methLabelX + '" y="' + (y - 2) + '" fill="' + color + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
+      svg += '<text x="' + methLabelX + '" y="' + (y + 16) + '" fill="' + (hot ? color : '#8b949e') + '" font-size="11">' + esc(compact(item.events)) + '</text>';
       svg += '</g>';
     });
     showSources.forEach(function (item) {
       var y = srcY[item.name];
-      var on = selected.endpoint === item.name;
-      var color = tint(item.name);
+      var hot = !!hotSource[item.name];
+      var color = pathColor(dominant(sourceHosts[item.name]), hot);
+      var on = selected.endpoint === item.name || (!!chosenHost() && hot);
       var fitted = fitText(item.name, sourceRoom);
       svg += '<g data-node="' + encodeURIComponent('endpoint\n' + item.name) + '" style="cursor:pointer">';
-      svg += '<title>' + esc(item.name + '. ' + Math.round(item.events).toLocaleString() + ' events. A known product keeps its name; otherwise this is the sourcetype. Click to follow it to the index.') + '</title>';
+      var sourceTip = view.sourceTitle ? view.sourceTitle(item) : (item.name + '. ' + Math.round(item.events).toLocaleString() + ' events. A known product keeps its name; otherwise this is the sourcetype. Click to follow it to the index.');
+      svg += '<title>' + esc(sourceTip) + '</title>';
       svg += '<rect x="' + srcX + '" y="' + (y - 14) + '" width="26" height="26" rx="6" fill="' + color + '" fill-opacity="0.18" stroke="' + color + '"/>';
       svg += '<text x="' + (srcX + 13) + '" y="' + (y + 4) + '" text-anchor="middle" fill="' + color + '" font-size="10" font-weight="700">' + esc(mono(item.name)) + '</text>';
-      svg += '<text x="' + srcLabelX + '" y="' + (y + 4) + '" fill="' + (on ? '#3dd6c6' : '#e6edf3') + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
+      svg += '<text x="' + srcLabelX + '" y="' + (y + 4) + '" fill="' + color + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
       svg += '</g>';
     });
     if (sourceExtra > 0) {
@@ -520,23 +573,72 @@ var Charts = (function () {
     }
     right.forEach(function (item) {
       var y = idxY[item.name];
-      var on = selected.index === item.name;
+      var hot = !!hotIndex[item.name];
+      var color = pathColor(dominant(indexHosts[item.name]), hot);
+      var on = selected.index === item.name || (!!chosenHost() && hot);
       var fitted = fitText(item.name, indexRoom);
       svg += '<g data-node="' + encodeURIComponent('splunk_index\n' + item.name) + '" style="cursor:pointer">';
-      svg += '<title>' + esc('Index ' + item.name + '. ' + Math.round(item.events).toLocaleString() + ' events. Click to filter the flow.') + '</title>';
-      svg += '<circle cx="' + idxX + '" cy="' + y + '" r="5" fill="' + (on ? '#3dd6c6' : '#8b949e') + '"/>';
-      svg += '<text x="' + idxLabelX + '" y="' + (y - 2) + '" fill="' + (on ? '#3dd6c6' : '#e6edf3') + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
-      svg += '<text x="' + idxLabelX + '" y="' + (y + 16) + '" fill="#8b949e" font-size="11">' + esc(compact(item.events)) + '</text>';
+      var indexTip = view.indexTitle ? view.indexTitle(item) : ('Index ' + item.name + '. ' + Math.round(item.events).toLocaleString() + ' events. Click to filter the flow.');
+      svg += '<title>' + esc(indexTip) + '</title>';
+      svg += '<circle cx="' + idxX + '" cy="' + y + '" r="5" fill="' + color + '"/>';
+      svg += '<text x="' + idxLabelX + '" y="' + (y - 2) + '" fill="' + color + '" font-size="' + fitted.size + '"' + (on ? ' font-weight="700"' : '') + '>' + esc(fitted.text) + '</text>';
+      svg += '<text x="' + idxLabelX + '" y="' + (y + 16) + '" fill="' + (hot ? color : '#8b949e') + '" font-size="11">' + esc(compact(item.events)) + '</text>';
       svg += '</g>';
     });
     svg += '</svg>';
     node.innerHTML = '<div class="chart fan">' + svg + '</div>';
+    var field = { host: 'data_source', ingest_method: 'ingest_method', endpoint: 'endpoint', splunk_index: 'splunk_index' };
+    function nodeKey(col, name) { return col + '\n' + name; }
+    function restoreFlow() {
+      Array.prototype.forEach.call(node.querySelectorAll('path.flow-link'), function (path) {
+        path.setAttribute('stroke', path.getAttribute('data-stroke'));
+        path.setAttribute('stroke-opacity', path.getAttribute('data-rest'));
+      });
+      Array.prototype.forEach.call(node.querySelectorAll('g[data-node]'), function (group) {
+        group.setAttribute('opacity', '1');
+      });
+    }
+    function highlightFlow(col, name) {
+      if (!name || name === '__more__' || !field[col]) { restoreFlow(); return; }
+      var keep = {};
+      rows.forEach(function (row) {
+        var host = row.data_source || 'unknown';
+        var method = row.ingest_method || 'Other';
+        var source = row.endpoint || 'unknown';
+        var index = row.splunk_index || 'unknown';
+        var value = { host: host, ingest_method: method, endpoint: source, splunk_index: index }[col];
+        if (value !== name) return;
+        keep[nodeKey('host', host)] = 1;
+        keep[nodeKey('ingest_method', method)] = 1;
+        keep[nodeKey('endpoint', source)] = 1;
+        keep[nodeKey('splunk_index', index)] = 1;
+      });
+      var color = tint(name);
+      Array.prototype.forEach.call(node.querySelectorAll('path.flow-link'), function (path) {
+        var from = decodeURIComponent(path.getAttribute('data-from'));
+        var to = decodeURIComponent(path.getAttribute('data-to'));
+        var hot = keep[from] && keep[to];
+        path.setAttribute('stroke', hot ? color : '#2d3a4f');
+        path.setAttribute('stroke-opacity', hot ? '0.95' : '0.08');
+      });
+      Array.prototype.forEach.call(node.querySelectorAll('g[data-node]'), function (group) {
+        var key = decodeURIComponent(group.getAttribute('data-node'));
+        var parts = key.split('\n');
+        var hot = parts[1] !== '__more__' && keep[key];
+        group.setAttribute('opacity', hot ? '1' : '0.18');
+      });
+    }
+    var fan = node.querySelector('.fan');
+    if (fan) fan.addEventListener('mouseleave', restoreFlow);
     Array.prototype.forEach.call(node.querySelectorAll('g[data-node]'), function (group) {
       var parts = decodeURIComponent(group.getAttribute('data-node')).split('\n');
       var col = parts[0];
       var name = parts.slice(1).join('\n');
       var tip = group.querySelector('title');
-      group.addEventListener('mouseover', function () { if (onHover && tip) onHover(tip.textContent); });
+      group.addEventListener('mouseover', function () {
+        highlightFlow(col, name);
+        if (onHover && tip) onHover(tip.textContent);
+      });
       group.addEventListener('click', function () { if (onPick) onPick(col, name); });
     });
   }

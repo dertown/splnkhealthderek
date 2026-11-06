@@ -4,8 +4,37 @@
   var tcpAll = [];
   var mapRows = [];
   var mapError = '';
+  var macroRows = [];
+  var macroError = '';
+  var detailRows = null;
+  var detailError = '';
+  var detailRequest = 0;
+  var zoom = { environment: '', family: '', ingest: '', index: '' };
   var request = 0;
   var focus = { category: '', network: '', ingest: '', index: '', host: '', endpoint: '' };
+  var macroView = {
+    headers: ['SITES', 'INGESTION PATH', 'SOURCETYPE FAMILY', 'INDEX'],
+    hostLimit: 9,
+    sourceLimit: 9,
+    indexLimit: 9,
+    hostTotal: 'env_events',
+    sourceTotal: 'fam_events',
+    indexTotal: 'idx_events',
+    methodTotal: 'method_events',
+    pinHost: 'Other sites',
+    pinSource: 'Other sourcetypes',
+    pinIndex: 'Other indexes',
+    hostTitle: function (item) { return 'Site ' + item.name + '. ' + Math.round(item.events).toLocaleString() + ' events in the last 24 hours. Click to open the hosts and sourcetypes in this site.'; },
+    methodTitle: function (item) { return 'Ingestion path ' + item.name + '. Click to open the hosts that use this path.'; },
+    sourceTitle: function (item) { return 'Sourcetype family ' + item.name + '. Click to open the sourcetypes in this family.'; },
+    indexTitle: function (item) { return 'Index ' + item.name + '. Click to open the hosts and sourcetypes that land here.'; }
+  };
+  var detailView = {
+    sourceLimit: 16,
+    sourceTitle: function (item) {
+      return item.name + '. ' + Math.round(item.events).toLocaleString() + ' events. This is a sourcetype from the indexed events. WinEventLog and XmlWinEventLog are split by the event-log channel in the source. Click to follow it.';
+    }
+  };
   var bounds = { events: 'events', mean: 'mean', drop_bound: 'drop (2σ)', burst_bound: 'burst (2σ)' };
   var sliceColumns = [
     { key: 'endpoint', label: 'Sourcetype' },
@@ -25,36 +54,58 @@
   function focused() {
     return !!(focus.endpoint || focus.category || focus.network || focus.ingest || focus.index || focus.host);
   }
-  function topEndpointNames() {
-    var totals = {};
-    mapRows.forEach(function (row) {
-      var name = row.endpoint || 'unknown';
-      totals[name] = (totals[name] || 0) + (Number(row.events) || 0);
-    });
-    return Object.keys(totals).sort(function (a, b) { return totals[b] - totals[a]; }).slice(0, 8);
+  function zoomed() {
+    return !!(zoom.environment || zoom.family || zoom.ingest || zoom.index);
   }
-  function topHostNames() {
+  function baseRows() {
+    var source = zoomed() ? (detailRows || []) : mapRows;
+    return source.filter(function (row) {
+      if (focus.endpoint && focus.endpoint !== '__more__' && (row.endpoint || 'unknown') !== focus.endpoint) return false;
+      if (focus.host && focus.host !== '__more__' && row.data_source !== focus.host) return false;
+      if (focus.category && row.category !== focus.category) return false;
+      if (focus.network && row.network !== focus.network) return false;
+      if (focus.ingest && row.ingest_method !== focus.ingest) return false;
+      if (focus.index && row.splunk_index !== focus.index) return false;
+      return true;
+    });
+  }
+  function topNames(rows, key) {
     var totals = {};
-    mapRows.forEach(function (row) {
-      var name = row.data_source || 'unknown';
+    rows.forEach(function (row) {
+      var name = row[key] || 'unknown';
       totals[name] = (totals[name] || 0) + (Number(row.events) || 0);
     });
     return Object.keys(totals).sort(function (a, b) { return totals[b] - totals[a]; }).slice(0, 8);
   }
   function selection() {
-    var top = topEndpointNames();
-    return mapRows.filter(function (row) {
-      var name = row.endpoint || 'unknown';
-      if (focus.endpoint === '__more__' && top.indexOf(name) >= 0) return false;
-      if (focus.endpoint && focus.endpoint !== '__more__' && name !== focus.endpoint) return false;
-      if (focus.host === '__more__' && topHostNames().indexOf(row.data_source || 'unknown') >= 0) return false;
-      if (focus.category && row.category !== focus.category) return false;
-      if (focus.network && row.network !== focus.network) return false;
-      if (focus.ingest && row.ingest_method !== focus.ingest) return false;
-      if (focus.index && row.splunk_index !== focus.index) return false;
-      if (focus.host && focus.host !== '__more__' && row.data_source !== focus.host) return false;
+    var rows = baseRows();
+    var topEp = topNames(rows, 'endpoint');
+    var topHost = topNames(rows, 'data_source');
+    return rows.filter(function (row) {
+      if (focus.endpoint === '__more__' && topEp.indexOf(row.endpoint || 'unknown') >= 0) return false;
+      if (focus.host === '__more__' && topHost.indexOf(row.data_source || 'unknown') >= 0) return false;
       return true;
     });
+  }
+  function scopeLabel() {
+    var parts = [];
+    if (zoom.environment) parts.push(zoom.environment);
+    if (zoom.ingest) parts.push(zoom.ingest);
+    if (zoom.family) parts.push(zoom.family);
+    if (zoom.index) parts.push(zoom.index);
+    var inner = pathLabel();
+    if (inner) parts.push(inner);
+    return parts.join(' · ');
+  }
+  function pathLabel() {
+    var parts = [];
+    if (focus.host && focus.host !== '__more__') parts.push(focus.host);
+    if (focus.ingest) parts.push(focus.ingest);
+    if (focus.endpoint && focus.endpoint !== '__more__') parts.push(focus.endpoint);
+    if (focus.index) parts.push(focus.index);
+    if (focus.network) parts.push(focus.network);
+    if (focus.category) parts.push(focus.category);
+    return parts.join(' · ');
   }
   function describe() {
     var parts = [];
@@ -114,23 +165,27 @@
     apply();
   }
   function pick(col, name) {
+    if ((col === 'host' || col === 'endpoint') && name === '__more__') {
+      var moreKey = col === 'host' ? 'host' : 'endpoint';
+      focus[moreKey] = focus[moreKey] === '__more__' ? '' : '__more__';
+      apply();
+      return;
+    }
     if (col === 'endpoint') {
-      var clear = focus.endpoint === name && !focus.index && !focus.host;
+      var clear = focus.endpoint === name && !focus.index && !focus.host && !focus.ingest;
       focus = { category: '', network: '', ingest: '', index: '', host: '', endpoint: clear ? '' : name };
     } else if (col === 'host') {
       var same = focus.host === name && !focus.endpoint && !focus.ingest && !focus.index;
       focus = { category: '', network: '', ingest: '', index: '', endpoint: '', host: same ? '' : name };
     } else if (col === 'network') {
-      focus.network = focus.network === name ? '' : name;
-      focus.host = '';
+      var sameNet = focus.network === name && !focus.host && !focus.endpoint && !focus.index && !focus.ingest;
+      focus = { category: '', network: sameNet ? '' : name, ingest: '', index: '', host: '', endpoint: '' };
     } else if (col === 'ingest_method') {
-      focus.ingest = focus.ingest === name ? '' : name;
-      focus.host = '';
+      var sameIn = focus.ingest === name && !focus.host && !focus.endpoint && !focus.index;
+      focus = { category: '', network: '', ingest: sameIn ? '' : name, index: '', host: '', endpoint: '' };
     } else if (col === 'splunk_index') {
-      focus.index = focus.index === name ? '' : name;
-      focus.host = '';
-      focus.category = '';
-      focus.network = '';
+      var sameIdx = focus.index === name && !focus.host && !focus.endpoint && !focus.ingest;
+      focus = { category: '', network: '', ingest: '', index: sameIdx ? '' : name, host: '', endpoint: '' };
     } else if (col === 'category') {
       focus.category = focus.category === name ? '' : name;
       focus.network = '';
@@ -141,16 +196,118 @@
     }
     apply();
   }
-  function drawMap() {
-    if (mapError) {
-      Health.fail(document.getElementById('map'), mapError);
-      document.getElementById('mapHover').textContent = mapError;
+  function paintMapChrome() {
+    var title = document.getElementById('mapTitle');
+    var note = document.getElementById('mapNote');
+    var crumb = document.getElementById('mapCrumb');
+    if (!zoomed() && !focused()) {
+      title.textContent = 'Site → ingestion path → sourcetype family → index';
+      note.textContent = 'Hundreds of hosts and sourcetypes stay grouped. A site is a shared domain, or an IPv4 /16. A sourcetype family is a known product, or the prefix of the sourcetype. The busiest eight of each are named. Everything else is one Other node, and its count still includes that tail. Hover a node to light its path. Click a site, a path, a family, or an index to open the hosts and sourcetypes inside it.';
+      crumb.textContent = 'Estate view';
       return;
     }
-    var selected = { endpoint: focus.endpoint, network: focus.network, ingest: focus.ingest, index: focus.index, host: focus.host };
-    Charts.sourceFan(document.getElementById('map'), mapRows, selected, pick, function (text) {
-      document.getElementById('mapHover').textContent = text;
+    var label = scopeLabel() || 'this selection';
+    title.textContent = 'Host → ingestion path → sourcetype → index';
+    note.textContent = 'Hosts and sourcetypes inside ' + label + '. Each sourcetype is the name Splunk indexed. For the Windows add-on, WinEventLog and XmlWinEventLog stay one family here, and each event-log channel comes from the source, so Security, System, and any other channel in this estate are separate. Hover a node to light its path. Choose Overview to return to the estate.';
+    crumb.innerHTML = '<a href="#" id="mapHome">Overview</a> · ' + Health.esc(label);
+    var home = document.getElementById('mapHome');
+    if (home) home.addEventListener('click', function (event) {
+      event.preventDefault();
+      if (zoomed()) clearZoom();
+      else {
+        focus = { category: '', network: '', ingest: '', index: '', host: '', endpoint: '' };
+        apply();
+      }
     });
+  }
+  function clearZoom() {
+    detailRequest += 1;
+    zoom = { environment: '', family: '', ingest: '', index: '' };
+    detailRows = null;
+    detailError = '';
+    focus = { category: '', network: '', ingest: '', index: '', host: '', endpoint: '' };
+    apply();
+  }
+  function openGroup(col, name) {
+    if (!name || name === '__more__') return;
+    zoom = { environment: '', family: '', ingest: '', index: '' };
+    if (col === 'host' || col === 'data_source') zoom.environment = name;
+    else if (col === 'ingest_method') zoom.ingest = name;
+    else if (col === 'endpoint') zoom.family = name;
+    else if (col === 'splunk_index') zoom.index = name;
+    else return;
+    focus = { category: '', network: '', ingest: '', index: '', host: '', endpoint: '' };
+    loadDetail();
+  }
+  function loadDetail() {
+    var id = ++detailRequest;
+    detailRows = null;
+    detailError = '';
+    paintMapChrome();
+    document.getElementById('map').innerHTML = '<p class="note">Loading the hosts and sourcetypes in this selection…</p>';
+    Health.query('topo_detail', {
+      tok_topo_environment: zoom.environment || '*',
+      tok_topo_family: zoom.family || '*',
+      tok_topo_ingest: zoom.ingest || '*',
+      tok_topo_index: zoom.index || '*'
+    }).then(function (rows) {
+      if (id !== detailRequest) return;
+      detailRows = rows || [];
+      apply();
+    }).catch(function (error) {
+      if (id !== detailRequest) return;
+      detailError = error && error.message ? error.message : String(error);
+      detailRows = [];
+      apply();
+    });
+  }
+  function drawMap() {
+    paintMapChrome();
+    if (!zoomed() && macroError) {
+      Health.fail(document.getElementById('map'), macroError);
+      document.getElementById('mapHover').textContent = macroError;
+      return;
+    }
+    if (zoomed() && detailError) {
+      Health.fail(document.getElementById('map'), detailError);
+      document.getElementById('mapHover').textContent = detailError;
+      return;
+    }
+    var macro = !zoomed() && !focused();
+    var rows = macro ? macroRows : (focused() ? baseRows() : (detailRows || []));
+    var selected = macro ? {} : {
+      endpoint: focus.endpoint === '__more__' ? '' : focus.endpoint,
+      network: focus.network,
+      ingest: focus.ingest,
+      index: focus.index,
+      host: focus.host === '__more__' ? '' : focus.host
+    };
+    if (!rows.length) {
+      document.getElementById('map').innerHTML = '<p class="note">' + (zoomed()
+        ? 'Nothing in this group sent events in the last 24 hours. Choose Overview to return to the estate.'
+        : 'No events in the last 24 hours.') + '</p>';
+      return;
+    }
+    Charts.sourceFan(document.getElementById('map'), rows, selected, macro ? openGroup : pick, function (text) {
+      document.getElementById('mapHover').textContent = text;
+    }, macro ? macroView : detailView);
+  }
+  function pathColumns() {
+    return [
+      { key: 'data_source', label: 'Host' },
+      { key: 'ingest_method', label: 'Ingestion path' },
+      { key: 'endpoint', label: 'Sourcetype' },
+      { key: 'splunk_index', label: 'Index' },
+      { key: 'events', label: 'Events (24h)' }
+    ];
+  }
+  function showPath(rows) {
+    var list = rows.slice().sort(function (a, b) { return (Number(b.events) || 0) - (Number(a.events) || 0); });
+    if (!list.length) {
+      document.getElementById('missing').innerHTML = '<p class="note">Nothing feeds this selection. Click it again to restore the full map.</p>';
+      return;
+    }
+    Health.table(document.getElementById('missing'), list.slice(0, 80), pathColumns(), function (row) { pick('host', row.data_source); });
   }
   function showMissing(rows) {
     var list = rows.slice().sort(function (a, b) { return (Number(b.events) || 0) - (Number(a.events) || 0); });
@@ -158,13 +315,9 @@
       document.getElementById('missing').innerHTML = '<p class="note">Every source is already drawn. There is nothing in the +N list.</p>';
       return;
     }
-    Health.table(document.getElementById('missing'), list.slice(0, 80), [
-      { key: 'data_source', label: 'Host' },
-      { key: 'ingest_method', label: 'Ingestion path' },
-      { key: 'endpoint', label: 'Sourcetype' },
-      { key: 'splunk_index', label: 'Index' },
-      { key: 'events', label: 'Events (24h)' }
-    ], function (row) { pick(focus.host === '__more__' ? 'host' : 'endpoint', focus.host === '__more__' ? row.data_source : row.endpoint); });
+    Health.table(document.getElementById('missing'), list.slice(0, 80), pathColumns(), function (row) {
+      pick(focus.host === '__more__' ? 'host' : 'endpoint', focus.host === '__more__' ? row.data_source : row.endpoint);
+    });
   }
   function paintLists() {
     var chosen = selection();
@@ -173,7 +326,7 @@
     var hostList = Object.keys(hosts);
     var pathRows = paths;
     var tcpRows = tcpAll;
-    if (focus.host) {
+    if (focus.host && focus.host !== '__more__') {
       pathRows = paths.filter(function (row) { return row.data_source === focus.host; });
       tcpRows = tcpAll.filter(function (row) { return row.data_source === focus.host; });
     } else if (focused() && mapRows.length) {
@@ -182,10 +335,7 @@
       });
       tcpRows = tcpAll.filter(function (row) { return hostList.indexOf(row.data_source) >= 0; });
     }
-    var one = focus.host || (hostList.length === 1 ? hostList[0] : '');
-    var flowRows = focused() ? chosen : mapRows;
-    var flowPick = focus.host && focus.host !== '__more__' ? focus.host : '';
-    Charts.flow(document.getElementById('flow'), flowRows, ['data_source', 'ingest_method', 'endpoint', 'splunk_index'], 'events', flowPick, function (name) { pick('host', name); });
+    var one = (focus.host && focus.host !== '__more__') ? focus.host : (hostList.length === 1 ? hostList[0] : '');
     Health.table(document.getElementById('paths'), pathRows, null, function (row) { pickHost(row.data_source); });
     Health.table(document.getElementById('tcpin'), tcpRows, null, function (row) { pickHost(row.data_source); });
     markRows(one);
@@ -274,11 +424,21 @@
     document.getElementById('selected').textContent = describe();
     drawMap();
     paintLists();
-    if (focus.endpoint === '__more__' || focus.host === '__more__') showMissing(selection());
-    else document.getElementById('missing').innerHTML = '<p class="note">Click +N under the hosts or the sourcetypes to list what did not fit.</p>';
+    var missingTitle = document.getElementById('missingTitle');
+    if (focus.endpoint === '__more__' || focus.host === '__more__') {
+      missingTitle.textContent = 'Not drawn' + (pathLabel() ? ' for ' + pathLabel() : '');
+      showMissing(selection());
+    } else if (zoomed() || focused()) {
+      missingTitle.textContent = 'Path for ' + (scopeLabel() || 'this selection');
+      showPath(focused() ? baseRows() : (detailRows || []));
+    } else {
+      missingTitle.textContent = 'Not drawn on the map';
+      document.getElementById('missing').innerHTML = '<p class="note">Click a site, a path, a family, or an index to open it. The hosts and sourcetypes in that group are listed here. Click +N inside a group to list what did not fit on the drawing.</p>';
+    }
     if (focus.host && focus.host !== '__more__') loadHost(focus.host);
     else if (focus.endpoint === '__more__' || focus.host === '__more__') showDirectory(selection());
     else if (focus.endpoint || focus.category || focus.network || focus.ingest || focus.index) loadGroup();
+    else if (zoomed()) showDirectory(detailRows || []);
     else showDirectory(mapRows);
   }
   function settled(promise) {
@@ -287,7 +447,8 @@
   Promise.all([
     settled(Health.query('topo_paths')),
     settled(Health.query('tcpin')),
-    settled(Health.query('topo_map'))
+    settled(Health.query('topo_map')),
+    settled(Health.query('topo_macro'))
   ]).then(function (res) {
     if (!res[0].rows || !res[1].rows) {
       Health.fail(document.getElementById('stats'), (res[0].error || res[1].error || 'The topology searches could not run.'));
@@ -297,6 +458,8 @@
     tcpAll = res[1].rows;
     mapRows = res[2].rows || [];
     mapError = res[2].error ? (res[2].error.message || String(res[2].error)) : '';
+    macroRows = res[3].rows || [];
+    macroError = res[3].error ? (res[3].error.message || String(res[3].error)) : '';
     var count = function (key) { var seen = {}; paths.forEach(function (row) { seen[row[key]] = 1; }); return Object.keys(seen).length; };
     Health.stats(document.getElementById('stats'), [
       { val: count('data_source'), lbl: 'Data sources' },
@@ -307,4 +470,41 @@
     apply();
     if (res[2].error) document.getElementById('mapHover').textContent = res[2].error.message || String(res[2].error);
   }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
+  function countStatus(rows, names) {
+    return rows.filter(function (row) { return names.indexOf(row.status) >= 0; }).length;
+  }
+  Health.query('feed_catalog').then(function (rows) {
+    if (!rows.length) {
+      document.getElementById('feedStats').innerHTML = '';
+      document.getElementById('feeds').innerHTML = '<p class="note">No feeds in lookups/feed_catalog.csv. Add an index row with expected_state=active.</p>';
+      return;
+    }
+    Health.stats(document.getElementById('feedStats'), [
+      { val: countStatus(rows, ['SILENT', 'NO EVENTS IN WINDOW']), lbl: 'Silent or missing', kind: 'bad' },
+      { val: countStatus(rows, ['SOURCETYPE DRIFT']), lbl: 'Sourcetype drift', kind: 'bad' },
+      { val: countStatus(rows, ['new in last 7d']), lbl: 'New in last 7 days', kind: 'warn' }
+    ]);
+    Health.table(document.getElementById('feeds'), rows, [
+      { key: 'index', label: 'Index' }, { key: 'sourcetype', label: 'Sourcetype' }, { key: 'source', label: 'Source' },
+      { key: 'status', label: 'Status' }, { key: 'last_event', label: 'Last event' },
+      { key: 'silent_min', label: 'Silent minutes' }, { key: 'expected_sourcetype', label: 'Expected sourcetype' },
+      { key: 'count', label: 'Events (30d)' }, { key: 'notes', label: 'Notes' }
+    ]);
+  }).catch(function (error) { Health.fail(document.getElementById('feeds'), error); });
+  Promise.all([
+    settled(Health.query('quarantine_daily')),
+    settled(Health.query('quarantine_rows'))
+  ]).then(function (res) {
+    if (res[0].error) Health.fail(document.getElementById('quarantineDaily'), res[0].error);
+    else {
+      var keys = Object.keys((res[0].rows[0] || {})).filter(function (key) { return key !== '_time' && key !== '_span' && key.charAt(0) !== '_'; });
+      Charts.line(document.getElementById('quarantineDaily'), res[0].rows, '_time', keys.slice(0, 8));
+    }
+    if (res[1].error) Health.fail(document.getElementById('quarantineRows'), res[1].error);
+    else if (!res[1].rows.length) document.getElementById('quarantineRows').innerHTML = '<p class="note">No events in the catch-all indexes from the feed catalog.</p>';
+    else Health.table(document.getElementById('quarantineRows'), res[1].rows, [
+      { key: 'sourcetype', label: 'Sourcetype' }, { key: 'source', label: 'Source' },
+      { key: 'count', label: 'Events' }, { key: 'first_event', label: 'First event' }, { key: 'last_event', label: 'Last event' }
+    ]);
+  });
 })();

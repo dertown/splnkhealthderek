@@ -3,27 +3,27 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.65">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.71">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>Data Topology</h1>
-    <p class="tagline">One flow for the last 24 hours: host, ingestion path, sourcetype, then index. Known products such as Microsoft 365, Azure, AWS, and Okta keep their name. Click any step to filter the panels below.</p>
+    <p class="tagline">The estate opens as sites, ingestion paths, sourcetype families, and indexes. Click one to open the hosts and sourcetypes inside it.</p>
     <div class="hero-meta"><a id="home" href="#">Summary</a></div>
   </div>
   <div class="stats-row" id="stats"></div>
   <div class="section">
-    <h2 class="section-title">Host → ingestion path → sourcetype → index</h2>
-    <p class="note">Hosts are on the left. The next column is how the data arrived: UF, HF, HEC, SC4S, or Edge Processor. Then the sourcetype — a known product keeps its name, and anything else stays the sourcetype. The line ends at the index. Click +N under the hosts or the sourcetypes to list what did not fit.</p>
+    <h2 class="section-title" id="mapTitle">Site → ingestion path → sourcetype family → index</h2>
+    <p class="note" id="mapNote">Hundreds of hosts and sourcetypes stay grouped. A site is a shared domain, or an IPv4 /16. A sourcetype family is a known product, or the prefix of the sourcetype. Hover a node to light its path. Click a site, a path, a family, or an index to open the hosts and sourcetypes inside it.</p>
+    <p class="note" id="mapCrumb">Estate view</p>
     <div id="map"></div>
-    <p class="note" id="mapHover">Click a host, an ingestion path, a sourcetype, or an index.</p>
+    <p class="note" id="mapHover">Hover a node to highlight its data flow. Click it to open that group.</p>
   </div>
   <div class="section">
-    <h2 class="section-title">Not drawn on the map</h2>
+    <h2 class="section-title" id="missingTitle">Not drawn on the map</h2>
     <div id="missing"><p class="note">Click +N under the hosts or the sourcetypes to list what did not fit.</p></div>
   </div>
-  <div class="section"><h2 class="section-title">Same flow, for the current selection</h2><div id="flow"></div></div>
   <div class="section"><h2 class="section-title">Top source → path → index flows</h2><div id="paths"></div></div>
   <div class="section">
     <h2 class="section-title">Selected from the map <span id="selected" class="note"></span></h2>
@@ -35,9 +35,23 @@
     <div id="srcOutliers"></div>
   </div>
   <div class="section"><h2 class="section-title">Forwarder → indexer (tcpin)</h2><div id="tcpin"></div></div>
+  <div class="section">
+    <h2 class="section-title">Expected feeds</h2>
+    <p class="note">Compared with lookups/feed_catalog.csv over the last 30 days. Silence uses min_silence_minutes. Sourcetype drift means the sourcetype is not the one named on that row. A source whose first event is inside 7 days is new. disabled_expected is listed and not counted.</p>
+    <div class="stats-row" id="feedStats"></div>
+    <div id="feeds"></div>
+  </div>
+  <div class="section">
+    <h2 class="section-title">Quarantine</h2>
+    <p class="note">Indexes whose catalog row has expected_state=catchall. The shipped row is named quarantine. Rename it to the catch-all index this estate uses.</p>
+    <h2 class="section-title">Events per day by sourcetype</h2>
+    <div id="quarantineDaily"></div>
+    <h2 class="section-title">What is in the catch-all</h2>
+    <div id="quarantineRows"></div>
+  </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.65"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.65"></script>
-<script src="../../static/app/splunk_exec_health/topology.js?v=1.7.65"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.71"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.71"></script>
+<script src="../../static/app/splunk_exec_health/topology.js?v=1.7.71"></script>
 </body>
 </html>

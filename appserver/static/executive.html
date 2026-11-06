@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.65">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.71">
 </head>
 <body>
 <div class="page">
@@ -31,9 +31,14 @@
       <div id="pie"></div>
     </div>
   </div>
+  <div class="section">
+    <h2 class="section-title">Empty hours by index</h2>
+    <p class="note">Hours in the last 7 days with no events, for indexes marked active in lookups/feed_catalog.csv. An index with no events at all counts as empty for the whole window.</p>
+    <div id="emptyHours"></div>
+  </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.65"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.65"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.71"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.71"></script>
 <script>
 (function () {
   var links = { 'Hosts & instances': 'host_heartbeat', 'Data flow': 'data_topology', 'HEC tokens': 'hec_performance', 'SC4S & Edge': 'sc4s_edge' };
@@ -65,6 +70,17 @@
     Charts.line(document.getElementById('ingest'), license, '_time', ['daily_GB', 'ma_7d']);
     Charts.pie(document.getElementById('pie'), indexes, 'index', 'GB');
   }).catch(function (error) { Health.fail(document.getElementById('stats'), error); });
+  Health.query('empty_hours').then(function (rows) {
+    if (!rows.length) {
+      document.getElementById('emptyHours').innerHTML = '<p class="note">No active indexes in lookups/feed_catalog.csv. Add a row with expected_state=active.</p>';
+      return;
+    }
+    Health.table(document.getElementById('emptyHours'), rows, [
+      { key: 'index', label: 'Index' }, { key: 'hours', label: 'Hours' },
+      { key: 'empty_hours', label: 'Empty hours' }, { key: 'empty_pct', label: 'Empty %' },
+      { key: 'last_empty', label: 'Last empty hour' }
+    ]);
+  }).catch(function (error) { Health.fail(document.getElementById('emptyHours'), error); });
 })();
 </script>
 </body>

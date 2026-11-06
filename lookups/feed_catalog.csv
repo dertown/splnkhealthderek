@@ -1,0 +1,3 @@
+kind,index,expected_sourcetype,expected_state,min_silence_minutes,notes
+index,_internal,splunkd,disabled_expected,60,"Example. Copy this row for each feed you expect, set expected_state to active, and name the index and sourcetype. disabled_expected stays on the list and is not counted as silent."
+index,quarantine,,catchall,60,"Catch-all index. Rename quarantine to the index this estate uses. Data Topology lists what lands there."

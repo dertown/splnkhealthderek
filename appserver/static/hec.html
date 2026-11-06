@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.65">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.71">
 </head>
 <body>
 <div class="page">
@@ -25,20 +25,38 @@
     <div id="inputErrors"></div>
   </div>
   <div class="section">
+    <h2 class="section-title">HEC token configuration load failures</h2>
+    <p class="note">Indexers that logged "Failed to load HEC token configuration" in the last 7 days. This is separate from a rejected event.</p>
+    <div id="confLoad"></div>
+  </div>
+  <div class="two">
+    <div class="section">
+      <h2 class="section-title">Line-breaking warnings</h2>
+      <p class="note">LineBreakingProcessor truncation warnings in the last 24 hours, by source and sourcetype.</p>
+      <div id="lineBreak"></div>
+    </div>
+    <div class="section">
+      <h2 class="section-title">Timestamp parse warnings</h2>
+      <p class="note">DateParserVerbose warnings in the last 24 hours. The context is the start of the line Splunk could not time.</p>
+      <div id="timeParse"></div>
+    </div>
+  </div>
+  <div class="section">
     <h2 class="section-title">Source → HEC token → index</h2>
     <p class="note">The index node lists the sourcetype. This uses the same handler log, so a path appears when Splunk recorded that client and token together.</p>
     <div id="flow"></div>
     <div id="flowTable"></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.65"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.65"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.71"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.71"></script>
 <script>
 (function () {
   Health.link('home', 'executive_overview');
   Promise.all([
     Health.query('hec_totals'), Health.query('hec_state'), Health.query('hec_time'), Health.query('hec_handler'), Health.query('hec_errors'),
-    Health.query('hec_input_errors'), Health.query('hec_flow')
+    Health.query('hec_input_errors'), Health.query('hec_flow'),
+    Health.query('hec_conf_load'), Health.query('parse_linebreak'), Health.query('parse_time')
   ]).then(function (res) {
     var totals = res[0][0] || {};
     Health.stats(document.getElementById('stats'), [
@@ -56,6 +74,14 @@
       { key: 'splunk_index', label: 'Index' }, { key: 'sourcetype', label: 'Sourcetype' },
       { key: 'hec_source', label: 'Source' }, { key: 'reply_label', label: 'Result' },
       { key: 'errors', label: 'Errors' }, { key: 'status_message', label: 'Message' }
+    ]);
+    var loadKeys = Object.keys(res[7][0] || {}).filter(function (key) { return key !== '_time' && key !== '_span' && key.charAt(0) !== '_'; });
+    Charts.line(document.getElementById('confLoad'), res[7], '_time', loadKeys.slice(0, 8));
+    Health.table(document.getElementById('lineBreak'), res[8], [
+      { key: 'data_source', label: 'Source' }, { key: 'data_sourcetype', label: 'Sourcetype' }, { key: 'count', label: 'Warnings' }
+    ]);
+    Health.table(document.getElementById('timeParse'), res[9], [
+      { key: 'context', label: 'Context' }, { key: 'count', label: 'Warnings' }
     ]);
     Charts.flow(document.getElementById('flow'), res[6], ['data_source', 'token_label', 'flow_index'], 'requests');
     Health.table(document.getElementById('flowTable'), res[6], [

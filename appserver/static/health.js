@@ -1,8 +1,8 @@
 /* Shared helpers for the Splunk Health Derek+ HTML pages. */
 var Health = (function () {
-  var PILL_GOOD = ['GREEN', 'OK', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no'];
-  var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING'];
-  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING'];
+  var PILL_GOOD = ['GREEN', 'OK', 'ok', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no', 'disabled (expected)'];
+  var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING', 'SILENT', 'NO EVENTS IN WINDOW', 'SOURCETYPE DRIFT'];
+  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING', 'stale source', 'new in last 7d', 'catch-all: review'];
 
   function root() {
     var path = window.location.pathname || '';

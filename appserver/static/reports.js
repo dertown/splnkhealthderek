@@ -15,7 +15,8 @@
         { title: 'Daily ingestion vs 7-day average (GB)', query: 'license_daily' },
         { title: 'Events indexed, last 15 minutes', query: 'live' },
         { title: 'Open agent findings', query: 'agent_counts' },
-        { title: 'Top indexes by license usage (GB, last 7 days)', query: 'top_indexes' }
+        { title: 'Top indexes by license usage (GB, last 7 days)', query: 'top_indexes' },
+        { title: 'Empty hours by index', query: 'empty_hours' }
       ]
     },
     host: {
@@ -39,6 +40,9 @@
         { title: 'HTTP handler', query: 'hec_handler' },
         { title: 'Token errors', query: 'hec_errors' },
         { title: 'HEC input errors', query: 'hec_input_errors' },
+        { title: 'HEC token configuration load failures', query: 'hec_conf_load' },
+        { title: 'Line-breaking warnings', query: 'parse_linebreak' },
+        { title: 'Timestamp parse warnings', query: 'parse_time' },
         { title: 'Source, token, and index', query: 'hec_flow' }
       ]
     },
@@ -59,9 +63,12 @@
     topology: {
       title: 'Data Topology',
       sections: [
+        { title: 'Sites, sourcetype families, and indexes', query: 'topo_macro' },
         { title: 'Category, network, ingest method, and index (24h)', query: 'topo_map' },
         { title: 'Top source, path, and index flows', query: 'topo_paths' },
-        { title: 'Forwarder to indexer (tcpin)', query: 'tcpin' }
+        { title: 'Forwarder to indexer (tcpin)', query: 'tcpin' },
+        { title: 'Expected feeds', query: 'feed_catalog' },
+        { title: 'Quarantine by sourcetype and source', query: 'quarantine_rows' }
       ]
     },
     agent: {
