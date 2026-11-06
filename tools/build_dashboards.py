@@ -685,6 +685,35 @@ Q_LIVE = r"""
 | eval events_per_sec=round(events/900, 1)
 """.strip()
 
+
+def live_by_index(earliest: str, window_sec: int) -> str:
+    """Events written to each index in a fixed window, with the rate for that window.
+
+    The total row is a second tstats so a head on the busiest indexes does not
+    change the estate total. Hosts and sourcetypes stay blank on that row because
+    a sum would count the same host twice.
+    """
+    return f"""
+| tstats count as events, dc(host) as hosts, dc(sourcetype) as sourcetypes, latest(_time) as last_seen where index=`exec_health_idx` earliest={earliest} latest=now by index
+| eval events_per_sec=round(events/{window_sec}, 2)
+| eval last_event=strftime(last_seen, "%Y-%m-%d %H:%M:%S")
+| sort 0 -events
+| head 40
+| append [
+    | tstats count as events where index=`exec_health_idx` earliest={earliest} latest=now
+    | appendpipe [ stats count | where count=0 | eval events=0 ]
+    | eval index="All indexes", events_per_sec=round(events/{window_sec}, 2)
+]
+| eval _order=if(index="All indexes", 0, 1)
+| sort 0 _order -events
+| fields - last_seen _order
+| table index, events, events_per_sec, hosts, sourcetypes, last_event
+""".strip()
+
+
+Q_LIVE_BY_INDEX = live_by_index("-15m", 900)
+Q_INDEXED_BY_INDEX = live_by_index("-4h", 14400)
+
 Q_TOP_INDEXES = r"""
 search `exec_health_license_usage`
 | eval GB=round(b/1024/1024/1024, 3)
@@ -1789,7 +1818,7 @@ Q_DQ_AGENT_FINDINGS = dq_agent_findings_core() + r"""
 | eval cfg_cmd=substr(replace(replace(replace(coalesce(cfg_cmd, "none"), "\|", " / "), "`", " "), "\$", " "), 1, 300)
 | eval cfg_search=substr(replace(replace(replace(coalesce(cfg_search, "none"), "\|", " / "), "`", " "), "\$", " "), 1, 500)
 """ + "\n| eval cfg_sample=replace(cfg_sample, \"\\\"\", \" \")\n| eval cfg_cmd=replace(cfg_cmd, \"\\\"\", \" \")\n| eval cfg_search=replace(cfg_search, \"\\\"\", \" \")\n" + r"""
-| eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Sample config to validate: "+cfg_sample+". Host check to validate: "+cfg_cmd+". Splunk check to validate: "+cfg_search+". Reply with root cause, confidence, and step-by-step admin actions. Then validate the sample config and both checks: say whether each would confirm this issue and is safe to hand to an admin. End with exactly three lines and nothing after them. SAMPLE_CHECK: pass or fail, then a short reason. FIX_CHECK: pass or fail, then a short reason. SUPPORT_TICKET: yes or no, then a short reason. Use SUPPORT_TICKET yes only when the next step is to open a Splunk support ticket. Do not request secrets or HEC token values."
+| eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Sample config to validate: "+cfg_sample+". Host check to validate: "+cfg_cmd+". Splunk check to validate: "+cfg_search+". Reply in sections. Start each section with a bold heading in the form **Heading:** and use the headings the answer needs, including a root cause, a confidence, and numbered admin steps. Then validate the sample config and both checks: say whether each would confirm this issue and is safe to hand to an admin. End with exactly three lines and nothing after them. SAMPLE_CHECK: pass or fail, then a short reason. FIX_CHECK: pass or fail, then a short reason. SUPPORT_TICKET: yes or no, then a short reason. Use SUPPORT_TICKET yes only when the next step is to open a Splunk support ticket. Do not request secrets or HEC token values."
 | eval ai_brief=replace(replace(replace(replace(ai_brief, "\|", " / "), "`", " "), "\$", " "), "[\r\n]+", " ")
 """ + "\n| eval ai_brief=replace(ai_brief, \"\\\"\", \" \")\n| eval ai_brief=substr(ai_brief, 1, 5800)\n" + r"""
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
@@ -3034,7 +3063,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.75"
+APP_VERSION = "1.7.77"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3480,6 +3509,8 @@ def emit_catalog() -> None:
         "areas": entry(exec_area_rollup(), "-15m", "now", count=20),
         "license_daily": entry(Q_LICENSE_DAILY, "-15d@d", "@d", count=30),
         "live": entry(Q_LIVE, "-15m", "now", count=5),
+        "live_by_index": entry(Q_LIVE_BY_INDEX, "-15m", "now", count=50, timeout=120),
+        "indexed_by_index": entry(Q_INDEXED_BY_INDEX, "-4h", "now", count=50, timeout=120),
         "agent_counts": entry(Q_DQ_AGENT_FINDINGS + "\n" + EXEC_AGENT_COUNTS, "-24h", "now", count=5, timeout=120),
         "top_indexes": entry(Q_TOP_INDEXES, "-7d@d", "@d", count=12),
         "state_counts": entry(Q_STATE_COUNTS, "-24h", "now", ["host_filter"], count=10),

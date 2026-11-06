@@ -142,6 +142,11 @@ td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: 
 tr.clickable { cursor: pointer; }
 tr:hover td { background: var(--accent-dim); }
 tr.selected td { background: #388bfd40; }
+.reply-table td:first-child { width: 28%; font-weight: 600; color: var(--text); }
+.reply-table td p { margin: 0 0 8px; line-height: 1.5; }
+.reply-table td p:last-child, .reply-table td li:last-child { margin-bottom: 0; }
+.reply-table ol { margin: 0; padding-left: 1.25em; }
+.reply-table li { margin: 0 0 8px; line-height: 1.5; }
 .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.03em; }
 .pill.good { color: var(--success); background: #3fb95022; }
 .pill.bad { color: var(--error); background: #f8514922; }

@@ -7,13 +7,21 @@
   var AREA_COLUMNS = [
     { key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'detail', label: 'Why' }
   ];
+  var INDEX_RATE_COLUMNS = [
+    { key: 'index', label: 'Index' },
+    { key: 'events', label: 'Events' },
+    { key: 'events_per_sec', label: 'Events per second' },
+    { key: 'hosts', label: 'Hosts writing' },
+    { key: 'sourcetypes', label: 'Sourcetypes' },
+    { key: 'last_event', label: 'Last event' }
+  ];
   var BOOKS = {
     summary: {
       title: 'Executive overview',
       sections: [
         { title: 'Status by area', query: 'areas', columns: AREA_COLUMNS },
         { title: 'Daily ingestion vs 7-day average (GB)', query: 'license_daily' },
-        { title: 'Events indexed, last 15 minutes', query: 'live' },
+        { title: 'Events indexed in the last 15 minutes, by index', query: 'live_by_index', columns: INDEX_RATE_COLUMNS },
         { title: 'Open agent findings', query: 'agent_counts' },
         { title: 'Top indexes by license usage (GB, last 7 days)', query: 'top_indexes' },
         { title: 'Last hour vs the usual hour, by index', query: 'index_season' },
@@ -54,7 +62,7 @@
       sections: [
         { title: 'Edge Processor summary', query: 'edge_summary' },
         { title: 'SC4S / syslog events', query: 'sc4s_time' },
-        { title: 'Events reaching indexers', query: 'indexed' },
+        { title: 'Events reaching indexers in the last 4 hours, by index', query: 'indexed_by_index', columns: INDEX_RATE_COLUMNS },
         { title: 'Events per syslog source', query: 'sc4s_hosts' },
         { title: 'SC4S issues', query: 'sc4s_errors' },
         { title: 'Edge Processor in vs out', query: 'edge_tp' },

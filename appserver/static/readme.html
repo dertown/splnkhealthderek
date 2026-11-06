@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.75">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.77">
 </head>
 <body>
 <div class="page">
@@ -41,7 +41,7 @@
     </div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.75"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.77"></script>
 <script>
 ['p1', 'executive_overview', 'p2', 'host_heartbeat', 'p3', 'hec_performance', 'p4', 'sc4s_edge', 'p5', 'data_topology', 'p6', 'data_quality_agent', 'p7', 'health_reports']
   .reduce(function (pairs, value, index, all) { if (index % 2 === 0) Health.link(value, all[index + 1]); return pairs; }, 0);
