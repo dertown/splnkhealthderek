@@ -16,6 +16,7 @@
         { title: 'Events indexed, last 15 minutes', query: 'live' },
         { title: 'Open agent findings', query: 'agent_counts' },
         { title: 'Top indexes by license usage (GB, last 7 days)', query: 'top_indexes' },
+        { title: 'Last hour vs the usual hour, by index', query: 'index_season' },
         { title: 'Empty hours by index', query: 'empty_hours' }
       ]
     },
@@ -24,6 +25,8 @@
       sections: [
         { title: 'Hosts by state', query: 'state_counts', host: true },
         { title: 'Last data received vs last internal heartbeat', query: 'phone_home', host: true },
+        { title: 'Heartbeat vs this host usual gap', query: 'heartbeat_learned', host: true },
+        { title: 'Last hour vs the same hour this week', query: 'host_season', host: true },
         { title: 'Ingestion latency, last 15 minutes (seconds)', query: 'latency', host: true },
         { title: 'Current volume vs 24-hour baseline', query: 'baseline', host: true },
         { title: 'Splunkd health by feature', query: 'features' },

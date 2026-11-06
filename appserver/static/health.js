@@ -1,8 +1,8 @@
 /* Shared helpers for the Splunk Health Derek+ HTML pages. */
 var Health = (function () {
-  var PILL_GOOD = ['GREEN', 'OK', 'ok', 'Healthy', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no', 'Turned off on purpose'];
-  var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING', 'Gone quiet', 'No events in 30 days', 'Wrong sourcetype'];
-  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING', 'Source gone quiet', 'New this week', 'In the catch-all'];
+  var PILL_GOOD = ['GREEN', 'OK', 'ok', 'Healthy', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no', 'Turned off on purpose', 'ON PATTERN'];
+  var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING', 'Gone quiet', 'No events in 30 days', 'Wrong sourcetype', 'QUIET', 'BELOW'];
+  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING', 'Source gone quiet', 'New this week', 'In the catch-all', 'LEARNING'];
 
   function root() {
     var path = window.location.pathname || '';
@@ -87,7 +87,7 @@ var Health = (function () {
     return '<span class="pill ' + kind + '">' + esc(text) + '</span>';
   }
 
-  var PILL_COLUMNS = ['severity', 'status', 'state', 'baseline_state', 'latency_state', 'hec_state', 'decision', 'recurring', 'approve', 'dismiss', 'key_state', 'conn_status', 'ai_status', 'tile_status', 'overall_status', 'agent_status'];
+  var PILL_COLUMNS = ['severity', 'status', 'state', 'baseline_state', 'latency_state', 'hec_state', 'decision', 'recurring', 'approve', 'dismiss', 'key_state', 'conn_status', 'ai_status', 'tile_status', 'overall_status', 'agent_status', 'heartbeat_band', 'season_state'];
 
   function table(el, rows, columns, onClick) {
     columns = columns || Object.keys((rows[0] || {})).filter(function (key) { return key.charAt(0) !== '_' && key !== 'api_key'; })

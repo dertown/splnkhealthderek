@@ -128,6 +128,14 @@ var Executive = (function () {
     Health.query('top_indexes').then(function (rows) {
       Charts.pie(document.getElementById('pie'), rows, 'index', 'GB');
     }, function (error) { Health.fail(document.getElementById('pie'), error); });
+    Health.query('index_season').then(function (rows) {
+      Health.table(document.getElementById('indexSeason'), rows, [
+        { key: 'index', label: 'Index' }, { key: 'hour', label: 'Hour' },
+        { key: 'events', label: 'Events' }, { key: 'typical', label: 'Usual for this hour' },
+        { key: 'lower', label: 'Low line' }, { key: 'samples', label: 'Days' },
+        { key: 'season_state', label: 'This hour' }
+      ]);
+    }, function (error) { Health.fail(document.getElementById('indexSeason'), error); });
     Health.query('empty_hours').then(function (rows) {
       if (!rows.length) {
         document.getElementById('emptyHours').innerHTML = '<p class="note">No active feeds yet. In the feed list, set a row state to active and name the index.</p>';

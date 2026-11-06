@@ -1044,6 +1044,111 @@ Q_TOPO_SRC_OUTLIERS = r"""
 """.strip()
 
 
+def heartbeat_learned_core(host_clause: str = "") -> str:
+    """Usual gap between a host's _internal events over 7 days.
+
+    tstats emits only buckets that had events, so the gap is the time between
+    buckets that actually phoned home. A host needs 48 gaps and 24 hours of
+    history. Until then the fixed heartbeat cutoff still applies.
+    """
+    where_host = f" {host_clause}" if host_clause else ""
+    return (
+        f"| tstats count where index=_internal{where_host} earliest=-7d@h latest=@h by host _time span=5m\n"
+        "| sort 0 host _time\n"
+        "| streamstats current=f window=1 last(_time) as prev_beat by host\n"
+        "| eval gap_sec=if(isnotnull(prev_beat), _time-prev_beat, null())\n"
+        "| stats min(_time) as first_bucket, max(_time) as last_bucket, median(gap_sec) as typical_gap, perc95(gap_sec) as p95_gap, count(gap_sec) as samples by host\n"
+        "| eval history_sec=last_bucket-first_bucket, current_gap=round(now()-last_bucket, 0)\n"
+        "| eval typical_gap=round(typical_gap, 0), p95_gap=round(p95_gap, 0)\n"
+        "| eval ready=if(samples>=`exec_health_heartbeat_samples` AND history_sec>=86400, 1, 0)\n"
+        "| eval bound_sec=if(ready=1, round(max(2*p95_gap, 3*typical_gap), 0), null())\n"
+        '| eval heartbeat_band=case(ready=0, "LEARNING", current_gap>bound_sec, "QUIET", 1=1, "ON PATTERN")'
+    )
+
+
+def host_season_core(host_clause: str = "") -> str:
+    """Last complete hour of indexed events vs the same hour on earlier days."""
+    where_host = f" {host_clause}" if host_clause else ""
+    return (
+        f"| tstats count as events where index=`exec_health_idx`{where_host} earliest=-8d@h latest=@h by _time span=1h host\n"
+        '| eval hour=strftime(_time, "%H"), closed=if(_time<relative_time(now(), "@h"), 1, 0)\n'
+        "| eventstats avg(eval(if(closed=1, events, null()))) as typical, stdev(eval(if(closed=1, events, null()))) as spread, count(eval(closed=1)) as samples by host hour\n"
+        '| where _time>=relative_time(now(), "-1h@h") AND _time<relative_time(now(), "@h")\n'
+        "| eval sigma=`exec_health_sigma`\n"
+        "| eval lower=round(typical-(sigma*coalesce(spread, 0)), 1), typical=round(typical, 1), spread=round(coalesce(spread, 0), 1)\n"
+        '| eval season_state=case(samples<`exec_health_season_samples`, "LEARNING", spread>0 AND events<lower AND typical>10, "BELOW", 1=1, "OK")'
+    )
+
+
+def index_season_core() -> str:
+    """Last complete hour per index vs the same hour on earlier days."""
+    return (
+        "| tstats count as events where index=`exec_health_idx` earliest=-8d@h latest=@h by _time span=1h index\n"
+        '| eval hour=strftime(_time, "%H"), closed=if(_time<relative_time(now(), "@h"), 1, 0)\n'
+        "| eventstats avg(eval(if(closed=1, events, null()))) as typical, stdev(eval(if(closed=1, events, null()))) as spread, count(eval(closed=1)) as samples by index hour\n"
+        '| where _time>=relative_time(now(), "-1h@h") AND _time<relative_time(now(), "@h")\n'
+        "| eval sigma=`exec_health_sigma`\n"
+        "| eval lower=round(typical-(sigma*coalesce(spread, 0)), 1), typical=round(typical, 1), spread=round(coalesce(spread, 0), 1)\n"
+        '| eval season_state=case(samples<`exec_health_season_samples`, "LEARNING", spread>0 AND events<lower AND typical>10, "BELOW", 1=1, "OK")'
+    )
+
+
+def host_liveness_findings() -> str:
+    """One finding per host: learned heartbeat, stopped input, or the fixed cutoff.
+
+    A learned quiet heartbeat replaces the fixed host-down row. A host that is
+    still on its usual cadence, with this hour below that hour's own level and
+    events still arriving, is a stopped input. Hosts still learning stay on the
+    fixed cutoff and the 24-hour volume check.
+    """
+    return (
+        """| tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) earliest=-24h latest=now by index host
+| eval kind=if(index="_internal", "heartbeat", "data")
+| stats max(eval(if(kind="data", last_seen, null()))) as last_data, max(eval(if(kind="heartbeat", last_seen, null()))) as last_heartbeat by host
+| eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat
+| eval state=case(isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "HEARTBEAT ONLY", data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "DATA SILENT", (isnull(last_data) OR data_age_sec > `exec_health_silence_sec`) AND (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_heartbeat_sec`), "HOST DOWN", 1=1, "OK")
+| append [
+"""
+        + heartbeat_learned_core()
+        + """
+| eval hb_ready=ready, hb_band=heartbeat_band, hb_gap=current_gap, hb_typical=typical_gap, hb_bound=bound_sec
+| fields host hb_ready hb_band hb_gap hb_typical hb_bound
+]
+| append [
+"""
+        + host_season_core()
+        + """
+| eval season_events=events, season_typical=typical, season_lower=lower, season_samples=samples, season_hour=hour, season_band=season_state
+| fields host season_events season_typical season_lower season_samples season_hour season_band
+]
+| stats max(data_age_sec) as data_age_sec, max(heartbeat_age_sec) as heartbeat_age_sec, max(hb_ready) as hb_ready, max(hb_gap) as hb_gap, max(hb_typical) as hb_typical, max(hb_bound) as hb_bound, max(season_events) as season_events, max(season_typical) as season_typical, max(season_lower) as season_lower, values(state) as state, values(hb_band) as hb_band, values(season_band) as season_band, values(season_hour) as season_hour by host
+| eval keep_fixed=if(state="DATA SILENT" OR state="HEARTBEAT ONLY" OR state="HOST DOWN", 1, 0)
+| eval keep_fixed=if(hb_ready=1 AND hb_band="QUIET", 0, keep_fixed)
+| eval keep_fixed=if(hb_ready=1 AND hb_band="ON PATTERN" AND state="HOST DOWN", 0, keep_fixed)
+| eval issue=case(hb_band="QUIET", "Heartbeat gap outside this host's usual pattern", hb_band="ON PATTERN" AND season_band="BELOW" AND season_events>0, "Host is phoning home, but this hour is below its usual ingest", keep_fixed=1 AND state="HOST DOWN", "Host down — no heartbeat and no indexed data", keep_fixed=1, "Host data silent while heartbeat is fresh", 1=1, null())
+| where isnotnull(issue)
+| eval severity="RED", entity=host
+| eval evidence=case(hb_band="QUIET", "current_gap_sec="+tostring(hb_gap)+", typical_gap_sec="+tostring(hb_typical)+", bound_sec="+tostring(hb_bound), season_band="BELOW" AND hb_band="ON PATTERN", "hour="+season_hour+", events="+tostring(season_events)+", typical="+tostring(season_typical)+", lower="+tostring(season_lower)+", heartbeat=on pattern", 1=1, "state="+state+", data_age_sec="+tostring(data_age_sec)+", heartbeat_age_sec="+tostring(heartbeat_age_sec))
+| eval suggested_fix=case(hb_band="QUIET", "This host's _internal gap is longer than its own usual gap. Check power, network, and splunkd. Do not remove the host from this app.", season_band="BELOW" AND hb_band="ON PATTERN", "The host is still phoning home on its usual cadence, but indexed events for this hour are below the same hour over the last week. Check the input, outputs.conf, and blocked queues. Hosts with fewer than a week of this hour stay on the 24-hour baseline.", state="HOST DOWN", "The host is not phoning home and not sending data. Check power, network, and splunkd. Do not remove the host from this app.", 1=1, "The UF is up but indexed data stopped. Check outputs.conf, blocked queues, sourcetype transforms, and the destination index. Restart the forwarder only after change control.")
+| eval fix_type=case(hb_band="QUIET", "runbook_heartbeat_gap", season_band="BELOW" AND hb_band="ON PATTERN", "runbook_host_season", state="HOST DOWN", "runbook_host_down", 1=1, "runbook_uf")
+| eval proposed_config=case(hb_band="QUIET" OR state="HOST DOWN", "none — human restores the endpoint", season_band="BELOW" AND hb_band="ON PATTERN", "none — human repairs the forwarder or input", 1=1, "none — human repairs the UF pipeline"), action="Review"
+| eval _rank=case(hb_band="QUIET", 1, season_band="BELOW" AND hb_band="ON PATTERN", 2, state="HOST DOWN", 3, 1=1, 4)
+| sort 0 _rank host
+| head 40
+| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+"""
+    )
+
+
+def index_season_findings() -> str:
+    return index_season_core() + r"""
+| where season_state="BELOW" AND events>0
+| eval issue="Index volume below the usual level for this hour", severity="RED", entity=index, evidence="hour="+hour+", events="+tostring(events)+", typical="+tostring(typical)+", lower="+tostring(lower)+", samples="+tostring(samples), suggested_fix="Compare this index at this hour with the same hour on earlier days. A flat 7-day average can call a normal night a drop. This check does not. An index with fewer than 6 days of this hour stays on the 7-day moving average.", fix_type="runbook_index_season", proposed_config="none — human reviews the index sources", action="Review"
+| head 25
+| table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+"""
+
+
 def dq_agent_findings_core() -> str:
     """Diagnose Splunk Health traffic lights vs learned baselines.
 
@@ -1090,23 +1195,12 @@ def dq_agent_findings_core() -> str:
 """
         + host_findings
         + "]\n| append [\n"
+        + index_season_findings()
+        + "]\n| append [\n"
         + hec_findings
+        + "]\n| append [\n"
+        + host_liveness_findings()
         + r"""
-]
-| append [
-    | tstats latest(_time) as last_seen where (index=`exec_health_idx` OR index=_internal) earliest=-24h latest=now by index host
-    | eval kind=if(index="_internal", "heartbeat", "data")
-    | stats max(eval(if(kind="data", last_seen, null()))) as last_data, max(eval(if(kind="heartbeat", last_seen, null()))) as last_heartbeat by host
-    | eval data_age_sec=now()-last_data, heartbeat_age_sec=now()-last_heartbeat
-    | eval state=case(isnull(last_data) AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "HEARTBEAT ONLY", data_age_sec > `exec_health_silence_sec` AND heartbeat_age_sec < `exec_health_heartbeat_sec`, "DATA SILENT", (isnull(last_data) OR data_age_sec > `exec_health_silence_sec`) AND (isnull(last_heartbeat) OR heartbeat_age_sec > `exec_health_heartbeat_sec`), "HOST DOWN", 1=1, "OK")
-    | where state="DATA SILENT" OR state="HEARTBEAT ONLY" OR state="HOST DOWN"
-    | eval issue=case(state="HOST DOWN", "Host down — no heartbeat and no indexed data", 1=1, "Host data silent while heartbeat is fresh")
-    | eval severity="RED", entity=host, evidence="state="+state+", data_age_sec="+tostring(data_age_sec)+", heartbeat_age_sec="+tostring(heartbeat_age_sec)
-    | eval suggested_fix=case(state="HOST DOWN", "The host is not phoning home and not sending data. Check power, network, and splunkd. Do not remove the host from this app.", 1=1, "The UF is up but indexed data stopped. Check outputs.conf, blocked queues, sourcetype transforms, and the destination index. Restart the forwarder only after change control.")
-    | eval fix_type=if(state="HOST DOWN", "runbook_host_down", "runbook_uf")
-    | eval proposed_config=if(state="HOST DOWN", "none — human restores the endpoint", "none — human repairs the UF pipeline"), action="Review"
-    | head 40
-    | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
 ]
 | append [
     search `exec_health_health_report` earliest=-15m
@@ -1461,6 +1555,25 @@ def host_state_counts(clause: str) -> str:
 
 
 Q_STATE_COUNTS = host_state_counts("host=$host_filter$")
+
+Q_HEARTBEAT_LEARNED = heartbeat_learned_core("host=$host_filter$") + r"""
+| eval usual_gap=tostring(typical_gap, "duration"), current=tostring(current_gap, "duration"), bound=if(isnotnull(bound_sec), tostring(bound_sec, "duration"), "n/a")
+| eval _color_rank=case(heartbeat_band="QUIET", 1, heartbeat_band="LEARNING", 2, 1=1, 3)
+| table host, usual_gap, current, bound, samples, heartbeat_band, _color_rank
+| sort _color_rank, host
+"""
+
+Q_HOST_SEASON = host_season_core("host=$host_filter$") + r"""
+| eval _color_rank=case(season_state="BELOW", 1, season_state="LEARNING", 2, 1=1, 3)
+| table host, hour, events, typical, lower, samples, season_state, _color_rank
+| sort _color_rank, host
+"""
+
+Q_INDEX_SEASON = index_season_core() + r"""
+| eval _color_rank=case(season_state="BELOW", 1, season_state="LEARNING", 2, 1=1, 3)
+| table index, hour, events, typical, lower, samples, season_state, _color_rank
+| sort _color_rank, index
+"""
 
 Q_HEALTH_FEATURES = (
     Q_HEALTH_BY_FEATURE
@@ -2921,7 +3034,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.74"
+APP_VERSION = "1.7.75"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3367,10 +3480,13 @@ def emit_catalog() -> None:
         "areas": entry(exec_area_rollup(), "-15m", "now", count=20),
         "license_daily": entry(Q_LICENSE_DAILY, "-15d@d", "@d", count=30),
         "live": entry(Q_LIVE, "-15m", "now", count=5),
-        "agent_counts": entry(Q_DQ_AGENT_FINDINGS + "\n" + EXEC_AGENT_COUNTS, "-24h", "now", count=5),
+        "agent_counts": entry(Q_DQ_AGENT_FINDINGS + "\n" + EXEC_AGENT_COUNTS, "-24h", "now", count=5, timeout=120),
         "top_indexes": entry(Q_TOP_INDEXES, "-7d@d", "@d", count=12),
         "state_counts": entry(Q_STATE_COUNTS, "-24h", "now", ["host_filter"], count=10),
         "phone_home": entry(Q_PHONE_HOME, "-24h", "now", ["host_filter"], count=300),
+        "heartbeat_learned": entry(Q_HEARTBEAT_LEARNED, "-7d@h", "@h", ["host_filter"], count=300, timeout=120),
+        "host_season": entry(Q_HOST_SEASON, "-8d@h", "@h", ["host_filter"], count=300, timeout=120),
+        "index_season": entry(Q_INDEX_SEASON, "-8d@h", "@h", count=100, timeout=120),
         "latency": entry(Q_LATENCY, "-15m@m", "now", ["host_filter"], count=300),
         "baseline": entry(Q_BASELINE_ALL, "-25h@m", "@m", ["host_filter"], count=300, timeout=120),
         "features": entry(Q_HEALTH_FEATURES, "-15m", "now", count=100),
@@ -3409,9 +3525,9 @@ def emit_catalog() -> None:
         "topo_src_trend": entry(Q_TOPO_SRC_TREND, "-25h@m", "@m", ["tok_data_source"], count=120),
         "topo_src_outliers": entry(Q_TOPO_SRC_OUTLIERS, "-25h@m", "@m", ["tok_data_source"], count=50),
         "agent_queue": entry(asked + "\n" + Q_DQ_QUEUE_VIEW + "\n| rename _finding_id AS finding_ref, _ai_brief AS ai_brief_text", "-24h", "now", gate, count=100, timeout=120),
-        "agent_status": entry(asked + "\n" + Q_DQ_AGENT_STATUS, "-24h", "now", gate, count=5),
-        "agent_selected": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_SUGGESTION, "-24h", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5),
-        "agent_sample": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_CONFIG_SAMPLE, "-24h", "now", ["tok_finding_id"], count=20),
+        "agent_status": entry(asked + "\n" + Q_DQ_AGENT_STATUS, "-24h", "now", gate, count=5, timeout=120),
+        "agent_selected": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_SUGGESTION, "-24h", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5, timeout=120),
+        "agent_sample": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_CONFIG_SAMPLE, "-24h", "now", ["tok_finding_id"], count=20, timeout=120),
         "agent_replies": entry(Q_DQ_AI_REPLIES, "0", "now", ["tok_finding_id", "tok_ai_ask"], count=5),
         "agent_list": entry(Q_DQ_AI_LIST, "0", "now", ["tok_ai_list"], count=100),
         "agent_recorded": entry(Q_DQ_RECORDED_READ, "0", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5),

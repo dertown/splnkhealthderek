@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.74">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.75">
 </head>
 <body>
 <div class="page">
@@ -37,11 +37,11 @@
     <h2 class="section-title" data-help="The search macros that set how long silence, latency, and a quiet HEC token must last before they are flagged. Change them under Settings, Advanced search, Search macros.">Thresholds</h2>
     <div class="panel">
       <p>All of these are search macros under Settings → Advanced search → Search macros.</p>
-      <p><code>exec_health_silence_sec</code> 3600, seconds without data before DATA SILENT. <code>exec_health_heartbeat_sec</code> 600, seconds without <code>_internal</code> before a missing heartbeat. <code>exec_health_latency_sec</code> 300, p95 index lag before DELAYED. <code>exec_health_sigma</code> 2, standard deviations below a host's mean before ALERT. <code>exec_health_hec_silence_min</code> 5 and <code>exec_health_hec_baseline_eps</code> 100 control HEC silence.</p>
+      <p><code>exec_health_silence_sec</code> 3600, seconds without data before DATA SILENT. <code>exec_health_heartbeat_sec</code> 600, seconds without <code>_internal</code> before a missing heartbeat, until that host has its own gap. <code>exec_health_heartbeat_samples</code> 48, gaps required across at least a day before the learned gap is used. <code>exec_health_season_samples</code> 6, days of the same hour required before that hour's ingest level is used. <code>exec_health_latency_sec</code> 300, p95 index lag before DELAYED. <code>exec_health_sigma</code> 2, standard deviations below a host's mean before ALERT. <code>exec_health_hec_silence_min</code> 5 and <code>exec_health_hec_baseline_eps</code> 100 control HEC silence.</p>
     </div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.74"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.75"></script>
 <script>
 ['p1', 'executive_overview', 'p2', 'host_heartbeat', 'p3', 'hec_performance', 'p4', 'sc4s_edge', 'p5', 'data_topology', 'p6', 'data_quality_agent', 'p7', 'health_reports']
   .reduce(function (pairs, value, index, all) { if (index % 2 === 0) Health.link(value, all[index + 1]); return pairs; }, 0);
