@@ -19,6 +19,7 @@ import re
 import socket
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,13 +33,16 @@ PING_PROMPT = "Reply with the single word PONG. Do not request secrets."
 SYSTEM_PROMPT = (
     "You are Derek+ Health Agent. Diagnose Splunk ingestion and infrastructure health. "
     "Do not request secrets. Do not claim you applied a Splunk change. "
-    "Reply with likely cause, confidence, and admin steps."
+    "Reply in short sections, each starting with a bold heading such as **Root cause:**, "
+    "**Confidence:** and **Admin steps:**. Follow any output format the user message asks for."
 )
 KEY_RE = re.compile(r"^[A-Za-z0-9._/=+-]{8,512}$")
 ADDED_FIELDS = ["ai_result", "ai_reply", "ai_error", "ai_http"]
 PING_TIMEOUT = 20
 ASK_TIMEOUT = 60
-MAX_REPLY = 4000
+MAX_REPLY = 6000
+RETRY_STATUS = (429, 500, 502, 503, 504, 529)
+RETRY_WAIT = 3
 
 
 class ProviderError(Exception):
@@ -90,7 +94,7 @@ def anthropic_model(model):
 
 
 def build_request(provider, endpoint, key, model, prompt, is_ping):
-    max_tokens = 16 if is_ping else 1024
+    max_tokens = 16 if is_ping else 1400
     user_prompt = PING_PROMPT if is_ping else prompt
     if provider == "anthropic":
         url = anthropic_endpoint(endpoint)
@@ -152,6 +156,18 @@ def error_text(exc):
 
 
 def call_provider(provider, endpoint, key, model, prompt, is_ping):
+    """Call the provider, with one retry when it is busy (429, 5xx) or briefly unreachable."""
+    try:
+        return call_once(provider, endpoint, key, model, prompt, is_ping)
+    except ProviderError as exc:
+        busy = exc.http_status.isdigit() and int(exc.http_status) in RETRY_STATUS
+        if is_ping or not (busy or str(exc).startswith("Cannot reach provider")):
+            raise
+    time.sleep(RETRY_WAIT)
+    return call_once(provider, endpoint, key, model, prompt, is_ping)
+
+
+def call_once(provider, endpoint, key, model, prompt, is_ping):
     url, body, headers = build_request(provider, endpoint, key, model, prompt, is_ping)
     check_endpoint(url)
     req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
@@ -183,7 +199,7 @@ def clean_error(message, key):
     if key:
         text = text.replace(key, "***")
     text = re.sub(r"[^A-Za-z0-9 .:_/,()'-]", " ", text)
-    return re.sub(r"\s+", " ", text).strip()[:300]
+    return re.sub(r"\s+", " ", text).strip()[:400]
 
 
 def process_row(row):

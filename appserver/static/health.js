@@ -136,6 +136,89 @@ var Health = (function () {
     if (el) el.href = page(view);
   }
 
+  function inlineHtml(text) {
+    var bits = String(text || '').split('`');
+    return bits.map(function (bit, index) {
+      return index % 2 === 1 ? '<code>' + esc(bit) + '</code>' : esc(bit);
+    }).join('');
+  }
+
+  function stepList(body) {
+    var parts = String(body || '').split(/\s+(?=\d{1,2}[.)]\s+)/);
+    var intro = '';
+    var items = [];
+    parts.forEach(function (part) {
+      var match = part.match(/^(\d{1,2})[.)]\s+([\s\S]*)$/);
+      if (match) items.push(match[2].trim());
+      else if (!items.length) intro = part.trim();
+      else if (items.length) items[items.length - 1] += ' ' + part.trim();
+    });
+    if (items.length < 2) return null;
+    return { intro: intro, items: items };
+  }
+
+  function sections(text) {
+    var cleaned = String(text || '').split('\n').filter(function (line) {
+      return !/^(SAMPLE_CHECK|FIX_CHECK|SUPPORT_TICKET):/i.test(line.trim());
+    }).join('\n').trim();
+    if (!cleaned) return [];
+    var found = [];
+    var match;
+    var bold = /\*\*([^*]+?)\*\*\s*:?\s*/g;
+    while ((match = bold.exec(cleaned))) {
+      found.push({ title: match[1].replace(/\s*:\s*$/, '').trim(), at: match.index, after: bold.lastIndex });
+    }
+    if (!found.length) {
+      var lines = /(?:^|\n)\s*(?:#{1,3}\s+)?([A-Za-z][^:\n]{2,80})\s*:\s+/g;
+      while ((match = lines.exec(cleaned))) {
+        var title = match[1].trim();
+        var at = match.index + (match[0].charAt(0) === '\n' ? 1 : 0);
+        found.push({ title: title, at: at, after: lines.lastIndex });
+      }
+    }
+    if (!found.length) return [{ title: 'Suggested fix', body: cleaned }];
+    var out = [];
+    if (found[0].at > 0) {
+      var lead = cleaned.slice(0, found[0].at).trim();
+      if (lead) out.push({ title: 'Summary', body: lead });
+    }
+    found.forEach(function (item, index) {
+      var end = index + 1 < found.length ? found[index + 1].at : cleaned.length;
+      out.push({ title: item.title, body: cleaned.slice(item.after, end).trim() });
+    });
+    return out.filter(function (item) { return item.title || item.body; });
+  }
+
+  function sectionBody(body) {
+    var steps = stepList(body);
+    if (!steps) return '<p>' + inlineHtml(body) + '</p>';
+    var html = steps.intro ? '<p>' + inlineHtml(steps.intro) + '</p>' : '';
+    html += '<ol>' + steps.items.map(function (item) { return '<li>' + inlineHtml(item) + '</li>'; }).join('') + '</ol>';
+    return html;
+  }
+
+  function reply(text, meta) {
+    var parts = sections(text);
+    meta = meta || {};
+    if (!parts.length) return '<p class="note">No suggestion yet.</p>';
+    if (parts.length === 1 && parts[0].title === 'Suggested fix' && parts[0].body.length < 320 && parts[0].body.indexOf('\n') < 0) {
+      return '<p class="note">' + inlineHtml(parts[0].body) + '</p>';
+    }
+    var html = '<div class="table-wrap"><table class="reply-table"><thead><tr><th>Section</th><th>Detail</th></tr></thead><tbody>';
+    parts.forEach(function (part) {
+      html += '<tr><td>' + esc(part.title) + '</td><td>' + sectionBody(part.body) + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    var note = [];
+    if (meta.from_ai && meta.from_ai !== 'none') note.push(meta.from_ai);
+    if (meta.requested_at && meta.requested_at !== 'none') note.push(meta.requested_at);
+    if (note.length) html += '<p class="note">' + esc(note.join(' · ')) + '</p>';
+    if (meta.earlier_ai_suggestion && meta.earlier_ai_suggestion !== 'none') {
+      html += '<p class="note">Earlier suggestion: ' + esc(meta.earlier_ai_suggestion) + '</p>';
+    }
+    return html;
+  }
+
   var helpPop = null;
   var helpBtn = null;
   function closeHelp() {
@@ -274,5 +357,5 @@ var Health = (function () {
 
   mountNav(0);
   help(document);
-  return { query: query, act: act, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help };
+  return { query: query, act: act, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply };
 })();

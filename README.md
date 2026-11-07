@@ -18,7 +18,7 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
 | **Data Topology** | The map opens as a summary: site (a shared domain, or an IPv4 /16) → ingestion path → sourcetype family → index. The busiest eight of each are named, and the rest is one Other node whose count still includes that tail. Hover a node to light its path through the map. Click a site, path, family, or index to open the hosts and sourcetypes inside it. Windows stays one family on the summary. Opening it lists the sourcetypes in the index; WinEventLog and XmlWinEventLog are split by the event-log channel in the source. Click Overview to return. Feeds you expect are a list in `lookups/feed_catalog.csv`: gone quiet, wrong sourcetype, and sources new this week. A catch-all index is any row whose state is catchall. The starting names are quarantine, lastchance, and main. Delete the ones this stack does not use. Click a host for its first/latest event and its own 24h trend (liveness stays on Host Heartbeat) |
 | **Derek+ Data Quality Agent** | Agentic loop over health tiles and learned ingest bounds (instance features, silent hosts, each host's heartbeat gap, same-hour ingest, search CPU, HEC, SC4S, Edge). A host still on its usual heartbeat whose hour is below that hour's level is a stopped input. When an AI provider is saved, it also checks the sample config and the fix check. If the suggestion is to open a Splunk support ticket, Generate fills a ticket you can copy. A human must click APPROVE or DISMISS before anything is recorded. Nothing is applied, and no ticket is filed. |
-| **Reports** | Timestamped HTML report: one compilation of the statistics collected across the health pages, or a targeted report for a single dashboard |
+| **Reports** | Timestamped HTML report: one compilation of the statistics collected across the health pages, or a targeted report for a single dashboard. Indexed events are listed by the index being written, with events per second, hosts, and sourcetypes |
 | **AI provider setup** | Set AI provider, model, and key in the UI, then SAVE to the search-head config lookup |
 
 Saved searches (all **disabled** on install):
@@ -55,7 +55,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.75.spl`.
+3. Upload `dist/splunk_exec_health-1.7.78.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -196,5 +196,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.75.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.78.spl --included-tags private_app
 ```
