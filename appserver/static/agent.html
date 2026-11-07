@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.78">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.79">
 </head>
 <body>
 <div class="page">
@@ -37,7 +37,7 @@
     <div id="list"></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.78"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.79"></script>
 <script>
 (function () {
   Health.link('home', 'executive_overview');
@@ -137,16 +137,14 @@
 
   function reload() {
     var base = params();
-    Promise.all([
-      Health.query('agent_queue', base),
-      Health.query('agent_status', base)
-    ]).then(function (res) {
-      var status = res[1][0] || {};
+    // One search: every queue row also carries the queue health (agent_status, issues).
+    Health.query('agent_queue', base).then(function (rows) {
+      var status = rows[0] || {};
       Health.stats(document.getElementById('stats'), [
         { val: status.agent_status || 'GREEN', lbl: 'Queue health', kind: status.agent_status === 'RED' ? 'bad' : (status.agent_status === 'YELLOW' ? 'warn' : 'ok') },
         { val: status.issues || '0', lbl: 'Open suggestions' }
       ]);
-      Health.table(document.getElementById('queue'), res[0], [
+      Health.table(document.getElementById('queue'), rows, [
         { key: 'severity', label: 'Severity' }, { key: 'issue', label: 'Issue' }, { key: 'entity', label: 'Entity' },
         { key: 'fix', label: 'Fix' }, { key: 'recurring', label: 'Recurring' }, { key: 'confidence', label: 'Confidence' },
         { key: 'status', label: 'Status' }, { key: 'approve', label: 'Approve' }, { key: 'dismiss', label: 'Dismiss' }
@@ -163,14 +161,19 @@
 
   function showSelection(row) {
     var find = { tok_finding_id: row.finding_ref, tok_cell: 'none', tok_row_status: row.status };
-    detail = null;
     sampleRows = [];
-    Health.query('agent_selected', find).then(function (rows) {
-      detail = rows[0] || null;
-      Health.table(document.getElementById('selected'), rows);
-      showTicket({}, [row.fix, sampleLine('Splunk Cloud'), detail && detail.suggested_fix]);
-    });
-    Health.query('agent_sample', { tok_finding_id: row.finding_ref }).then(function (rows) {
+    // The queue row already holds this detail, so no search runs for it.
+    detail = {
+      severity: row.severity, issue: row.issue, entity: row.entity, likely_cause: row.likely_cause,
+      suggested_fix: row.suggested_fix, where_to_act: row.where_to_act, evidence: row.evidence,
+      confidence: row.confidence, playbook_name: row.playbook_name, status: row.status, _color_rank: row._color_rank
+    };
+    Health.table(document.getElementById('selected'), [detail]);
+    showTicket({}, [row.fix, sampleLine('Splunk Cloud'), detail.suggested_fix]);
+    // The sample is a lookup read; the handler rejects characters these patterns leave out.
+    var fixType = /^[a-z0-9_]{1,64}$/.test(row.fix_type || '') ? row.fix_type : 'none';
+    var entity = String(row.entity || 'none').replace(/[|"\\`$\r\n]/g, '_').slice(0, 200) || 'none';
+    Health.query('agent_sample', { tok_fix_type: fixType, tok_entity: entity }).then(function (rows) {
       sampleRows = rows;
       Health.table(document.getElementById('sample'), rows);
       showTicket({}, [row.fix, sampleLine('Splunk Cloud'), detail && detail.suggested_fix]);
