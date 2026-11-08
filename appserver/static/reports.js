@@ -74,8 +74,8 @@
     topology: {
       title: 'Data Topology',
       sections: [
-        { title: 'Sites, sourcetype families, and indexes', query: 'topo_macro' },
-        { title: 'Category, network, ingest method, and index (24h)', query: 'topo_map' },
+        { title: 'Sites, sourcetype families, and indexes', query: 'topo_overview', view: 'macro' },
+        { title: 'Category, network, ingest method, and index (24h)', query: 'topo_overview', view: 'map' },
         { title: 'Top source, path, and index flows', query: 'topo_paths' },
         { title: 'Forwarder to indexer (tcpin)', query: 'tcpin' },
         { title: 'Feeds you expect', query: 'feed_catalog' },
@@ -85,7 +85,7 @@
     agent: {
       title: 'Data Quality Agent',
       sections: [
-        { title: 'Queue health', query: 'agent_status', params: { tok_ask: 'all' } },
+        { title: 'Queue health', query: 'agent_queue', params: { tok_ask: 'all' }, health: true },
         { title: 'Work queue', query: 'agent_queue', params: { tok_ask: 'all' }, columns: QUEUE_COLUMNS },
         { title: 'Saved AI suggestions', query: 'agent_list', params: { tok_ai_list: 'show' } }
       ]
@@ -118,13 +118,35 @@
         var params = {};
         Object.keys(section.params || {}).forEach(function (name) { params[name] = section.params[name]; });
         if (section.host) params.host_filter = filter;
-        jobs.push({ book: key, title: section.title, query: section.query, params: params, columns: section.columns });
+        jobs.push({ book: key, title: section.title, query: section.query, params: params, columns: section.columns, view: section.view, health: section.health });
       });
     });
     return jobs;
   }
+  // Sections that ask for the same search share one request, then take their part:
+  // a topology view, or the queue health that every queue row carries.
+  function shape(job, rows) {
+    if (job.view) {
+      return rows.filter(function (row) { return row.topo_view === job.view; }).map(function (row) {
+        var copy = {};
+        Object.keys(row).forEach(function (key) { if (key !== 'topo_view') copy[key] = row[key]; });
+        return copy;
+      });
+    }
+    if (job.health) {
+      var first = rows[0] || {};
+      return [{ agent_status: first.agent_status || 'GREEN', issues: first.issues || '0' }];
+    }
+    return rows;
+  }
   function runPool(jobs) {
     var results = new Array(jobs.length);
+    var shared = {};
+    function fetchOnce(job) {
+      var key = job.query + '?' + JSON.stringify(job.params || {});
+      if (!shared[key]) shared[key] = Health.query(job.query, job.params);
+      return shared[key].then(function (rows) { return shape(job, rows); });
+    }
     var cursor = 0;
     var active = 0;
     var finished = 0;
@@ -136,7 +158,7 @@
           (function (index) {
             active += 1;
             status.textContent = 'Running ' + jobs[index].title + ' (' + (finished + active) + ' of ' + jobs.length + ')';
-            Health.query(jobs[index].query, jobs[index].params).then(function (rows) {
+            fetchOnce(jobs[index]).then(function (rows) {
               results[index] = { ok: true, rows: rows };
             }, function (error) {
               results[index] = { ok: false, error: error };

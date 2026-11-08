@@ -445,12 +445,20 @@
   function settled(promise) {
     return promise.then(function (rows) { return { rows: rows }; }, function (error) { return { error: error }; });
   }
+  // topo_overview returns the map and the summary from one search; topo_view tells them apart.
+  function view(result, name) {
+    if (!result.rows) return result;
+    return {
+      rows: result.rows.filter(function (row) { return row.topo_view === name; })
+        .map(function (row) { var copy = {}; Object.keys(row).forEach(function (key) { if (key !== 'topo_view') copy[key] = row[key]; }); return copy; })
+    };
+  }
   Promise.all([
     settled(Health.query('topo_paths')),
     settled(Health.query('tcpin')),
-    settled(Health.query('topo_map')),
-    settled(Health.query('topo_macro'))
+    settled(Health.query('topo_overview'))
   ]).then(function (res) {
+    res = [res[0], res[1], view(res[2], 'map'), view(res[2], 'macro')];
     if (!res[0].rows || !res[1].rows) {
       Health.fail(document.getElementById('stats'), (res[0].error || res[1].error || 'The topology searches could not run.'));
       return;

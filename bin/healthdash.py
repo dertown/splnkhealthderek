@@ -33,6 +33,7 @@ PARAMS = {
     "tok_topo_family": (r"^(?:\*|Other sourcetypes|[^\"\\`$\r\n|]{1,80})$", "*"),
     "tok_topo_endpoint": (r"^(?:\*|[^\"\\`$\r\n|]{1,80})$", "*"),
     "tok_finding_id": (r"^(none|[a-fA-F0-9]{8,128})$", "none"),
+    "tok_fix_type": (r"^(none|[a-z0-9_]{1,64})$", "none"),
     "tok_ask": (r"^[a-z0-9 ]{0,64}$", "all"),
     "tok_cell": (r"^(none|approve|dismiss|fix)$", "none"),
     "tok_row_status": (r"^(none|open|approved|dismissed)$", "none"),

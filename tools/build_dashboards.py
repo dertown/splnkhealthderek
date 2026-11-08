@@ -772,24 +772,20 @@ Q_TOPO_ENRICH = r"""
     match(source, "(?i)^/var/|^/opt/|^/etc/|^/usr/|^/home/"), "Linux",
     1=1, null())
 | append [
-    search index=_internal source=*metrics.log group=tcpin_connections
+    search index=_internal sourcetype=splunkd source=*metrics.log (group=tcpin_connections OR group=udpin_connections)
     | eval host=coalesce(sourceHost, hostname)
     | eval fwd=lower(trim(coalesce(fwdType, "")))
     | eval conn=lower(trim(coalesce(connectionType, "")))
-    | eval forwarder_class=case(
+    | eval forwarder_class=if(group="tcpin_connections", case(
         match(fwd, "^(uf|lwf)$"), "UF",
         match(fwd, "^(full|hf|hwf)$"), "HF",
+        1=1, null()), null())
+    | eval metrics_net=case(
+        group="tcpin_connections" AND isnull(forwarder_class) AND match(conn, "raw") AND isnum(coalesce(destPort, dest_port)), "TCP:".coalesce(destPort, dest_port),
+        group="udpin_connections" AND match("UDP:".coalesce(destPort, dest_port, port), "^UDP:[0-9]+$"), "UDP:".coalesce(destPort, dest_port, port),
         1=1, null())
-    | eval metrics_net=if(isnull(forwarder_class) AND match(conn, "raw") AND isnum(coalesce(destPort, dest_port)), "TCP:".coalesce(destPort, dest_port), null())
     | where isnotnull(host) AND (isnotnull(forwarder_class) OR isnotnull(metrics_net))
     | stats latest(forwarder_class) as forwarder_class, latest(metrics_net) as metrics_net by host
-]
-| append [
-    search index=_internal source=*metrics.log group=udpin_connections
-    | eval host=coalesce(sourceHost, hostname)
-    | eval metrics_net="UDP:".coalesce(destPort, dest_port, port)
-    | where isnotnull(host) AND match(metrics_net, "^UDP:[0-9]+$")
-    | stats latest(metrics_net) as metrics_net by host
 ]
 | eventstats latest(forwarder_class) as forwarder_class, latest(metrics_net) as metrics_net by host
 | eventstats values(os_class) as os_classes by host
@@ -938,6 +934,24 @@ Q_TOPO_MACRO = (
 """
 )
 
+# The map and the summary in one search. They share the tstats and metrics.log
+# pass, so it runs once; topo_view says which rows belong to which.
+TOPO_BASE = (
+    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n"
+    + Q_TOPO_CLASSIFY
+)
+assert Q_TOPO_MAP.startswith(TOPO_BASE + "\n") and Q_TOPO_MACRO.startswith(TOPO_BASE + "\n")
+Q_TOPO_OVERVIEW = (
+    TOPO_BASE
+    + "\n| appendpipe [\n"
+    + Q_TOPO_MAP[len(TOPO_BASE) + 1:].rstrip()
+    + '\n    | eval topo_view="map"\n]\n| appendpipe [\n    | where isnull(topo_view)\n'
+    + Q_TOPO_MACRO[len(TOPO_BASE) + 1:].rstrip()
+    + '\n    | eval topo_view="macro"\n]\n| where isnotnull(topo_view)'
+)
+
 # One site, family, path, or index. "Other *" keeps everything outside the top
 # groups, using the same rank as the summary. The map then draws hosts.
 Q_TOPO_DETAIL = (
@@ -999,7 +1013,7 @@ Q_TOPO_FOCUS_TREND = (
 )
 
 Q_TCPIN_PATHS = r"""
-search index=_internal source=*metrics.log group=tcpin_connections
+search index=_internal sourcetype=splunkd source=*metrics.log group=tcpin_connections
 | eval data_source=coalesce(sourceHost, hostname)
 | eval receiver=host
 | eval fwd=lower(trim(coalesce(fwdType, "")))
@@ -1213,18 +1227,24 @@ def dq_agent_findings_core() -> str:
 ]
 | append [
     | tstats count as events where index=`exec_health_idx` earliest=-8d@h latest=@h by _time span=1h index
+    | appendpipe [
     | streamstats window=168 current=f avg(events) as ma_7d by index
     | where _time >= relative_time(now(), "-1h@h") AND _time < relative_time(now(), "@h")
     | eval drop_pct=if(ma_7d>0, round(((ma_7d-events)/ma_7d)*100, 1), 0)
     | where drop_pct >= `exec_health_drop_red_pct` AND ma_7d>10
     | eval issue="Index volume below 7-day moving average", severity="RED", entity=index, evidence="last_hour="+tostring(events)+", ma_7d="+tostring(round(ma_7d,0))+", drop_pct="+tostring(drop_pct)+"%", suggested_fix="Confirm whether this index was expected to be quiet (maintenance, source retirement). If not, check the last forwarder or HEC route that writes here. Macro exec_health_idx can be narrowed after review.", fix_type="runbook_index", proposed_config="optional: Settings > Search macros > exec_health_idx", action="Review"
     | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+    ]
+    | appendpipe [
+    | where isnull(issue)
+"""
+        + index_season_findings().split("\n", 1)[1]
+        + """    ]
+    | where isnotnull(issue)
 ]
 | append [
 """
         + host_findings
-        + "]\n| append [\n"
-        + index_season_findings()
         + "]\n| append [\n"
         + hec_findings
         + "]\n| append [\n"
@@ -1294,7 +1314,7 @@ def dq_agent_findings_core() -> str:
 ]
 | where isnull(_seed)
 | append [
-    search index=_internal source=*metrics.log group=tcpin_connections earliest=-2h
+    search index=_internal sourcetype=splunkd source=*metrics.log group=tcpin_connections earliest=-2h
     | eval entity=coalesce(sourceHost, hostname)
     | eval tool_fwdType=lower(trim(coalesce(fwdType, "")))
     | eval tool_conn=lower(trim(coalesce(connectionType, "")))
@@ -1356,7 +1376,7 @@ def exec_area_rollup() -> str:
         ),
         _area_row(
             r"""
-search index=_internal source=*metrics.log group=queue blocked=true
+search index=_internal sourcetype=splunkd source=*metrics.log group=queue blocked=true
 | stats count as blocked""",
             AREA_HOSTS,
             "null()",
@@ -2044,7 +2064,7 @@ Q_INDEXED_COMPARE = r"""
 """.strip()
 
 Q_INGEST_ACTIONS = r"""
-search index=_internal source=*metrics.log group=queue blocked=true
+search index=_internal sourcetype=splunkd source=*metrics.log group=queue blocked=true
 | timechart span=5m limit=10 count as blocked_reports by name
 """.strip()
 
@@ -2299,7 +2319,10 @@ Q_DQ_QUEUE_VIEW = r"""
 | eval fix=coalesce(suggested_fix, "")
 | eval fix=if(len(fix)>80, substr(fix,1,80)."...", fix)
 | eval _finding_id=finding_id, _ai_brief=ai_brief, _ai_auto="ask"
-| table severity, issue, entity, fix, recurring, confidence, status, approve, dismiss, _finding_id, _ai_brief, _ai_auto, _color_rank
+| eventstats count(eval(status="open")) as issues, count(eval(status="open" AND severity="RED")) as red_issues
+| eval agent_status=case(red_issues>0, "RED", issues>0, "YELLOW", 1=1, "GREEN")
+| eval where_to_act=coalesce(splunk_web_path, "Open the matching dashboard in this app")
+| table severity, issue, entity, fix, recurring, confidence, status, approve, dismiss, likely_cause, suggested_fix, where_to_act, evidence, playbook_name, fix_type, agent_status, issues, _finding_id, _ai_brief, _ai_auto, _color_rank
 """
 
 Q_DQ_PICKER = r"""
@@ -2315,6 +2338,27 @@ Q_DQ_SUGGESTION = r"""
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval where_to_act=coalesce(splunk_web_path, "Open the matching dashboard in this app")
 | table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank
+"""
+
+# The HTML page's sample: a lookup read only. The page already has the row's
+# fix_type and entity, so it does not rerun the findings search.
+Q_DQ_SAMPLE_LOOKUP = r"""
+| inputlookup dq_agent_config_samples where fix_type="$tok_fix_type$"
+| eval entity="$tok_entity$"
+| eval safe_entity=replace(entity, "[^A-Za-z0-9._:/ -]", "_")
+| eval rows="File|".conf_file."@@Goes in|".where_it_goes."@@Splunk Cloud|".cloud_note."@@Sample|".replace(sample, "@@", "@@Sample|")."@@Check on the host|".check_command."@@Check in Splunk|".check_search
+| eval rows=split(replace(rows, "\{\{entity\}\}", safe_entity), "@@")
+| mvexpand rows
+| rex field=rows "^(?<part>[^|]*)\|(?<text>.*)"
+| where text!="none"
+| table part, text
+| appendpipe [
+    | stats count
+    | where count=0
+    | eval part="Sample", text="Select a row in the work queue to see a sample config for that problem."
+    | fields - count
+]
+| eval _color_rank=3
 """
 
 # One table row per line so the sample reads top to bottom. Samples are templates that
@@ -3065,7 +3109,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.78"
+APP_VERSION = "1.7.79"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3549,8 +3593,7 @@ def emit_catalog() -> None:
         "edge_logs": entry(Q_EDGE_LOGS, "-4h", "now", count=100),
         "indexed": entry(Q_INDEXED_COMPARE, "-4h", "now", count=300),
         "topo_paths": entry(Q_TOPO_PATHS, "-4h", "now", count=100, timeout=120),
-        "topo_map": entry(Q_TOPO_MAP, "-24h", "now", count=500, timeout=120),
-        "topo_macro": entry(Q_TOPO_MACRO, "-24h", "now", count=240, timeout=120),
+        "topo_overview": entry(Q_TOPO_OVERVIEW, "-24h", "now", count=740, timeout=120),
         "topo_detail": entry(Q_TOPO_DETAIL, "-24h", "now", ["tok_topo_environment", "tok_topo_family", "tok_topo_ingest", "tok_topo_index"], count=300, timeout=120),
         "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_category", "tok_topo_network", "tok_topo_ingest", "tok_topo_index", "tok_topo_endpoint"], count=200, timeout=120),
         "tcpin": entry(Q_TCPIN_PATHS, "-4h", "now", count=80),
@@ -3558,9 +3601,7 @@ def emit_catalog() -> None:
         "topo_src_trend": entry(Q_TOPO_SRC_TREND, "-25h@m", "@m", ["tok_data_source"], count=120),
         "topo_src_outliers": entry(Q_TOPO_SRC_OUTLIERS, "-25h@m", "@m", ["tok_data_source"], count=50),
         "agent_queue": entry(asked + "\n" + Q_DQ_QUEUE_VIEW + "\n| rename _finding_id AS finding_ref, _ai_brief AS ai_brief_text", "-24h", "now", gate, count=100, timeout=120),
-        "agent_status": entry(asked + "\n" + Q_DQ_AGENT_STATUS, "-24h", "now", gate, count=5, timeout=120),
-        "agent_selected": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_SUGGESTION, "-24h", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5, timeout=120),
-        "agent_sample": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_CONFIG_SAMPLE, "-24h", "now", ["tok_finding_id"], count=20, timeout=120),
+        "agent_sample": entry(Q_DQ_SAMPLE_LOOKUP, "0", "now", ["tok_fix_type", "tok_entity"], count=20, timeout=30),
         "agent_replies": entry(Q_DQ_AI_REPLIES, "0", "now", ["tok_finding_id", "tok_ai_ask"], count=5),
         "agent_list": entry(Q_DQ_AI_LIST, "0", "now", ["tok_ai_list"], count=100),
         "agent_recorded": entry(Q_DQ_RECORDED_READ, "0", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5),
