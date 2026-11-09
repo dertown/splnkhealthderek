@@ -736,11 +736,28 @@ def check_html_backend() -> None:
             err("health_queries.json", f"{name} looks like it carries a secret")
         if re.search(r"""api_key\s*=\s*["'][^"']{12,}""", spec["spl"]):
             err("health_queries.json", f"{name} assigns a literal API key")
+        # The AI provider key goes to storage/passwords from bin/healthdash.py. Search
+        # text is kept in _audit and the job inspector, so it must never carry the key.
+        if "tok_cfg_key" in spec["spl"] or "tok_cfg_key" in declared:
+            err("health_queries.json", f"{name} places the AI provider key (tok_cfg_key) into search text")
     if writes != {"decide", "ask", "ticket", "save_config", "conn_test"}:
         err("health_queries.json", f"write searches are {sorted(writes)}")
     for banned in ("verify=False", "CERT_NONE", "http://"):
         if banned in handler:
             err("bin/healthdash.py", f"contains {banned}")
+    if not re.search(r'^SECRET_PARAMS = \{[^}]*"tok_cfg_key"', handler, re.M):
+        err("bin/healthdash.py", "SECRET_PARAMS must list tok_cfg_key so it is never placed into a search")
+    if "storage/passwords" not in handler:
+        err("bin/healthdash.py", "must save the AI provider key to storage/passwords")
+    ping = (ROOT / "bin" / "derekaiping.py").read_text(encoding="utf-8")
+    if "storage/passwords" not in ping or 'row.get("api_key")' in ping:
+        err("bin/derekaiping.py", "must read the AI provider key from storage/passwords, not from search results")
+    for path in [DEFAULT / "savedsearches.conf", *VIEWS.glob("*.xml")]:
+        if path.is_file() and "$tok_cfg_key$" in path.read_text(encoding="utf-8"):
+            err(path.name, "places the AI provider key (tok_cfg_key) into search text")
+    meta = parse_conf(ROOT / "metadata" / "default.meta")
+    if "passwords" not in meta:
+        err("default.meta", "missing [passwords] stanza for the AI provider key in storage/passwords")
 
     restmap = parse_conf(DEFAULT / "restmap.conf")
     stanza = restmap.get("script:healthdash", {})

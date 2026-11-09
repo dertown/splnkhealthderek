@@ -9,7 +9,7 @@
 <div class="page">
   <div class="hero">
     <h1>AI provider setup</h1>
-    <p class="tagline">Choose a provider and model, paste the API key, and save. The key is stored in the KV Store on this search head and is never written into the app. Leave the key blank to keep the stored one. Saving also runs the connection test.</p>
+    <p class="tagline">Choose a provider and model, paste the API key, and save. The key is stored encrypted in Splunk's credential store on this search head, never in a search or in the app. Saving it needs the list_storage_passwords capability. Leave the key blank to keep the stored one. Saving also runs the connection test.</p>
     <div class="hero-meta"><a id="home" href="#">Executive overview</a><span>·</span><a id="agent" href="#">Data Quality Agent</a></div>
   </div>
   <div class="panel">

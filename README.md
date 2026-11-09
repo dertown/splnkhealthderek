@@ -65,6 +65,7 @@ Grant the viewing role:
 
 - Indexes: `_internal`, `_introspection`, and `_metrics` if Edge panels should run
 - Capabilities: `search`, `rest_properties_get` (standard for power / sc_admin)
+- To save the AI provider key or use the AI provider: `list_storage_passwords` (sc_admin and admin have it). See [Optional AI provider](#optional-ai-provider).
 
 On Cloud, override `exec_health_idx` and `exec_health_sc4s_idx` if `index=*` is too broad for your workload limits.
 
@@ -115,7 +116,7 @@ Enable **Exec Health - Data quality agent report** if you want open findings ema
 
 ### Optional AI provider
 
-Use **Configure → AI provider** (or click the AI provider tile on the agent dashboard). Fill in **AI provider**, pick a **model** from the dropdown, enter the **API key**, then click **SAVE**. Search does not open. That writes KV Store collection `dq_agent_ai_config` on this search head (the key **survives app updates**) and queues a **connection test** ping. Dashboards show **SET** / **MISSING**, not the key. Setup status is **READY** / **FAILED** / **LOCAL**. The connection tile is **PASS** / **TESTING** / **FAIL** / **SKIP**. Leave the key field blank on later saves to keep the stored value.
+Use **Configure → AI provider** (or click the AI provider tile on the agent dashboard). Fill in **AI provider**, pick a **model** from the dropdown, enter the **API key**, then click **SAVE**. Search does not open. The key goes to Splunk's credential store (`storage/passwords`, app `splunk_exec_health`, realm `splunk_exec_health_ai`, name `provider_api_key`), where it is encrypted and **survives app updates**. The provider and model go to KV Store collection `dq_agent_ai_config`, which records only that a key is stored (`api_key=stored`) and its length (`key_len`). Saving then runs a **connection test** ping. Dashboards show **SET** / **MISSING**, not the key. Setup status is **READY** / **FAILED** / **LOCAL**. The connection tile is **PASS** / **TESTING** / **FAIL** / **SKIP**. Leave the key field blank on later saves to keep the stored value.
 
 1. Pick OpenAI / Cisco AI Defense / Azure OpenAI / Anthropic / custom, pick a **model** from the dropdown, enter the key, click **SAVE**.
 2. SAVE sends one short ping **directly from the search head** to the provider with `| derekaiping` (`bin/derekaiping.py`). Anthropic pings `https://api.anthropic.com/v1/messages` with `x-api-key` and a Claude model. No webhook, alert, or gateway is involved.
@@ -123,9 +124,18 @@ Use **Configure → AI provider** (or click the AI provider tile on the agent da
 4. On the agent dashboard, select a finding; the ask runs automatically. The reply is stored with the request and shown under **AI suggested fix**.
 5. Pick **None** and SAVE to turn the provider off. Leave the key field blank to keep a key that is already stored.
 
+**Permissions for the key.** The REST handler `bin/healthdash.py` writes the key to `storage/passwords` as the signed-in user when SAVE is clicked, and `bin/derekaiping.py` reads it back as the user running the search. Both need:
+
+- the `list_storage_passwords` capability (sc_admin and admin have it; grant it to any other role that should save the key or use AI suggestions), and
+- the `[passwords]` access in `metadata/default.meta`: read and write for `admin` and `sc_admin` only. Add a role there (or in `local.meta`) to let it use the stored key.
+
+If the user lacks these, SAVE shows *The API key could not be saved to the credential store* and nothing is written. AI calls fail with *API key is not in the credential store*.
+
+**Upgrading from 1.7.75 or earlier.** Older versions kept the key in plaintext in `dq_agent_ai_config`. That value is no longer used. Enter the key once more and click SAVE: the key moves to the credential store, and the plaintext copy in KV Store is overwritten. Until you do, the old plaintext copy stays in KV Store and AI calls fail with *API key is not in the credential store*. A SAVE with the key field blank also clears the old copy and shows the key as **MISSING**.
+
 Until you SAVE in the UI, macros `exec_health_ai_*` remain the fallback (default `off`). HEC token secrets and webhook URLs still do not belong in this app.
 
-How `derekaiping` handles the key: the dashboard search reads the key from KV Store and passes it to the command in the result row, not in the search string. The command drops the key from its output, redacts it from error text, uses the system TLS trust store with TLS 1.2 or later, does not follow redirects, and refuses non-HTTPS, loopback, and link-local endpoints. It has no embedded keys or certificates.
+How the key is kept out of searches: the key typed on the setup page goes only to the REST handler, which stores it in `storage/passwords`. No search ever carries the key, so it is not in `_audit` or the job inspector; the searches get only its length in the `tok_cfg_save` latch. `tools/validate_keys.py` fails if a catalog search uses `$tok_cfg_key$` again. `derekaiping` reads the key from `storage/passwords` with the session key Splunk passes to the command, not from the result row. The command drops the key from its output, redacts it from error text, uses the system TLS trust store with TLS 1.2 or later, does not follow redirects, and refuses non-HTTPS, loopback, and link-local endpoints. It has no embedded keys or certificates.
 
 ## Tune thresholds
 

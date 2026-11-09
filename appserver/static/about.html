@@ -22,7 +22,7 @@
   <div class="section">
     <h2 class="section-title" data-help="What a Splunk Cloud search head needs. The AI calls leave this search head over HTTPS. Install and administer the app as sc_admin. The API key is not in the app package.">Cloud notes</h2>
     <div class="panel">
-      <p>The AI connection test and the suggested fixes call the provider directly from the search head, so the search head needs outbound HTTPS to that provider. The API key lives in the KV Store collection <code>dq_agent_ai_config</code>, which is not shipped in the app package.</p>
+      <p>The AI connection test and the suggested fixes call the provider directly from the search head, so the search head needs outbound HTTPS to that provider. The API key lives in Splunk's credential store (<code>storage/passwords</code>), which is not shipped in the app package and is never placed in a search.</p>
       <p>Install with <code>sc_admin</code>. The app ships with <code>is_configured = 0</code> and every object grants <code>sc_admin</code>.</p>
     </div>
   </div>

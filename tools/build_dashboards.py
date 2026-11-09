@@ -2480,21 +2480,25 @@ Q_DQ_AI_MODELS = r"""
 """
 
 # Writes only after SAVE is clicked. Empty page-load skips outputlookup.
-# api_key is stored in KV Store (dq_agent_ai_config), not in a packaged CSV, so app
-# updates do not wipe it. Leave the key field blank to keep the stored value.
+# The key itself never reaches this search: bin/healthdash.py stores it in the
+# credential store (storage/passwords) and passes only its length in the
+# tok_cfg_save latch. The KV row records api_key="stored" (or "none") and key_len.
+# Leave the key field blank to keep the stored key. A plaintext key left in KV by
+# an older version is replaced with "none", so the person enters it again.
 Q_DQ_AI_SAVE_CONFIG = r"""
 | makeresults
 | eval save="$tok_cfg_save$"
-| eval want="save|".replace(lower("$tok_cfg_provider$"), "[^a-z]", "")."|".replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")."|".tostring(len(replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")))
+| eval key_len=tonumber(mvindex(split(save, "|"), 3))
+| eval want="save|".replace(lower("$tok_cfg_provider$"), "[^a-z]", "")."|".replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")."|".tostring(key_len)
 | eval stanza="default", _key="default"
 | lookup dq_agent_ai_config stanza OUTPUT inbox_index AS prev_inbox, inbox_sourcetype AS prev_st, endpoint AS prev_endpoint, api_key AS prev_key
 | eval provider=replace(lower("$tok_cfg_provider$"), "[^a-z]", "")
 | eval provider=if(provider="openai" OR provider="cisco" OR provider="azure" OR provider="anthropic" OR provider="custom", provider, "none")
 | eval model=replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")
 | eval model=if(model="" OR isnull(model), "none", model)
-| eval api_key=replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")
-| eval api_key=if(api_key="" OR isnull(api_key) OR api_key="none", coalesce(prev_key, "none"), api_key)
-| eval api_key=if(provider="none", "none", api_key)
+| lookup dq_agent_ai_config stanza OUTPUT key_len AS prev_len
+| eval api_key=case(provider="none", "none", key_len>0, "stored", prev_key="stored", "stored", 1=1, "none")
+| eval key_len=case(api_key="none", 0, key_len>0, key_len, 1=1, coalesce(prev_len, 0))
 | where save=want
 | eval mode=if(provider="none", "off", "provider")
 | lookup dq_agent_ai_providers provider OUTPUT default_endpoint
@@ -2504,15 +2508,15 @@ Q_DQ_AI_SAVE_CONFIG = r"""
 | eval inbox_index=coalesce(prev_inbox, "main")
 | eval inbox_sourcetype=coalesce(prev_st, "derek_health_ai")
 | eval updated_by="human_dashboard", updated_at=strftime(now(), "%Y-%m-%d %H:%M:%S"), note="ui_config"
-| table _key, stanza, mode, provider, model, endpoint, api_key, inbox_index, inbox_sourcetype, updated_by, updated_at, note
+| table _key, stanza, mode, provider, model, endpoint, api_key, key_len, inbox_index, inbox_sourcetype, updated_by, updated_at, note
 | appendpipe [
     | inputlookup append=true dq_agent_ai_config
-    | stats latest(mode) as mode, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(api_key) as api_key, latest(inbox_index) as inbox_index, latest(inbox_sourcetype) as inbox_sourcetype, latest(updated_by) as updated_by, latest(updated_at) as updated_at, latest(note) as note by stanza
+    | stats latest(mode) as mode, latest(provider) as provider, latest(model) as model, latest(endpoint) as endpoint, latest(api_key) as api_key, latest(key_len) as key_len, latest(inbox_index) as inbox_index, latest(inbox_sourcetype) as inbox_sourcetype, latest(updated_by) as updated_by, latest(updated_at) as updated_at, latest(note) as note by stanza
     | eval _key=stanza
     | outputlookup dq_agent_ai_config
 ]
 | where stanza="default"
-| eval key_state=if(api_key!="none" AND api_key!="", "SET", "MISSING")
+| eval key_state=if(api_key="stored", "SET", "MISSING")
 | eval _color_rank=3
 | table updated_at, provider, model, key_state, mode, _color_rank
 """
@@ -2522,21 +2526,20 @@ Q_DQ_AI_SAVE_CONFIG = r"""
 Q_DQ_AI_CONN_WRITE = r"""
 | makeresults
 | eval save="$tok_cfg_save$"
-| eval want="save|".replace(lower("$tok_cfg_provider$"), "[^a-z]", "")."|".replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")."|".tostring(len(replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")))
+| eval key_len=tonumber(mvindex(split(save, "|"), 3))
+| eval want="save|".replace(lower("$tok_cfg_provider$"), "[^a-z]", "")."|".replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")."|".tostring(key_len)
 | eval stanza="default"
 | lookup dq_agent_ai_config stanza OUTPUT api_key AS prev_key, endpoint AS prev_endpoint
 | eval provider=replace(lower("$tok_cfg_provider$"), "[^a-z]", "")
 | eval provider=if(provider="openai" OR provider="cisco" OR provider="azure" OR provider="anthropic" OR provider="custom", provider, "none")
 | eval model=replace("$tok_cfg_model$", "[^A-Za-z0-9._-]", "")
 | eval model=if(model="" OR isnull(model), "none", model)
-| eval api_key=replace("$tok_cfg_key$", "[^A-Za-z0-9._/=+-]", "")
-| eval api_key=if(api_key="" OR isnull(api_key) OR api_key="none", coalesce(prev_key, "none"), api_key)
-| eval api_key=if(provider="none", "none", api_key)
+| eval api_key=if(provider="none", "none", coalesce(prev_key, "none"))
 | lookup dq_agent_ai_providers provider OUTPUT default_endpoint
 | eval endpoint=coalesce(default_endpoint, prev_endpoint, "none")
 | eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
 | eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
-| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none" AND len(api_key)>=8, 1, 0)
+| eval key_ok=if(api_key="stored", 1, 0)
 | eval model_ok=if(model!="none" AND model!="", 1, 0)
 | eval endpoint_ok=if(match(lower(coalesce(endpoint, "")), "^https://[a-z0-9]"), 1, 0)
 | where save=want AND provider!="none" AND key_ok=1 AND model_ok=1 AND endpoint_ok=1
@@ -2568,7 +2571,7 @@ Q_DQ_AI_CONN_TEST = Q_DQ_AI_CFG_ROW + r"""
 | eval model_ok=if(isnotnull(model) AND model!="" AND model!="none", 1, 0)
 | eval endpoint_ok=if(isnotnull(endpoint) AND endpoint!="" AND endpoint!="none", 1, 0)
 | eval endpoint_https=if(match(lower(coalesce(endpoint, "")), "^https://[a-z0-9]"), 1, 0)
-| eval key_shape=if(key_state="SET" AND len(api_key)>=8, "ok", "bad")
+| eval key_shape=if(api_key="stored", "ok", "bad")
 | eval setup_reason=case(
     mode!="provider" OR provider="none" OR provider="", "Local only. No provider is saved.",
     key_state!="SET", "Setup incomplete: API key is missing. Enter a key and click SAVE.",
@@ -3537,8 +3540,10 @@ def emit_catalog() -> None:
         "ai_current": entry(Q_DQ_AI_CONN_TEST, "0", "now", count=5),
         "ai_providers": entry("| inputlookup dq_agent_ai_providers | table provider, provider_label, default_endpoint, notes", "0", "now", count=20),
         "ai_models": entry(Q_DQ_AI_MODELS, "0", "now", ["tok_cfg_provider"], count=50),
-        "save_config": entry(Q_DQ_AI_SAVE_CONFIG, "0", "now", ["tok_cfg_save", "tok_cfg_provider", "tok_cfg_model", "tok_cfg_key"], count=5, timeout=60, write=True),
-        "conn_test": entry(Q_DQ_AI_CONN_WRITE, "0", "now", ["tok_cfg_save", "tok_cfg_provider", "tok_cfg_model", "tok_cfg_key"], count=5, timeout=150, write=True),
+        # tok_cfg_key is read by bin/healthdash.py and stored in storage/passwords; it is
+        # never a search parameter. tools/validate_keys.py fails if it comes back.
+        "save_config": entry(Q_DQ_AI_SAVE_CONFIG, "0", "now", ["tok_cfg_save", "tok_cfg_provider", "tok_cfg_model"], count=5, timeout=60, write=True),
+        "conn_test": entry(Q_DQ_AI_CONN_WRITE, "0", "now", ["tok_cfg_save", "tok_cfg_provider", "tok_cfg_model"], count=5, timeout=150, write=True),
     }
     import re as _re
     for name, item in catalog.items():
