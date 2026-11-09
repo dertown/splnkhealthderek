@@ -685,6 +685,35 @@ Q_LIVE = r"""
 | eval events_per_sec=round(events/900, 1)
 """.strip()
 
+
+def live_by_index(earliest: str, window_sec: int) -> str:
+    """Events written to each index in a fixed window, with the rate for that window.
+
+    The total row is a second tstats so a head on the busiest indexes does not
+    change the estate total. Hosts and sourcetypes stay blank on that row because
+    a sum would count the same host twice.
+    """
+    return f"""
+| tstats count as events, dc(host) as hosts, dc(sourcetype) as sourcetypes, latest(_time) as last_seen where index=`exec_health_idx` earliest={earliest} latest=now by index
+| eval events_per_sec=round(events/{window_sec}, 2)
+| eval last_event=strftime(last_seen, "%Y-%m-%d %H:%M:%S")
+| sort 0 -events
+| head 40
+| append [
+    | tstats count as events where index=`exec_health_idx` earliest={earliest} latest=now
+    | appendpipe [ stats count | where count=0 | eval events=0 ]
+    | eval index="All indexes", events_per_sec=round(events/{window_sec}, 2)
+]
+| eval _order=if(index="All indexes", 0, 1)
+| sort 0 _order -events
+| fields - last_seen _order
+| table index, events, events_per_sec, hosts, sourcetypes, last_event
+""".strip()
+
+
+Q_LIVE_BY_INDEX = live_by_index("-15m", 900)
+Q_INDEXED_BY_INDEX = live_by_index("-4h", 14400)
+
 Q_TOP_INDEXES = r"""
 search `exec_health_license_usage`
 | eval GB=round(b/1024/1024/1024, 3)
@@ -743,24 +772,20 @@ Q_TOPO_ENRICH = r"""
     match(source, "(?i)^/var/|^/opt/|^/etc/|^/usr/|^/home/"), "Linux",
     1=1, null())
 | append [
-    search index=_internal source=*metrics.log group=tcpin_connections
+    search index=_internal sourcetype=splunkd source=*metrics.log (group=tcpin_connections OR group=udpin_connections)
     | eval host=coalesce(sourceHost, hostname)
     | eval fwd=lower(trim(coalesce(fwdType, "")))
     | eval conn=lower(trim(coalesce(connectionType, "")))
-    | eval forwarder_class=case(
+    | eval forwarder_class=if(group="tcpin_connections", case(
         match(fwd, "^(uf|lwf)$"), "UF",
         match(fwd, "^(full|hf|hwf)$"), "HF",
+        1=1, null()), null())
+    | eval metrics_net=case(
+        group="tcpin_connections" AND isnull(forwarder_class) AND match(conn, "raw") AND isnum(coalesce(destPort, dest_port)), "TCP:".coalesce(destPort, dest_port),
+        group="udpin_connections" AND match("UDP:".coalesce(destPort, dest_port, port), "^UDP:[0-9]+$"), "UDP:".coalesce(destPort, dest_port, port),
         1=1, null())
-    | eval metrics_net=if(isnull(forwarder_class) AND match(conn, "raw") AND isnum(coalesce(destPort, dest_port)), "TCP:".coalesce(destPort, dest_port), null())
     | where isnotnull(host) AND (isnotnull(forwarder_class) OR isnotnull(metrics_net))
     | stats latest(forwarder_class) as forwarder_class, latest(metrics_net) as metrics_net by host
-]
-| append [
-    search index=_internal source=*metrics.log group=udpin_connections
-    | eval host=coalesce(sourceHost, hostname)
-    | eval metrics_net="UDP:".coalesce(destPort, dest_port, port)
-    | where isnotnull(host) AND match(metrics_net, "^UDP:[0-9]+$")
-    | stats latest(metrics_net) as metrics_net by host
 ]
 | eventstats latest(forwarder_class) as forwarder_class, latest(metrics_net) as metrics_net by host
 | eventstats values(os_class) as os_classes by host
@@ -909,6 +934,24 @@ Q_TOPO_MACRO = (
 """
 )
 
+# The map and the summary in one search. They share the tstats and metrics.log
+# pass, so it runs once; topo_view says which rows belong to which.
+TOPO_BASE = (
+    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
+    + Q_TOPO_ENRICH
+    + "\n"
+    + Q_TOPO_CLASSIFY
+)
+assert Q_TOPO_MAP.startswith(TOPO_BASE + "\n") and Q_TOPO_MACRO.startswith(TOPO_BASE + "\n")
+Q_TOPO_OVERVIEW = (
+    TOPO_BASE
+    + "\n| appendpipe [\n"
+    + Q_TOPO_MAP[len(TOPO_BASE) + 1:].rstrip()
+    + '\n    | eval topo_view="map"\n]\n| appendpipe [\n    | where isnull(topo_view)\n'
+    + Q_TOPO_MACRO[len(TOPO_BASE) + 1:].rstrip()
+    + '\n    | eval topo_view="macro"\n]\n| where isnotnull(topo_view)'
+)
+
 # One site, family, path, or index. "Other *" keeps everything outside the top
 # groups, using the same rank as the summary. The map then draws hosts.
 Q_TOPO_DETAIL = (
@@ -970,7 +1013,7 @@ Q_TOPO_FOCUS_TREND = (
 )
 
 Q_TCPIN_PATHS = r"""
-search index=_internal source=*metrics.log group=tcpin_connections
+search index=_internal sourcetype=splunkd source=*metrics.log group=tcpin_connections
 | eval data_source=coalesce(sourceHost, hostname)
 | eval receiver=host
 | eval fwd=lower(trim(coalesce(fwdType, "")))
@@ -1184,18 +1227,24 @@ def dq_agent_findings_core() -> str:
 ]
 | append [
     | tstats count as events where index=`exec_health_idx` earliest=-8d@h latest=@h by _time span=1h index
+    | appendpipe [
     | streamstats window=168 current=f avg(events) as ma_7d by index
     | where _time >= relative_time(now(), "-1h@h") AND _time < relative_time(now(), "@h")
     | eval drop_pct=if(ma_7d>0, round(((ma_7d-events)/ma_7d)*100, 1), 0)
     | where drop_pct >= `exec_health_drop_red_pct` AND ma_7d>10
     | eval issue="Index volume below 7-day moving average", severity="RED", entity=index, evidence="last_hour="+tostring(events)+", ma_7d="+tostring(round(ma_7d,0))+", drop_pct="+tostring(drop_pct)+"%", suggested_fix="Confirm whether this index was expected to be quiet (maintenance, source retirement). If not, check the last forwarder or HEC route that writes here. Macro exec_health_idx can be narrowed after review.", fix_type="runbook_index", proposed_config="optional: Settings > Search macros > exec_health_idx", action="Review"
     | table issue, severity, entity, evidence, suggested_fix, fix_type, proposed_config, action
+    ]
+    | appendpipe [
+    | where isnull(issue)
+"""
+        + index_season_findings().split("\n", 1)[1]
+        + """    ]
+    | where isnotnull(issue)
 ]
 | append [
 """
         + host_findings
-        + "]\n| append [\n"
-        + index_season_findings()
         + "]\n| append [\n"
         + hec_findings
         + "]\n| append [\n"
@@ -1265,7 +1314,7 @@ def dq_agent_findings_core() -> str:
 ]
 | where isnull(_seed)
 | append [
-    search index=_internal source=*metrics.log group=tcpin_connections earliest=-2h
+    search index=_internal sourcetype=splunkd source=*metrics.log group=tcpin_connections earliest=-2h
     | eval entity=coalesce(sourceHost, hostname)
     | eval tool_fwdType=lower(trim(coalesce(fwdType, "")))
     | eval tool_conn=lower(trim(coalesce(connectionType, "")))
@@ -1327,7 +1376,7 @@ def exec_area_rollup() -> str:
         ),
         _area_row(
             r"""
-search index=_internal source=*metrics.log group=queue blocked=true
+search index=_internal sourcetype=splunkd source=*metrics.log group=queue blocked=true
 | stats count as blocked""",
             AREA_HOSTS,
             "null()",
@@ -1785,12 +1834,14 @@ Q_DQ_AGENT_FINDINGS = dq_agent_findings_core() + r"""
 | eval action=if(status="open", "Review", "Resolved")
 | eval agent_thought="OBSERVE: "+issue+" on "+entity+". INVESTIGATE: "+coalesce(tool_plan, "learned baselines")+". TOOLS: fwdType="+coalesce(tool_fwdType, "n/a")+" conn="+coalesce(tool_conn, "n/a")+" err_component="+coalesce(tool_err_component, "none")+" err_count="+coalesce(tostring(tool_err_count), "0")+". HYPOTHESIZE: "+coalesce(likely_cause, "needs human review")+" (confidence "+coalesce(confidence, "n/a")+"). PROPOSE: "+suggested_fix+". ACT: wait for human APPROVE or DISMISS — never change Splunk unattended."
 | lookup dq_agent_config_samples fix_type OUTPUT sample AS cfg_sample, check_command AS cfg_cmd, check_search AS cfg_search
-| eval cfg_sample=substr(replace(replace(replace(replace(coalesce(cfg_sample, "none"), "@@", " ; "), "\|", " / "), "`", " "), "\$", " "), 1, 700)
-| eval cfg_cmd=substr(replace(replace(replace(coalesce(cfg_cmd, "none"), "\|", " / "), "`", " "), "\$", " "), 1, 300)
-| eval cfg_search=substr(replace(replace(replace(coalesce(cfg_search, "none"), "\|", " / "), "`", " "), "\$", " "), 1, 500)
+| eval safe_entity=replace(coalesce(entity, "none"), "[^A-Za-z0-9._:/ -]", "_")
+| eval cfg_sample=replace(coalesce(cfg_sample, "none"), "\{\{entity\}\}", safe_entity), cfg_cmd=replace(coalesce(cfg_cmd, "none"), "\{\{entity\}\}", safe_entity), cfg_search=replace(coalesce(cfg_search, "none"), "\{\{entity\}\}", safe_entity)
+| eval cfg_sample=substr(replace(replace(replace(replace(coalesce(cfg_sample, "none"), "@@", " ; "), "\|", " [pipe] "), "`", " "), "\$", " "), 1, 700)
+| eval cfg_cmd=substr(replace(replace(replace(coalesce(cfg_cmd, "none"), "\|", " [pipe] "), "`", " "), "\$", " "), 1, 300)
+| eval cfg_search=substr(replace(replace(replace(coalesce(cfg_search, "none"), "\|", " [pipe] "), "`", " "), "\$", " "), 1, 500)
 """ + "\n| eval cfg_sample=replace(cfg_sample, \"\\\"\", \" \")\n| eval cfg_cmd=replace(cfg_cmd, \"\\\"\", \" \")\n| eval cfg_search=replace(cfg_search, \"\\\"\", \" \")\n" + r"""
-| eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+issue+". Entity: "+entity+". Evidence: "+evidence+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+suggested_fix+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Sample config to validate: "+cfg_sample+". Host check to validate: "+cfg_cmd+". Splunk check to validate: "+cfg_search+". Reply with root cause, confidence, and step-by-step admin actions. Then validate the sample config and both checks: say whether each would confirm this issue and is safe to hand to an admin. End with exactly three lines and nothing after them. SAMPLE_CHECK: pass or fail, then a short reason. FIX_CHECK: pass or fail, then a short reason. SUPPORT_TICKET: yes or no, then a short reason. Use SUPPORT_TICKET yes only when the next step is to open a Splunk support ticket. Do not request secrets or HEC token values."
-| eval ai_brief=replace(replace(replace(replace(ai_brief, "\|", " / "), "`", " "), "\$", " "), "[\r\n]+", " ")
+| eval ai_brief="Role: Derek+ Health Agent. Goal: diagnose Splunk infrastructure health (instance features, ingestion, silent hosts, search CPU, HEC, SC4S, Edge) and propose fixes. Hard constraint: do not apply changes; a human must approve. Issue: "+coalesce(issue, "unknown")+". Entity: "+coalesce(entity, "unknown")+". Evidence: "+coalesce(evidence, "none")+". Forwarder type: "+coalesce(tool_fwdType, "unknown")+". Connection: "+coalesce(tool_conn, "unknown")+". Recent _internal errors: "+coalesce(tostring(tool_err_count), "0")+" ("+coalesce(tool_err_component, "none")+"). Playbook: "+coalesce(playbook_name, "none")+". Likely cause: "+coalesce(likely_cause, "unknown")+". Suggested fix: "+coalesce(suggested_fix, "none")+". Splunk Web: "+coalesce(splunk_web_path, "n/a")+". Sample config to validate: "+cfg_sample+". Host check to validate: "+cfg_cmd+". Splunk check to validate: "+cfg_search+". In the sample and the checks, [pipe] stands for the pipe character. Reply in under 400 words. Reply in sections. Start each section with a bold heading in the form **Heading:** and use the headings the answer needs, including a root cause, a confidence, and numbered admin steps. Then validate the sample config and both checks: say whether each would confirm this issue and is safe to hand to an admin. End with exactly three lines and nothing after them. SAMPLE_CHECK: pass or fail, then a short reason. FIX_CHECK: pass or fail, then a short reason. SUPPORT_TICKET: yes or no, then a short reason. Use SUPPORT_TICKET yes only when the next step is to open a Splunk support ticket. Do not request secrets or HEC token values."
+| eval ai_brief=replace(replace(replace(replace(ai_brief, "\|", " [pipe] "), "`", " "), "\$", " "), "[\r\n]+", " ")
 """ + "\n| eval ai_brief=replace(ai_brief, \"\\\"\", \" \")\n| eval ai_brief=substr(ai_brief, 1, 5800)\n" + r"""
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | table finding_id, severity, issue, entity, evidence, suggested_fix, fix_type, proposed_config, playbook_name, likely_cause, confidence, tool_plan, splunk_web_path, tool_fwdType, tool_conn, tool_err_component, tool_err_count, agent_thought, ai_brief, status, action, _color_rank
@@ -2013,7 +2064,7 @@ Q_INDEXED_COMPARE = r"""
 """.strip()
 
 Q_INGEST_ACTIONS = r"""
-search index=_internal source=*metrics.log group=queue blocked=true
+search index=_internal sourcetype=splunkd source=*metrics.log group=queue blocked=true
 | timechart span=5m limit=10 count as blocked_reports by name
 """.strip()
 
@@ -2268,7 +2319,10 @@ Q_DQ_QUEUE_VIEW = r"""
 | eval fix=coalesce(suggested_fix, "")
 | eval fix=if(len(fix)>80, substr(fix,1,80)."...", fix)
 | eval _finding_id=finding_id, _ai_brief=ai_brief, _ai_auto="ask"
-| table severity, issue, entity, fix, recurring, confidence, status, approve, dismiss, _finding_id, _ai_brief, _ai_auto, _color_rank
+| eventstats count(eval(status="open")) as issues, count(eval(status="open" AND severity="RED")) as red_issues
+| eval agent_status=case(red_issues>0, "RED", issues>0, "YELLOW", 1=1, "GREEN")
+| eval where_to_act=coalesce(splunk_web_path, "Open the matching dashboard in this app")
+| table severity, issue, entity, fix, recurring, confidence, status, approve, dismiss, likely_cause, suggested_fix, where_to_act, evidence, playbook_name, fix_type, agent_status, issues, _finding_id, _ai_brief, _ai_auto, _color_rank
 """
 
 Q_DQ_PICKER = r"""
@@ -2284,6 +2338,27 @@ Q_DQ_SUGGESTION = r"""
 | eval _color_rank=case(status!="open", 3, severity="RED", 1, severity="YELLOW", 2, 1=1, 3)
 | eval where_to_act=coalesce(splunk_web_path, "Open the matching dashboard in this app")
 | table severity, issue, entity, likely_cause, suggested_fix, where_to_act, evidence, confidence, playbook_name, status, _color_rank
+"""
+
+# The HTML page's sample: a lookup read only. The page already has the row's
+# fix_type and entity, so it does not rerun the findings search.
+Q_DQ_SAMPLE_LOOKUP = r"""
+| inputlookup dq_agent_config_samples where fix_type="$tok_fix_type$"
+| eval entity="$tok_entity$"
+| eval safe_entity=replace(entity, "[^A-Za-z0-9._:/ -]", "_")
+| eval rows="File|".conf_file."@@Goes in|".where_it_goes."@@Splunk Cloud|".cloud_note."@@Sample|".replace(sample, "@@", "@@Sample|")."@@Check on the host|".check_command."@@Check in Splunk|".check_search
+| eval rows=split(replace(rows, "\{\{entity\}\}", safe_entity), "@@")
+| mvexpand rows
+| rex field=rows "^(?<part>[^|]*)\|(?<text>.*)"
+| where text!="none"
+| table part, text
+| appendpipe [
+    | stats count
+    | where count=0
+    | eval part="Sample", text="Select a row in the work queue to see a sample config for that problem."
+    | fields - count
+]
+| eval _color_rank=3
 """
 
 # One table row per line so the sample reads top to bottom. Samples are templates that
@@ -2378,16 +2453,16 @@ Q_DQ_AI_ASK_WRITE = r"""
 | eval actor="human_dashboard", requested_at=strftime(now(), "%Y-%m-%d %H:%M:%S")
 | eval entity=if(entity="" OR isnull(entity), "none", entity)
 | eval issue=if(issue="" OR isnull(issue), "none", issue)
-| eval ai_brief=if(ai_brief="" OR isnull(ai_brief), "none", ai_brief)
+| eval ai_brief=if(isnull(ai_brief) OR len(ai_brief)<60, "Role: Derek+ Health Agent. Diagnose this Splunk health finding and propose a fix. A human must approve any change. Issue: ".issue.". Entity: ".entity.". Reply in under 400 words. Reply in sections. Start each section with a bold heading in the form **Heading:** and include a root cause, a confidence, and numbered admin steps. Then end with exactly three lines and nothing after them. SAMPLE_CHECK: pass or fail, then a short reason. FIX_CHECK: pass or fail, then a short reason. SUPPORT_TICKET: yes or no, then a short reason. Do not request secrets or HEC token values.", ai_brief)
 """.rstrip() + RECUR_HISTORY + r"""
-| eval ai_brief=if(recurring="RECURRING", ai_brief." This problem is recurring. An AI suggestion for it was first saved at ".first_suggested_at.". Most recent earlier suggestion, from ".previous_at.": ".substr(previous_suggestion, 1, 1500)." Say why that fix may not have held and what to do differently.", ai_brief)
+| eval ai_brief=if(recurring="RECURRING", ai_brief." This problem is recurring. An AI suggestion for it was first saved at ".coalesce(first_suggested_at, "an earlier date").". Most recent earlier suggestion, from ".coalesce(previous_at, "an earlier date").": ".substr(coalesce(previous_suggestion, "none"), 1, 1500)." Say why that fix may not have held and what to do differently.", ai_brief)
 """.rstrip() + DECISION_STATUS + r"""
-| eval ai_brief=if(reopened=1, ai_brief." A person recorded the decision ".rec_decision." on this problem at ".rec_decided_at." and it is still happening.", ai_brief)
+| eval ai_brief=if(reopened=1, ai_brief." A person recorded the decision ".coalesce(rec_decision, "none")." on this problem at ".coalesce(rec_decided_at, "an earlier date")." and it is still happening.", ai_brief)
 | eval recurring=if(reopened=1, "RECURRING", recurring)
 | eval is_ping=0
 | derekaiping
 | eval status=if(ai_result="replied", "replied", "failed")
-| eval note=if(ai_result="replied", "ask_ai_provider", "ask failed: ".coalesce(ai_error, "no reply"))
+| eval note=if(ai_result="replied", "ask_ai_provider", "ask failed".if(coalesce(ai_http, "")!="", " (HTTP ".ai_http.")", "").": ".if(coalesce(ai_error, "")="", "no reply", ai_error))
 | eval reply=if(ai_result="replied", ai_reply, "none")
 | table finding_id, entity, issue, provider, model, endpoint, status, actor, requested_at, note, ai_brief, reply, recurring, first_suggested_at, earlier_suggestions, previous_suggestion
 | appendpipe [
@@ -3037,7 +3112,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.75"
+APP_VERSION = "1.7.79"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3483,6 +3558,8 @@ def emit_catalog() -> None:
         "areas": entry(exec_area_rollup(), "-15m", "now", count=20),
         "license_daily": entry(Q_LICENSE_DAILY, "-15d@d", "@d", count=30),
         "live": entry(Q_LIVE, "-15m", "now", count=5),
+        "live_by_index": entry(Q_LIVE_BY_INDEX, "-15m", "now", count=50, timeout=120),
+        "indexed_by_index": entry(Q_INDEXED_BY_INDEX, "-4h", "now", count=50, timeout=120),
         "agent_counts": entry(Q_DQ_AGENT_FINDINGS + "\n" + EXEC_AGENT_COUNTS, "-24h", "now", count=5, timeout=120),
         "top_indexes": entry(Q_TOP_INDEXES, "-7d@d", "@d", count=12),
         "state_counts": entry(Q_STATE_COUNTS, "-24h", "now", ["host_filter"], count=10),
@@ -3519,8 +3596,7 @@ def emit_catalog() -> None:
         "edge_logs": entry(Q_EDGE_LOGS, "-4h", "now", count=100),
         "indexed": entry(Q_INDEXED_COMPARE, "-4h", "now", count=300),
         "topo_paths": entry(Q_TOPO_PATHS, "-4h", "now", count=100, timeout=120),
-        "topo_map": entry(Q_TOPO_MAP, "-24h", "now", count=500, timeout=120),
-        "topo_macro": entry(Q_TOPO_MACRO, "-24h", "now", count=240, timeout=120),
+        "topo_overview": entry(Q_TOPO_OVERVIEW, "-24h", "now", count=740, timeout=120),
         "topo_detail": entry(Q_TOPO_DETAIL, "-24h", "now", ["tok_topo_environment", "tok_topo_family", "tok_topo_ingest", "tok_topo_index"], count=300, timeout=120),
         "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_category", "tok_topo_network", "tok_topo_ingest", "tok_topo_index", "tok_topo_endpoint"], count=200, timeout=120),
         "tcpin": entry(Q_TCPIN_PATHS, "-4h", "now", count=80),
@@ -3528,9 +3604,7 @@ def emit_catalog() -> None:
         "topo_src_trend": entry(Q_TOPO_SRC_TREND, "-25h@m", "@m", ["tok_data_source"], count=120),
         "topo_src_outliers": entry(Q_TOPO_SRC_OUTLIERS, "-25h@m", "@m", ["tok_data_source"], count=50),
         "agent_queue": entry(asked + "\n" + Q_DQ_QUEUE_VIEW + "\n| rename _finding_id AS finding_ref, _ai_brief AS ai_brief_text", "-24h", "now", gate, count=100, timeout=120),
-        "agent_status": entry(asked + "\n" + Q_DQ_AGENT_STATUS, "-24h", "now", gate, count=5, timeout=120),
-        "agent_selected": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_SUGGESTION, "-24h", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5, timeout=120),
-        "agent_sample": entry(Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_CONFIG_SAMPLE, "-24h", "now", ["tok_finding_id"], count=20, timeout=120),
+        "agent_sample": entry(Q_DQ_SAMPLE_LOOKUP, "0", "now", ["tok_fix_type", "tok_entity"], count=20, timeout=30),
         "agent_replies": entry(Q_DQ_AI_REPLIES, "0", "now", ["tok_finding_id", "tok_ai_ask"], count=5),
         "agent_list": entry(Q_DQ_AI_LIST, "0", "now", ["tok_ai_list"], count=100),
         "agent_recorded": entry(Q_DQ_RECORDED_READ, "0", "now", ["tok_finding_id", "tok_cell", "tok_row_status"], count=5),

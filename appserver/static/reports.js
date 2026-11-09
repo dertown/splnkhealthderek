@@ -7,13 +7,21 @@
   var AREA_COLUMNS = [
     { key: 'area', label: 'Area' }, { key: 'status', label: 'Status' }, { key: 'detail', label: 'Why' }
   ];
+  var INDEX_RATE_COLUMNS = [
+    { key: 'index', label: 'Index' },
+    { key: 'events', label: 'Events' },
+    { key: 'events_per_sec', label: 'Events per second' },
+    { key: 'hosts', label: 'Hosts writing' },
+    { key: 'sourcetypes', label: 'Sourcetypes' },
+    { key: 'last_event', label: 'Last event' }
+  ];
   var BOOKS = {
     summary: {
       title: 'Executive overview',
       sections: [
         { title: 'Status by area', query: 'areas', columns: AREA_COLUMNS },
         { title: 'Daily ingestion vs 7-day average (GB)', query: 'license_daily' },
-        { title: 'Events indexed, last 15 minutes', query: 'live' },
+        { title: 'Events indexed in the last 15 minutes, by index', query: 'live_by_index', columns: INDEX_RATE_COLUMNS },
         { title: 'Open agent findings', query: 'agent_counts' },
         { title: 'Top indexes by license usage (GB, last 7 days)', query: 'top_indexes' },
         { title: 'Last hour vs the usual hour, by index', query: 'index_season' },
@@ -54,7 +62,7 @@
       sections: [
         { title: 'Edge Processor summary', query: 'edge_summary' },
         { title: 'SC4S / syslog events', query: 'sc4s_time' },
-        { title: 'Events reaching indexers', query: 'indexed' },
+        { title: 'Events reaching indexers in the last 4 hours, by index', query: 'indexed_by_index', columns: INDEX_RATE_COLUMNS },
         { title: 'Events per syslog source', query: 'sc4s_hosts' },
         { title: 'SC4S issues', query: 'sc4s_errors' },
         { title: 'Edge Processor in vs out', query: 'edge_tp' },
@@ -66,8 +74,8 @@
     topology: {
       title: 'Data Topology',
       sections: [
-        { title: 'Sites, sourcetype families, and indexes', query: 'topo_macro' },
-        { title: 'Category, network, ingest method, and index (24h)', query: 'topo_map' },
+        { title: 'Sites, sourcetype families, and indexes', query: 'topo_overview', view: 'macro' },
+        { title: 'Category, network, ingest method, and index (24h)', query: 'topo_overview', view: 'map' },
         { title: 'Top source, path, and index flows', query: 'topo_paths' },
         { title: 'Forwarder to indexer (tcpin)', query: 'tcpin' },
         { title: 'Feeds you expect', query: 'feed_catalog' },
@@ -77,7 +85,7 @@
     agent: {
       title: 'Data Quality Agent',
       sections: [
-        { title: 'Queue health', query: 'agent_status', params: { tok_ask: 'all' } },
+        { title: 'Queue health', query: 'agent_queue', params: { tok_ask: 'all' }, health: true },
         { title: 'Work queue', query: 'agent_queue', params: { tok_ask: 'all' }, columns: QUEUE_COLUMNS },
         { title: 'Saved AI suggestions', query: 'agent_list', params: { tok_ai_list: 'show' } }
       ]
@@ -110,13 +118,35 @@
         var params = {};
         Object.keys(section.params || {}).forEach(function (name) { params[name] = section.params[name]; });
         if (section.host) params.host_filter = filter;
-        jobs.push({ book: key, title: section.title, query: section.query, params: params, columns: section.columns });
+        jobs.push({ book: key, title: section.title, query: section.query, params: params, columns: section.columns, view: section.view, health: section.health });
       });
     });
     return jobs;
   }
+  // Sections that ask for the same search share one request, then take their part:
+  // a topology view, or the queue health that every queue row carries.
+  function shape(job, rows) {
+    if (job.view) {
+      return rows.filter(function (row) { return row.topo_view === job.view; }).map(function (row) {
+        var copy = {};
+        Object.keys(row).forEach(function (key) { if (key !== 'topo_view') copy[key] = row[key]; });
+        return copy;
+      });
+    }
+    if (job.health) {
+      var first = rows[0] || {};
+      return [{ agent_status: first.agent_status || 'GREEN', issues: first.issues || '0' }];
+    }
+    return rows;
+  }
   function runPool(jobs) {
     var results = new Array(jobs.length);
+    var shared = {};
+    function fetchOnce(job) {
+      var key = job.query + '?' + JSON.stringify(job.params || {});
+      if (!shared[key]) shared[key] = Health.query(job.query, job.params);
+      return shared[key].then(function (rows) { return shape(job, rows); });
+    }
     var cursor = 0;
     var active = 0;
     var finished = 0;
@@ -128,7 +158,7 @@
           (function (index) {
             active += 1;
             status.textContent = 'Running ' + jobs[index].title + ' (' + (finished + active) + ' of ' + jobs.length + ')';
-            Health.query(jobs[index].query, jobs[index].params).then(function (rows) {
+            fetchOnce(jobs[index]).then(function (rows) {
               results[index] = { ok: true, rows: rows };
             }, function (error) {
               results[index] = { ok: false, error: error };
