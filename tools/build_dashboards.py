@@ -822,13 +822,28 @@ Q_TOPO_PATHS = (
 # An IPv4 host becomes its /24. A hostname stays a hostname: this data has no
 # address for it, so it is not given a made-up CIDR. Volume is event count.
 # The search never reads a HEC token secret.
+# A site is one domain, or one IPv4 /16. The domain is the last two labels,
+# lowercased, so a server, its parent name, and a different case are one site.
+# A short hostname joins that domain when the same server is also seen with it.
 Q_TOPO_CLASSIFY = r"""
 | eval octets=split(host, ".")
 | eval o1=coalesce(tonumber(mvindex(octets,0)), -1), o2=coalesce(tonumber(mvindex(octets,1)), -1), o3=coalesce(tonumber(mvindex(octets,2)), -1), o4=coalesce(tonumber(mvindex(octets,3)), -1)
 | eval network=if(mvcount(octets)=4 AND o1>=0 AND o1<=255 AND o2>=0 AND o2<=255 AND o3>=0 AND o3<=255 AND o4>=0 AND o4<=255 AND match(host, "^[0-9.]+"), o1.".".o2.".".o3.".0/24", host)
-| eval labels=split(host, ".")
-| eval environment=case(match(host, "^[0-9.]+$") AND o1>=0 AND o2>=0, o1.".".o2.".0.0/16", mvcount(labels)>=3, mvindex(labels, -2).".".mvindex(labels, -1), 1=1, coalesce(host, "unknown"))
+| eval host_site=lower(trim(coalesce(host, "unknown")))
+| eval host_site=replace(host_site, "\.+$", "")
+| eval host_site=if(host_site="", "unknown", host_site)
+| eval site_labels=split(host_site, ".")
+| eval site_n=mvcount(site_labels)
+| eval site_last=mvindex(site_labels, -1)
+| eval site_short=mvindex(site_labels, 0)
+| eval site_ip=if(match(host_site, "^[0-9.]+$") AND site_n=4 AND o1>=0 AND o1<=255 AND o2>=0 AND o2<=255 AND o3>=0 AND o3<=255 AND o4>=0 AND o4<=255, 1, 0)
+| eval site_domain=if(site_ip=0 AND site_n>=2 AND match(site_last, "^[a-z]{2,24}$"), mvindex(site_labels, -2).".".site_last, null())
+| eval site_join=if(site_ip=1, "ip ".host_site, site_short)
+| eventstats values(site_domain) as site_known by site_join
+| eval site_domain=if(site_ip=0 AND isnull(site_domain) AND mvcount(site_known)=1, site_known, site_domain)
+| eval environment=case(site_ip=1, o1.".".o2.".0.0/16", isnotnull(site_domain) AND site_domain!="", site_domain, 1=1, host_site)
 | eval environment=substr(environment, 1, 80)
+| fields - host_site site_labels site_n site_last site_short site_ip site_domain site_join site_known
 | eval category=case(
     match(sourcetype, "(?i)paloalto|pan:traffic|pan:threat|cisco:asa|cisco:ftd|cisco:firepower|fortinet|fortigate|checkpoint|opsec|pfsense|netscreen|sonicwall|zscaler|meraki|iptables|juniper:firewall"), "Firewall",
     match(source, "(?i)paloalto|fortigate|cisco_asa|checkpoint|firepower"), "Firewall",
@@ -900,7 +915,7 @@ Q_TOPO_MAP = (
     + "\n| table endpoint, endpoint_kind, category, network, ingest_method, splunk_index, data_source, events, _color_rank"
 )
 
-# Estate summary. A site is the parent domain, or an IPv4 /16. A sourcetype family
+# Estate summary. A site is one domain, or an IPv4 /16. A sourcetype family
 # is a known product, or the prefix before ":" or "_". The long tail is one
 # "Other" node so the counts still include it. The browser drills in from here.
 Q_TOPO_MACRO = (
@@ -952,39 +967,19 @@ Q_TOPO_OVERVIEW = (
     + '\n    | eval topo_view="macro"\n]\n| where isnotnull(topo_view)'
 )
 
-# One site, family, path, or index. "Other *" keeps everything outside the top
-# groups, using the same rank as the summary. The map then draws hosts.
-Q_TOPO_DETAIL = (
-    "| tstats count as events where index=`exec_health_idx` by host sourcetype source index\n"
-    + Q_TOPO_ENRICH
+# Every host, ingestion path, sourcetype, and index for the zoomable map. Each row
+# also carries its site and sourcetype family, so the browser groups and opens them
+# without another search. There is no top-N and no Other node.
+Q_TOPO_FULL = (
+    TOPO_BASE
     + "\n"
-    + Q_TOPO_CLASSIFY
-    + "\n"
-    + r"""| where ("$tok_topo_environment$"="*" OR "$tok_topo_environment$"="Other sites" OR environment="$tok_topo_environment$") AND ("$tok_topo_family$"="*" OR "$tok_topo_family$"="Other sourcetypes" OR family="$tok_topo_family$") AND ("$tok_topo_index$"="*" OR "$tok_topo_index$"="Other indexes" OR index="$tok_topo_index$") AND ("$tok_topo_ingest$"="*" OR ingest_method="$tok_topo_ingest$")
-| eventstats sum(events) as env_total by environment
-| eventstats sum(events) as fam_total by family
-| eventstats sum(events) as idx_total by index
-| sort 0 -env_total environment
-| streamstats dc(environment) as env_rank
-| sort 0 -fam_total family
-| streamstats dc(family) as fam_rank
-| sort 0 -idx_total index
-| streamstats dc(index) as idx_rank
-| where ("$tok_topo_environment$"!="Other sites" OR env_rank>8) AND ("$tok_topo_family$"!="Other sourcetypes" OR fam_rank>8) AND ("$tok_topo_index$"!="Other indexes" OR idx_rank>8)
-| eval endpoint=if(match(sourcetype, "(?i)^(wineventlog|xmlwineventlog)$"), coalesce(source, sourcetype), sourcetype)
+    + r"""| eval endpoint=if(match(sourcetype, "(?i)^(wineventlog|xmlwineventlog)$"), coalesce(source, sourcetype), sourcetype)
 | eval endpoint=substr(coalesce(endpoint, "unknown"), 1, 80)
-| eval endpoint_kind="sourcetype"
-| stats sum(events) as events by endpoint, endpoint_kind, category, network, ingest_method, index, host
-| eventstats sum(events) as st_total by endpoint
-| sort 0 -st_total endpoint -events
-| streamstats count as st_host_rank by endpoint
-| where st_host_rank<=6
-| sort 0 -st_total -events
-| head 400
+| stats sum(events) as events by environment, host, ingest_method, family, endpoint, index, network
+| sort 0 -events
+| head 20000
 | rename host as data_source, index as splunk_index
-| fields - st_total st_host_rank
-| eval _color_rank=3
-| table endpoint, endpoint_kind, category, network, ingest_method, splunk_index, data_source, events, _color_rank
+| table environment, data_source, ingest_method, family, endpoint, splunk_index, network, events
 """
 )
 
@@ -993,7 +988,8 @@ Q_TOPO_FOCUS_TREND = (
     + Q_TOPO_ENRICH
     + "\n"
     + Q_TOPO_CLASSIFY
-    + '\n| where ("$tok_topo_category$"="*" OR category="$tok_topo_category$") AND ("$tok_topo_network$"="*" OR network="$tok_topo_network$") AND ("$tok_topo_ingest$"="*" OR ingest_method="$tok_topo_ingest$") AND ("$tok_topo_index$"="*" OR index="$tok_topo_index$") AND ("$tok_topo_endpoint$"="*" OR endpoint="$tok_topo_endpoint$")'
+    + '\n| eval st_endpoint=substr(coalesce(if(match(sourcetype, "(?i)^(wineventlog|xmlwineventlog)$"), coalesce(source, sourcetype), sourcetype), "unknown"), 1, 80)'
+    + '\n| where ("$tok_topo_environment$"="*" OR environment="$tok_topo_environment$") AND ("$tok_topo_ingest$"="*" OR ingest_method="$tok_topo_ingest$") AND ("$tok_topo_family$"="*" OR family="$tok_topo_family$") AND ("$tok_topo_endpoint$"="*" OR st_endpoint="$tok_topo_endpoint$") AND ("$tok_topo_index$"="*" OR index="$tok_topo_index$")'
     + "\n| stats sum(events) as events by _time"
     + "\n| timechart span=15m sum(events) as events"
     + "\n| fillnull value=0 events"
@@ -3109,7 +3105,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.79"
+APP_VERSION = "1.7.81"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3594,8 +3590,8 @@ def emit_catalog() -> None:
         "indexed": entry(Q_INDEXED_COMPARE, "-4h", "now", count=300),
         "topo_paths": entry(Q_TOPO_PATHS, "-4h", "now", count=100, timeout=120),
         "topo_overview": entry(Q_TOPO_OVERVIEW, "-24h", "now", count=740, timeout=120),
-        "topo_detail": entry(Q_TOPO_DETAIL, "-24h", "now", ["tok_topo_environment", "tok_topo_family", "tok_topo_ingest", "tok_topo_index"], count=300, timeout=120),
-        "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_category", "tok_topo_network", "tok_topo_ingest", "tok_topo_index", "tok_topo_endpoint"], count=200, timeout=120),
+        "topo_full": entry(Q_TOPO_FULL, "-24h", "now", count=20000, timeout=150),
+        "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_environment", "tok_topo_ingest", "tok_topo_family", "tok_topo_endpoint", "tok_topo_index"], count=200, timeout=120),
         "tcpin": entry(Q_TCPIN_PATHS, "-4h", "now", count=80),
         "topo_src_stats": entry(Q_TOPO_SRC_STATS, "-4h", "now", ["tok_data_source"], count=5),
         "topo_src_trend": entry(Q_TOPO_SRC_TREND, "-25h@m", "@m", ["tok_data_source"], count=120),

@@ -3,26 +3,25 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.79">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.81">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>Data Topology</h1>
-    <p class="tagline">The estate opens as sites, ingestion paths, sourcetype families, and indexes. Click one to open the hosts and sourcetypes inside it.</p>
+    <p class="tagline">Every host, ingestion path, sourcetype, and index in one map. Scroll to zoom from sites down to single hosts and sourcetypes.</p>
     <div class="hero-meta"><a id="home" href="#">Executive overview</a></div>
   </div>
   <div class="stats-row" id="stats"></div>
   <div class="section">
-    <h2 class="section-title" id="mapTitle" data-help="The summary groups hosts into sites, then the ingestion path, the sourcetype family, and the index. Hover a node to light only its path. Click a node to open the hosts and sourcetypes inside it. Windows stays one family until you open it, and then each sourcetype or event-log channel in the index is its own node. Overview returns to the summary.">Site → ingestion path → sourcetype family → index</h2>
-    <p class="note" id="mapNote">Hundreds of hosts and sourcetypes stay grouped. A site is a shared domain, or an IPv4 /16. A sourcetype family is a known product, or the prefix of the sourcetype. Hover a node to light its path. Click a site, a path, a family, or an index to open the hosts and sourcetypes inside it.</p>
-    <p class="note" id="mapCrumb">Estate view</p>
+    <h2 class="section-title" id="mapTitle" data-help="Every host, ingestion path, sourcetype, and index from the last 24 hours, with nothing folded into an Other node. Hosts are grouped into sites. A site is one domain, or one IPv4 /16, and a domain is listed once. Sourcetypes are grouped into families: a known product, or the prefix of the sourcetype. Zoomed out, a site or family is one bar. Scroll toward it, or double-click it, and it opens into its hosts or sourcetypes once there is room to label them. Drag to pan. The strip on the right is the whole estate; drag in it to jump. Full screen uses the whole browser window, and Escape returns. Hover a node to light only its flow. Click a node to select it and fill the tables below; click it again to clear.">Estate map: site and host → ingestion path → family and sourcetype → index</h2>
+    <p class="note" id="mapNote">Bar height follows event volume. Scroll to zoom, drag to pan, double-click a node to zoom to it. Keys when the map has focus: + and − zoom, 0 fits the estate, F is full screen, arrows pan.</p>
     <div id="map"></div>
-    <p class="note" id="mapHover">Hover a node to highlight its data flow. Click it to open that group.</p>
+    <p class="note" id="mapHover">Loading every host, path, sourcetype, and index…</p>
   </div>
   <div class="section">
-    <h2 class="section-title" id="missingTitle" data-help="Rows for the current click. On the summary this waits for a click. After you open a group, it lists the hosts, paths, sourcetypes, and indexes in that group, including ones the drawing could not fit.">Not drawn on the map</h2>
-    <div id="missing"><p class="note">Click +N under the hosts or the sourcetypes to list what did not fit.</p></div>
+    <h2 class="section-title" id="missingTitle" data-help="With nothing selected, the busiest host, path, sourcetype, and index combinations. After you click a node, every flow that passes through it. Click a row to select that host and zoom the map to it.">Busiest flows on the map</h2>
+    <div id="missing"></div>
   </div>
   <div class="section"><h2 class="section-title" data-help="The busiest combinations of host, ingestion path, and index over the last few hours. Click a row to focus that host.">Top source → path → index flows</h2><div id="paths"></div></div>
   <div class="section">
@@ -50,8 +49,9 @@
     <div id="quarantineRows"></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.79"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.79"></script>
-<script src="../../static/app/splunk_exec_health/topology.js?v=1.7.79"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.81"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.81"></script>
+<script src="../../static/app/splunk_exec_health/topomap.js?v=1.7.81"></script>
+<script src="../../static/app/splunk_exec_health/topology.js?v=1.7.81"></script>
 </body>
 </html>
