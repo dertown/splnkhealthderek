@@ -131,7 +131,7 @@ Use **Configure → AI provider** (or click the AI provider tile on the agent da
 
 If the user lacks these, SAVE shows *The API key could not be saved to the credential store* and nothing is written. AI calls fail with *API key is not in the credential store*.
 
-**Upgrading from 1.7.75 or earlier.** Older versions kept the key in plaintext in `dq_agent_ai_config`. That value is no longer used. Enter the key once more and click SAVE: the key moves to the credential store, and the plaintext copy in KV Store is overwritten. Until you do, the old plaintext copy stays in KV Store and AI calls fail with *API key is not in the credential store*. A SAVE with the key field blank also clears the old copy and shows the key as **MISSING**.
+**Upgrading from 1.7.79 or earlier.** Older versions kept the key in plaintext in `dq_agent_ai_config`. That value is no longer used. Enter the key once more and click SAVE: the key moves to the credential store, and the plaintext copy in KV Store is overwritten. Until you do, the old plaintext copy stays in KV Store and AI calls fail with *API key is not in the credential store*. A SAVE with the key field blank also clears the old copy and shows the key as **MISSING**.
 
 Until you SAVE in the UI, macros `exec_health_ai_*` remain the fallback (default `off`). HEC token secrets and webhook URLs still do not belong in this app.
 
