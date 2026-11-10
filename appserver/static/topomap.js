@@ -250,7 +250,8 @@ function share(values) {
       + '<button type="button" class="btn secondary" data-act="in" title="Zoom in (+)">+</button>'
       + '<button type="button" class="btn secondary" data-act="fit" title="Fit the whole estate (0)">Fit</button>'
       + '<button type="button" class="btn secondary" data-act="full" title="Full screen (F)">Full screen</button>'
-      + '<span class="topomap-hint">Scroll to zoom · drag to pan · double-click a node to zoom to it · click to select</span>'
+      + '<button type="button" class="btn secondary" data-act="estate" hidden>Whole estate</button>'
+      + '<span class="topomap-looking">Whole estate</span>'
       + '<span class="topomap-zoom"></span>'
       + '</div>'
       + '<div class="topomap-heads"></div>'
@@ -594,7 +595,7 @@ function share(values) {
         var kind = item.col === 0 ? 'Site ' : 'Sourcetype family ';
         var inside = item.leaves.length + (item.col === 0 ? ' hosts' : ' sourcetypes');
         if (item.col === 2) {
-          return kind + item.name + ' · ' + inside + ' · ' + events + '. ' + (item.open ? 'Click to collapse the sourcetypes.' : 'Click to show the sourcetypes.');
+          return kind + item.name + ' · ' + inside + ' · ' + events + '. Click to redraw the map around this family and list its sourcetypes.';
         }
         return kind + item.name + ' · ' + inside + ' · ' + events + '. ' + (item.open ? 'Click to select it.' : 'Scroll or double-click to open it. Click to select it.');
       }
@@ -713,13 +714,6 @@ function share(values) {
       var item = unitAt(event.clientX - rect.left, event.clientY - rect.top);
       clickTimer = global.setTimeout(function () {
         clickTimer = null;
-        if (item && item.leaves && item.col === 2) {
-          item.userOpen = !item.userOpen;
-          schedule();
-          if (item.userOpen && item.h * view.k / item.leaves.length < LABEL_MIN) zoomToUnit(item);
-          onHover(describe(item));
-          return;
-        }
         onPick(item ? descriptor(item) : null);
       }, 240);
     });
@@ -771,6 +765,7 @@ function share(values) {
       else if (act === 'out') animateTo({ k: view.k / 1.8, oy: view.oy + cssH / view.k / 2 - cssH / (view.k / 1.8) / 2 });
       else if (act === 'fit') animateTo({ k: fitK, oy: 0 });
       else if (act === 'full') toggleFull();
+      else if (act === 'estate') onPick(null);
     });
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape' && wrap.classList.contains('full')) toggleFull();
@@ -820,15 +815,29 @@ function share(values) {
         return true;
       });
     }
+    var LOOKING = { site: 'site', host: 'host', ingest_method: 'ingestion path', family: 'sourcetype family', endpoint: 'sourcetype', splunk_index: 'index' };
     function show(desc) {
       var kept = rowsFor(desc);
       model = build(kept);
       model.note = desc && !kept.length ? 'Nothing flows through this selection.' : '';
+      if (desc && (desc.col === 'family' || desc.col === 'endpoint') && model.groups[2]) {
+        model.groups[2].forEach(function (group) {
+          if (group.name === (desc.col === 'family' ? desc.name : desc.family)) group.userOpen = true;
+        });
+      }
       relayout();
       fit();
       hover = null;
       focus = desc ? { desc: desc, unit: findUnit(desc) } : null;
       if (model) setForced();
+      var looking = wrap.querySelector('.topomap-looking');
+      var back = wrap.querySelector('[data-act="estate"]');
+      if (looking) {
+        looking.textContent = desc
+          ? 'Looking at ' + (LOOKING[desc.col] || desc.col) + ' ' + desc.name
+          : 'Whole estate';
+      }
+      if (back) back.hidden = !desc;
       setHighlight();
       draw();
     }

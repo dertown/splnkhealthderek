@@ -209,10 +209,14 @@
   function apply(reveal) {
     document.getElementById('selected').textContent = describe();
     if (map) map.setFocus(focus);
+    var title = document.getElementById('mapTitle');
     var note = document.getElementById('mapNote');
+    title.textContent = focus
+      ? LABEL[focus.col] + ': ' + focus.name
+      : 'Estate map: site and host → ingestion path → family and sourcetype → index';
     note.textContent = focus
-      ? 'Showing only ' + LABEL[focus.col].toLowerCase() + ' ' + focus.name + '. Click it again, or click empty space, to draw the whole estate.'
-      : 'Bar height follows event volume, with the largest flow held back so smaller ones stay readable. Click a family to show or hide its sourcetypes. Click a host, a path, or a sourcetype to redraw the map around it. Scroll to zoom, drag to pan, double-click a node to zoom to it. Keys when the map has focus: + and − zoom, 0 fits the estate, F is full screen, arrows pan.';
+      ? 'This drawing is only the ' + LABEL[focus.col].toLowerCase() + ' ' + focus.name + '. The columns are the hosts, ingestion paths, sourcetypes, and indexes in that selection. Click Whole estate to return to every flow.'
+      : 'Click a family, a host, a path, or a sourcetype and this map is drawn again around that choice. A family opens into its sourcetypes. Scroll to zoom, drag to pan, double-click a node to zoom to it.';
     var chosen = selection();
     paintLists(chosen);
     showFlows(chosen);

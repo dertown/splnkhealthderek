@@ -167,7 +167,7 @@ tr.selected td { background: #388bfd40; }
 body.topomap-lock { overflow: hidden; }
 .topomap-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #1c2836; flex-wrap: wrap; }
 .topomap-bar .btn { padding: 4px 10px; font-size: 0.8rem; }
-.topomap-hint { color: var(--muted); font-size: 0.75rem; margin-left: 8px; }
+.topomap-looking { color: var(--accent); font-size: 0.95rem; font-weight: 700; margin-left: 10px; }
 .topomap-zoom { color: var(--muted); font-size: 0.75rem; margin-left: auto; font-variant-numeric: tabular-nums; }
 .topomap-heads { position: relative; height: 22px; }
 .topomap-heads span { position: absolute; top: 5px; color: var(--muted); font-size: 11px; letter-spacing: 0.04em; white-space: nowrap; }
