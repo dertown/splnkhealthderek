@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.81">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.83">
 </head>
 <body>
 <div class="page">
@@ -14,13 +14,13 @@
   </div>
   <div class="stats-row" id="stats"></div>
   <div class="section">
-    <h2 class="section-title" id="mapTitle" data-help="Every host, ingestion path, sourcetype, and index from the last 24 hours, with nothing folded into an Other node. Hosts are grouped into sites. A site is one domain, or one IPv4 /16, and a domain is listed once. Sourcetypes are grouped into families: a known product, or the prefix of the sourcetype. Zoomed out, a site or family is one bar. Scroll toward it, or double-click it, and it opens into its hosts or sourcetypes once there is room to label them. Drag to pan. The strip on the right is the whole estate; drag in it to jump. Full screen uses the whole browser window, and Escape returns. Hover a node to light only its flow. Click a node to select it and fill the tables below; click it again to clear.">Estate map: site and host → ingestion path → family and sourcetype → index</h2>
-    <p class="note" id="mapNote">Bar height follows event volume. Scroll to zoom, drag to pan, double-click a node to zoom to it. Keys when the map has focus: + and − zoom, 0 fits the estate, F is full screen, arrows pan.</p>
+    <h2 class="section-title" id="mapTitle" data-help="Every host, ingestion path, sourcetype, and index from the last 24 hours, with nothing folded into an Other node. Hosts are grouped into sites. A site is one domain, or one IPv4 /16, and a domain is listed once. Sourcetypes are grouped into families: a known product, or the prefix of the sourcetype. Zoomed out, each family is one bar. Click a family to open its sourcetypes, and click it again to collapse them. A site opens into its hosts as you scroll in. Bar height follows volume, with the largest flow held back so the smaller ones stay visible. Drag to pan. The strip on the right is the whole estate; drag in it to jump. Full screen uses the whole browser window, and Escape returns. Hover a node to light only its flow. Click a host, an ingestion path, a sourcetype, a site, a family, or an index and the map is drawn again with only the flows through that click. Click it again, or click empty space, to draw the whole estate.">Estate map: site and host → ingestion path → family and sourcetype → index</h2>
+    <p class="note" id="mapNote">Bar height follows event volume, with the largest flow held back so smaller ones stay readable. Click a family to show or hide its sourcetypes. Click a host, a path, or a sourcetype to redraw the map around it. Scroll to zoom, drag to pan, double-click a node to zoom to it. Keys when the map has focus: + and − zoom, 0 fits the estate, F is full screen, arrows pan.</p>
     <div id="map"></div>
     <p class="note" id="mapHover">Loading every host, path, sourcetype, and index…</p>
   </div>
   <div class="section">
-    <h2 class="section-title" id="missingTitle" data-help="With nothing selected, the busiest host, path, sourcetype, and index combinations. After you click a node, every flow that passes through it. Click a row to select that host and zoom the map to it.">Busiest flows on the map</h2>
+    <h2 class="section-title" id="missingTitle" data-help="With nothing selected, the busiest host, path, sourcetype, and index combinations. After you click a node, every flow that passes through it. Click a row to redraw the map around that host.">Busiest flows on the map</h2>
     <div id="missing"></div>
   </div>
   <div class="section"><h2 class="section-title" data-help="The busiest combinations of host, ingestion path, and index over the last few hours. Click a row to focus that host.">Top source → path → index flows</h2><div id="paths"></div></div>
@@ -49,9 +49,9 @@
     <div id="quarantineRows"></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.81"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.81"></script>
-<script src="../../static/app/splunk_exec_health/topomap.js?v=1.7.81"></script>
-<script src="../../static/app/splunk_exec_health/topology.js?v=1.7.81"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.83"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.83"></script>
+<script src="../../static/app/splunk_exec_health/topomap.js?v=1.7.83"></script>
+<script src="../../static/app/splunk_exec_health/topology.js?v=1.7.83"></script>
 </body>
 </html>

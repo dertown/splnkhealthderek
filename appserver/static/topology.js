@@ -208,7 +208,11 @@
 
   function apply(reveal) {
     document.getElementById('selected').textContent = describe();
-    if (map) map.setFocus(focus, { reveal: !!reveal });
+    if (map) map.setFocus(focus);
+    var note = document.getElementById('mapNote');
+    note.textContent = focus
+      ? 'Showing only ' + LABEL[focus.col].toLowerCase() + ' ' + focus.name + '. Click it again, or click empty space, to draw the whole estate.'
+      : 'Bar height follows event volume, with the largest flow held back so smaller ones stay readable. Click a family to show or hide its sourcetypes. Click a host, a path, or a sourcetype to redraw the map around it. Scroll to zoom, drag to pan, double-click a node to zoom to it. Keys when the map has focus: + and − zoom, 0 fits the estate, F is full screen, arrows pan.';
     var chosen = selection();
     paintLists(chosen);
     showFlows(chosen);

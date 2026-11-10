@@ -41,6 +41,31 @@
 
   function clamp(value, low, high) { return Math.max(low, Math.min(high, value)); }
 
+// Volume still decides the order and the thickness, but a square-root-like scale
+// plus a cap keeps the largest flow from filling the column and hiding the rest.
+function share(values) {
+  var weights = values.map(function (value) { return Math.pow(Math.max(Number(value) || 0, 1), 0.4); });
+  var sum = 0;
+  weights.forEach(function (weight) { sum += weight; });
+  if (!sum) return values.map(function () { return values.length ? 1 / values.length : 0; });
+  var parts = weights.map(function (weight) { return weight / sum; });
+  var cap = 0.42;
+  for (var guard = 0; guard < 6 && parts.length > 1; guard++) {
+    var overflow = 0;
+    var room = 0;
+    parts.forEach(function (part) {
+      if (part > cap) overflow += part - cap;
+      else room += part;
+    });
+    if (overflow < 1e-6 || room <= 0) break;
+    parts = parts.map(function (part) {
+      return part > cap ? cap : part + overflow * (part / room);
+    });
+    cap = Math.min(0.7, cap + 0.1);
+  }
+  return parts;
+}
+
   // Builds every node once. Leaves are hosts, paths, sourcetypes, and indexes; groups
   // are sites and families. Links are kept at leaf level and folded per frame.
   function build(rows) {
@@ -144,8 +169,6 @@
     model.H = H;
 
     function place(col, ordered, grouped) {
-      var total = 0;
-      ordered.forEach(function (leaf) { total += leaf.ev; });
       var n = ordered.length;
       var g = grouped ? model.groups[col].length : 0;
       var leafGap = grouped ? GAP : Math.min(H * 0.04, Math.max(GAP, H * 0.25 / Math.max(1, n)));
@@ -153,14 +176,15 @@
       var free = Math.max(0, H - n * (MIN_H + leafGap) - g * groupGap);
       var y = groupGap / 2;
       var last = null;
-      ordered.forEach(function (leaf) {
+      var parts = share(ordered.map(function (leaf) { return leaf.ev; }));
+      ordered.forEach(function (leaf, index) {
         if (grouped && leaf.group !== last) {
           if (last) { last.h = y - last.y - leafGap; y += groupGap; }
           last = leaf.group;
           last.y = y;
         }
         leaf.y = y;
-        leaf.h = MIN_H + (total ? free * leaf.ev / total : 0);
+        leaf.h = MIN_H + free * (parts[index] || 0);
         y += leaf.h + leafGap;
       });
       if (last) last.h = y - last.y - leafGap;
@@ -237,6 +261,7 @@
     var zoomLabel = wrap.querySelector('.topomap-zoom');
     var ctx = canvas.getContext('2d');
     var model = null;
+    var allRows = [];
     var cssW = 0, cssH = 0, dpr = 1;
     var view = { k: 1, oy: 0 };
     var fitK = 1, maxK = 1;
@@ -297,6 +322,8 @@
     function isOpen(group) {
       if (!group) return true;
       if (group.forced) return true;
+      // A family stays one bar until it is clicked, then it shows its sourcetypes.
+      if (group.col === 2) return !!group.userOpen;
       return group.h * view.k / group.leaves.length >= OPEN_SLOT;
     }
 
@@ -333,12 +360,11 @@
         Object.keys(bag).forEach(function (id) {
           var list = bag[id];
           var owner = list[0][end];
-          var total = 0;
-          list.forEach(function (link) { total += link.ev; });
           list.sort(function (p, q) { return (p[other].y + p[other].h / 2) - (q[other].y + q[other].h / 2); });
+          var parts = share(list.map(function (link) { return link.ev; }));
           var y = owner.y;
-          list.forEach(function (link) {
-            var h = total ? owner.h * link.ev / total : 0;
+          list.forEach(function (link, index) {
+            var h = owner.h * (parts[index] || 0);
             link[end + '0'] = y;
             link[end + '1'] = y + h;
             y += h;
@@ -374,7 +400,7 @@
       if (!model || !model.data.length) {
         ctx.fillStyle = '#8b949e';
         ctx.font = FONT;
-        ctx.fillText('No events in the last 24 hours.', PAD, 28);
+        ctx.fillText((model && model.note) || 'No events in the last 24 hours.', PAD, 28);
         return;
       }
       frame = buildFrame();
@@ -567,6 +593,9 @@
       if (item.leaves) {
         var kind = item.col === 0 ? 'Site ' : 'Sourcetype family ';
         var inside = item.leaves.length + (item.col === 0 ? ' hosts' : ' sourcetypes');
+        if (item.col === 2) {
+          return kind + item.name + ' · ' + inside + ' · ' + events + '. ' + (item.open ? 'Click to collapse the sourcetypes.' : 'Click to show the sourcetypes.');
+        }
         return kind + item.name + ' · ' + inside + ' · ' + events + '. ' + (item.open ? 'Click to select it.' : 'Scroll or double-click to open it. Click to select it.');
       }
       var label = ['Host ', 'Ingestion path ', 'Sourcetype ', 'Index '][item.col];
@@ -684,6 +713,13 @@
       var item = unitAt(event.clientX - rect.left, event.clientY - rect.top);
       clickTimer = global.setTimeout(function () {
         clickTimer = null;
+        if (item && item.leaves && item.col === 2) {
+          item.userOpen = !item.userOpen;
+          schedule();
+          if (item.userOpen && item.h * view.k / item.leaves.length < LABEL_MIN) zoomToUnit(item);
+          onHover(describe(item));
+          return;
+        }
         onPick(item ? descriptor(item) : null);
       }, 240);
     });
@@ -768,29 +804,42 @@
     canvas.style.cursor = 'grab';
     sizeCanvas();
 
+    // A click keeps only the rows that pass through that host, path, sourcetype,
+    // site, family, or index, then lays the map out again so they fill the view.
+    function rowsFor(desc) {
+      if (!desc) return allRows;
+      return allRows.filter(function (row) {
+        if (desc.col === 'site') return (row.environment || 'unknown') === desc.name;
+        if (desc.col === 'host') return (row.data_source || 'unknown') === desc.name;
+        if (desc.col === 'ingest_method') return (row.ingest_method || 'Other') === desc.name;
+        if (desc.col === 'family') return (row.family || 'unknown') === desc.name;
+        if (desc.col === 'endpoint') {
+          return (row.endpoint || 'unknown') === desc.name && (!desc.family || (row.family || 'unknown') === desc.family);
+        }
+        if (desc.col === 'splunk_index') return (row.splunk_index || 'unknown') === desc.name;
+        return true;
+      });
+    }
+    function show(desc) {
+      var kept = rowsFor(desc);
+      model = build(kept);
+      model.note = desc && !kept.length ? 'Nothing flows through this selection.' : '';
+      relayout();
+      fit();
+      hover = null;
+      focus = desc ? { desc: desc, unit: findUnit(desc) } : null;
+      if (model) setForced();
+      setHighlight();
+      draw();
+    }
+
     return {
       setData: function (rows) {
-        model = build(rows || []);
-        relayout();
-        fit();
-        hover = null;
-        if (focus) focus = { desc: focus.desc, unit: findUnit(focus.desc) };
-        if (model) setForced();
-        setHighlight();
-        draw();
+        allRows = rows || [];
+        show(focus && focus.desc);
       },
-      setFocus: function (desc, options) {
-        options = options || {};
-        focus = desc ? { desc: desc, unit: findUnit(desc) } : null;
-        if (!model) return;
-        setForced();
-        setHighlight();
-        if (options.reveal && focus && focus.unit) {
-          var item = focus.unit;
-          var top = toScreen(item.y), bottom = toScreen(item.y + item.h);
-          var tooSmall = item.h * view.k < OPEN_SLOT;
-          if (top < 0 || bottom > cssH || tooSmall) zoomToUnit(item);
-        }
+      setFocus: function (desc) {
+        show(desc || null);
       },
       fit: function () { if (model) animateTo({ k: fitK, oy: 0 }); }
     };
