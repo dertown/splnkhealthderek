@@ -4,8 +4,14 @@ The browser asks for a search by name. The handler runs only the named searches 
 default/health_queries.json, as the signed-in user, and never SPL sent from the
 browser. A click can only run the five searches marked write=True (record a
 decision, ask the AI provider, draft a support ticket, save the AI config, test
-the connection). Nothing here changes Splunk configuration, and the ticket is
-only text returned to the page.
+the connection). The ticket is only text returned to the page.
+
+The AI provider key is the one value that is never placed into a search. On
+save_config this handler writes it to Splunk's credential store
+(storage/passwords, app splunk_exec_health, realm CRED_REALM, user CRED_NAME) as
+the signed-in user, and the search only sees its length in tok_cfg_save. That
+needs the list_storage_passwords capability and write access to [passwords] in
+metadata/default.meta. bin/derekaiping.py reads the key back from there.
 """
 from __future__ import annotations
 
@@ -48,6 +54,13 @@ PARAMS = {
 
 WRITES = {"decide", "ask", "ticket", "save_config", "conn_test"}
 TOKEN_RE = re.compile(r"\$([a-z_]+)\$")
+# Read only here and sent to storage/passwords; never a search parameter.
+SECRET_PARAMS = {"tok_cfg_key"}
+
+APP = "splunk_exec_health"
+CRED_REALM = "splunk_exec_health_ai"
+CRED_NAME = "provider_api_key"
+CRED_PATH = f"/servicesNS/nobody/{APP}/storage/passwords"
 
 
 def _catalog() -> dict:
@@ -56,12 +69,55 @@ def _catalog() -> dict:
         return json.load(fh)
 
 
+def _clean_key(params: dict) -> str:
+    raw = str(params.get("tok_cfg_key") or "")
+    pattern, unused = PARAMS["tok_cfg_key"]
+    if not re.fullmatch(pattern, raw):
+        raise ValueError("rejected tok_cfg_key")
+    return "" if raw == "none" else raw
+
+
 def _latch(params: dict) -> None:
-    """The config searches only write when this matches, so compute it here."""
-    provider = re.sub(r"[^a-z]", "", params.get("tok_cfg_provider", "").lower())
-    model = re.sub(r"[^A-Za-z0-9._-]", "", params.get("tok_cfg_model", ""))
-    key = re.sub(r"[^A-Za-z0-9._/=+\-]", "", params.get("tok_cfg_key", ""))
-    params["tok_cfg_save"] = f"save|{provider}|{model}|{len(key)}"
+    """The config searches only write when this matches, so compute it here.
+
+    The key's length is the only thing about the key the searches ever see.
+    """
+    provider = re.sub(r"[^a-z]", "", str(params.get("tok_cfg_provider", "")).lower())
+    model = re.sub(r"[^A-Za-z0-9._-]", "", str(params.get("tok_cfg_model", "")))
+    params["tok_cfg_save"] = f"save|{provider}|{model}|{len(_clean_key(params))}"
+
+
+def _store_key(session_key: str, params: dict) -> None:
+    """Save the typed key in storage/passwords, or remove it when the provider is none.
+
+    A blank key keeps whatever is stored. Raises on any failure so the search,
+    which would otherwise record the key as stored, does not run.
+    """
+    key = _clean_key(params)
+    provider = str(params.get("tok_cfg_provider") or "none")
+    entity = CRED_PATH + "/" + quote(f"{CRED_REALM}:{CRED_NAME}:", safe="")
+    if provider == "none":
+        resp, unused = rest.simpleRequest(entity, sessionKey=session_key, method="DELETE", raiseAllErrors=False)
+        if resp.status not in (200, 404):
+            raise RuntimeError(f"credential delete returned HTTP {resp.status}")
+        return
+    if not key:
+        return
+    if len(key) < 8:
+        raise ValueError("rejected tok_cfg_key")
+    resp, unused = rest.simpleRequest(
+        entity, sessionKey=session_key, method="POST",
+        postargs={"password": key, "output_mode": "json"}, raiseAllErrors=False,
+    )
+    if resp.status == 404:
+        resp, unused = rest.simpleRequest(
+            CRED_PATH, sessionKey=session_key, method="POST",
+            postargs={"name": CRED_NAME, "realm": CRED_REALM, "password": key, "output_mode": "json"},
+            raiseAllErrors=False,
+        )
+    if resp.status not in (200, 201):
+        # 403 means the user lacks list_storage_passwords or write on [passwords].
+        raise RuntimeError(f"credential save returned HTTP {resp.status}")
 
 
 class HealthDashHandler(PersistentServerConnectionApplication):
@@ -129,6 +185,8 @@ class HealthDashHandler(PersistentServerConnectionApplication):
             _latch(supplied)
         values = {}
         for name in spec["params"]:
+            if name in SECRET_PARAMS:
+                raise ValueError(f"{name} may not be placed into a search")
             pattern, default = PARAMS[name]
             raw = supplied.get(name, "")
             value = default if raw == "" or raw is None else str(raw)
@@ -142,7 +200,18 @@ class HealthDashHandler(PersistentServerConnectionApplication):
         if spec is None or bool(spec.get("write")) != write or (write and name not in WRITES):
             return self._render({"success": False, "error": "Unknown search"}, 404)
         spec = dict(spec, name=name)
-        values = self._fill(spec, supplied if isinstance(supplied, dict) else {})
+        supplied = supplied if isinstance(supplied, dict) else {}
+        values = self._fill(spec, supplied)
+        if name == "save_config":
+            try:
+                _store_key(session_key, supplied)
+            except ValueError:
+                return self._render({"success": False, "error": "The API key must be 8 to 512 characters: "
+                                     "letters, digits, and . _ / = + -"}, 400)
+            except Exception as exc:  # noqa: BLE001 - the message never contains the key
+                logger.warning("save_config credential store failed: %s", type(exc).__name__)
+                return self._render({"success": False, "error": "The API key could not be saved to the credential store. "
+                                     "Saving needs the list_storage_passwords capability."}, 403)
         spl = spec["spl"]
         for key in sorted(values, key=len, reverse=True):
             spl = spl.replace(f"${key}$", values[key])
