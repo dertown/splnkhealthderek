@@ -2,7 +2,7 @@
 var Health = (function () {
   var PILL_GOOD = ['GREEN', 'OK', 'ok', 'Healthy', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no', 'Turned off on purpose', 'ON PATTERN'];
   var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING', 'Gone quiet', 'No events in 30 days', 'Wrong sourcetype', 'QUIET', 'BELOW'];
-  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING', 'Source gone quiet', 'New this week', 'In the catch-all', 'LEARNING'];
+  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING', 'Source gone quiet', 'New this week', 'In the catch-all', 'LEARNING', 'DISABLED', 'NOT SCHEDULED'];
 
   function root() {
     var path = window.location.pathname || '';
@@ -68,6 +68,23 @@ var Health = (function () {
       method: 'POST', credentials: 'same-origin',
       headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
       body: JSON.stringify({ name: name, params: params || {} })
+    }).then(handle);
+  }
+
+  // Self-heal: plan is a read-only GET; apply is a POST that the server
+  // recomputes and refuses unless tok_heal_confirm is yes.
+  function heal(params) {
+    var qs = Object.keys(params || {}).map(function (key) {
+      return encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
+    }).join('&');
+    return fetch(api('heal') + (qs ? '?' + qs : ''), { credentials: 'same-origin', headers: headers() }).then(handle);
+  }
+
+  function healRun(params) {
+    return fetch(api('heal'), {
+      method: 'POST', credentials: 'same-origin',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+      body: JSON.stringify({ params: params || {} })
     }).then(handle);
   }
 
@@ -357,5 +374,5 @@ var Health = (function () {
 
   mountNav(0);
   help(document);
-  return { query: query, act: act, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply };
+  return { query: query, act: act, heal: heal, healRun: healRun, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply };
 })();
