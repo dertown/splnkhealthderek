@@ -413,6 +413,17 @@
   "timeout": 120,
   "write": false
  },
+ "heal_runs": {
+  "spl": "search index=_internal sourcetype=scheduler savedsearch_name=\"Exec Health - *\" earliest=-$tok_heal_window$\n| eval run_epoch=_time\n| fields savedsearch_name run_epoch\n| sort 0 savedsearch_name run_epoch",
+  "earliest": "-24h",
+  "latest": "now",
+  "params": [
+   "tok_heal_window"
+  ],
+  "count": 5000,
+  "timeout": 120,
+  "write": false
+ },
  "tcpin": {
   "spl": "search index=_internal sourcetype=splunkd source=*metrics.log group=tcpin_connections\n| eval data_source=coalesce(sourceHost, hostname)\n| eval receiver=host\n| eval fwd=lower(trim(coalesce(fwdType, \"\")))\n| eval connection=case(\n    match(fwd, \"^(uf|lwf)$\"), \"UF\",\n    match(fwd, \"^(full|hf|hwf)$\"), \"HF\",\n    match(lower(coalesce(connectionType, \"\")), \"raw\"), \"TCP raw\",\n    1=1, coalesce(fwdType, connectionType, \"s2s\"))\n| where isnotnull(data_source) AND isnotnull(receiver)\n| stats sum(kb) as kb, sum(tcp_eps) as eps by data_source, connection, receiver\n| eval kb=round(kb, 1), eps=round(eps, 2)\n| sort 0 -kb\n| head 80\n| eval _color_rank=3\n| table data_source, connection, receiver, kb, eps, _color_rank",
   "earliest": "-4h",

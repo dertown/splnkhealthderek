@@ -4,8 +4,14 @@ The browser asks for a search by name. The handler runs only the named searches 
 default/health_queries.json, as the signed-in user, and never SPL sent from the
 browser. A click can only run the five searches marked write=True (record a
 decision, ask the AI provider, draft a support ticket, save the AI config, test
-the connection). Nothing here changes Splunk configuration, and the ticket is
+the connection). Those writes change only this app's own records; the ticket is
 only text returned to the page.
+
+The one change to Splunk configuration is the self-heal on Host Heartbeat. Its
+plan (GET) changes nothing. Its apply (POST, after a click that confirms it)
+re-enables the app's own Exec Health saved searches and re-runs the newest
+scheduled slot that never ran. It only touches names shipped in
+default/savedsearches.conf, and it recomputes the plan itself on apply.
 """
 from __future__ import annotations
 
@@ -13,6 +19,7 @@ import json
 import logging
 import os
 import re
+import time
 from urllib.parse import quote
 
 import splunk.rest as rest
@@ -44,10 +51,110 @@ PARAMS = {
     "tok_cfg_model": (r"^[A-Za-z0-9._-]{0,64}$", "none"),
     "tok_cfg_key": (r"^[A-Za-z0-9._/=+\-]{0,512}$", ""),
     "tok_cfg_save": (r"^save\|[a-z]*\|[A-Za-z0-9._-]*\|[0-9]+$", "save|||0"),
+    "tok_heal_window": (r"^(1h|6h|24h)$", "6h"),
+    "tok_heal_confirm": (r"^(yes|no)$", "no"),
 }
 
 WRITES = {"decide", "ask", "ticket", "save_config", "conn_test"}
 TOKEN_RE = re.compile(r"\$([a-z_]+)\$")
+
+# Self-heal settings. A scheduled slot counts as run if the scheduler logged a run
+# that started inside [slot - 2 min, slot + 5 min). A slot newer than the grace
+# period may still be running, so it is not yet missed.
+HEAL_APP = "splunk_exec_health"
+HEAL_PREFIX = "Exec Health - "
+HEAL_WINDOWS = {"1h": 3600, "6h": 6 * 3600, "24h": 24 * 3600}
+HEAL_GRACE_SEC = 900
+HEAL_COVER_BEFORE = 120
+HEAL_COVER_AFTER = 300
+_CRON_LIMITS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
+
+
+class SearchFailed(Exception):
+    """Operator-facing failure. The message is safe to show on the page."""
+
+
+def _cron_field(expr: str, low: int, high: int) -> set:
+    values = set()
+    for part in expr.split(","):
+        step = 1
+        if "/" in part:
+            part, step_text = part.split("/", 1)
+            if not step_text.isdigit() or int(step_text) < 1:
+                raise ValueError("cron step")
+            step = int(step_text)
+        if part == "*":
+            start, end = low, high
+        elif re.fullmatch(r"\d{1,2}-\d{1,2}", part):
+            start, end = (int(p) for p in part.split("-"))
+        elif re.fullmatch(r"\d{1,2}", part):
+            start = end = int(part)
+        else:
+            raise ValueError("cron field")
+        if start < low or end > high or start > end:
+            raise ValueError("cron range")
+        values.update(range(start, end + 1, step))
+    return values
+
+
+def _parse_cron(expr: str):
+    """Minute, hour, day-of-month, month, day-of-week sets, plus the star flags that
+    decide whether day-of-month and day-of-week are combined with AND or OR."""
+    fields = (expr or "").split()
+    if len(fields) != 5:
+        raise ValueError("cron must have five fields")
+    sets = [_cron_field(f, low, high) for f, (low, high) in zip(fields, _CRON_LIMITS)]
+    if 7 in sets[4]:
+        sets[4].discard(7)
+        sets[4].add(0)
+    return sets, fields[2].startswith("*"), fields[4].startswith("*")
+
+
+def _cron_matches(stamp: time.struct_time, parsed) -> bool:
+    sets, dom_star, dow_star = parsed
+    if stamp.tm_min not in sets[0] or stamp.tm_hour not in sets[1] or stamp.tm_mon not in sets[3]:
+        return False
+    dom_ok = stamp.tm_mday in sets[2]
+    dow_ok = (stamp.tm_wday + 1) % 7 in sets[4]
+    if not dom_star and not dow_star:
+        return dom_ok or dow_ok
+    return dom_ok and dow_ok
+
+
+def _expected_slots(cron: str, start: int, end: int) -> list:
+    """Whole-minute scheduled times in [start, end), in the server's local time."""
+    parsed = _parse_cron(cron)
+    stamp = start + (-start % 60)
+    slots = []
+    while stamp < end:
+        if _cron_matches(time.localtime(stamp), parsed):
+            slots.append(stamp)
+        stamp += 60
+    return slots
+
+
+def _is_covered(slot: int, run_times: list) -> bool:
+    return any(slot - HEAL_COVER_BEFORE <= run < slot + HEAL_COVER_AFTER for run in run_times)
+
+
+def _shipped_names() -> list:
+    """Exec Health searches shipped in this app. Only these names are ever touched."""
+    path = os.path.join(os.path.dirname(__file__), "..", "default", "savedsearches.conf")
+    names = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            match = re.fullmatch(r"\[(Exec Health - [^\]\r\n]{1,200})\]\s*", line)
+            if match:
+                names.append(match.group(1))
+    return names
+
+
+def _flag(value) -> bool:
+    return str(value).strip().lower() in ("1", "true")
+
+
+def _local_time(epoch) -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(epoch))
 
 
 def _catalog() -> dict:
@@ -101,6 +208,11 @@ class HealthDashHandler(PersistentServerConnectionApplication):
             if method == "post" and path == "act":
                 body = self._body(args)
                 return self._run(session_key, user, body.get("name", ""), body.get("params") or {}, write=True)
+            if method == "get" and path == "heal":
+                return self._heal_plan_response(session_key, user, supplied)
+            if method == "post" and path == "heal":
+                body = self._body(args)
+                return self._heal_apply_response(session_key, user, body.get("params") or {})
         except Exception as exc:  # noqa: BLE001 - report a clean message, keep the detail in the log
             logger.warning("healthdash request failed: %s", exc)
             return self._render({"success": False, "error": "The search could not run"}, 500)
@@ -141,6 +253,14 @@ class HealthDashHandler(PersistentServerConnectionApplication):
         spec = self.catalog.get(name)
         if spec is None or bool(spec.get("write")) != write or (write and name not in WRITES):
             return self._render({"success": False, "error": "Unknown search"}, 404)
+        try:
+            rows = self._oneshot(session_key, user, name, spec, supplied)
+        except SearchFailed as exc:
+            return self._render({"success": False, "error": str(exc)}, 500)
+        return self._render({"success": True, "rows": rows})
+
+    def _oneshot(self, session_key: str, user: str, name: str, spec: dict, supplied: dict) -> list:
+        """Run one named catalog search as the signed-in user and return its rows."""
         spec = dict(spec, name=name)
         values = self._fill(spec, supplied if isinstance(supplied, dict) else {})
         spl = spec["spl"]
@@ -167,13 +287,223 @@ class HealthDashHandler(PersistentServerConnectionApplication):
             data = json.loads(content)
         except Exception as exc:  # noqa: BLE001
             logger.warning("oneshot %s failed: %s", name, exc)
-            return self._render({"success": False, "error": "The search could not run"}, 500)
+            raise SearchFailed("The search could not run") from exc
         if isinstance(data, dict) and data.get("messages"):
             fatal = [m.get("text", "") for m in data["messages"] if m.get("type") == "FATAL"]
             if fatal:
                 logger.warning("oneshot %s fatal: %s", name, fatal[0][:300])
-                return self._render({"success": False, "error": fatal[0][:300]}, 500)
+                raise SearchFailed(fatal[0][:300])
         rows = data.get("results") or [] if isinstance(data, dict) else []
         for row in rows:
             row.pop("api_key", None)
+        return rows
+
+    # -- self-heal -----------------------------------------------------------
+
+    def _heal_values(self, supplied: dict) -> dict:
+        values = {}
+        for name in ("tok_heal_window", "tok_heal_confirm"):
+            pattern, default = PARAMS[name]
+            raw = supplied.get(name, "")
+            value = default if raw == "" or raw is None else str(raw)
+            if not re.fullmatch(pattern, value):
+                raise ValueError(f"rejected {name}")
+            values[name] = value
+        return values
+
+    def _saved_searches(self, session_key: str) -> dict:
+        """The app's shipped Exec Health searches that exist, keyed by name."""
+        try:
+            response, content = rest.simpleRequest(
+                f"/servicesNS/-/{HEAL_APP}/saved/searches",
+                sessionKey=session_key,
+                getargs={"count": "0", "output_mode": "json"},
+                raiseAllErrors=False,
+            )
+            status = int(getattr(response, "status", 0) or 0)
+            if not 200 <= status < 300:
+                raise SearchFailed(f"could not read saved searches (HTTP {status})")
+            payload = json.loads(content)
+        except SearchFailed:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("heal list failed: %s", exc)
+            raise SearchFailed("could not read saved searches") from exc
+        shipped = set(_shipped_names())
+        found = {}
+        for entry in payload.get("entry") or []:
+            name = entry.get("name") or ""
+            if name not in shipped or name in found:
+                continue
+            body = entry.get("content") or {}
+            acl = entry.get("acl") or {}
+            found[name] = {
+                "owner": acl.get("owner") or "nobody",
+                "disabled": _flag(body.get("disabled")),
+                "scheduled": _flag(body.get("is_scheduled")),
+                "cron": str(body.get("cron_schedule") or "").strip(),
+            }
+        return found
+
+    def _scheduler_runs(self, session_key: str, user: str, window_key: str) -> dict:
+        """Start times of scheduler runs per Exec Health search, inside the window."""
+        spec = self.catalog["heal_runs"]
+        rows = self._oneshot(session_key, user, "heal_runs", spec, {"tok_heal_window": window_key})
+        runs: dict = {}
+        for row in rows:
+            try:
+                runs.setdefault(row.get("savedsearch_name") or "", []).append(float(row.get("run_epoch")))
+            except (TypeError, ValueError):
+                continue
+        return runs
+
+    def _heal_items(self, session_key: str, user: str, window_key: str) -> list:
+        """Plan: what each shipped Exec Health search needs. Changes nothing."""
+        window_sec = HEAL_WINDOWS[window_key]
+        now = int(time.time())
+        found = self._saved_searches(session_key)
+        runs = self._scheduler_runs(session_key, user, window_key)
+        items = []
+        for name in _shipped_names():
+            item = {
+                "search": name, "owner": "", "state": "MISSING", "cron": "",
+                "disabled": False, "scheduled": False, "expected": 0, "runs": 0,
+                "missed": 0, "rerun": None, "note": "",
+            }
+            info = found.get(name)
+            if info is None:
+                item["note"] = "Not installed in this app"
+                items.append(item)
+                continue
+            item.update(owner=info["owner"], cron=info["cron"], disabled=info["disabled"], scheduled=info["scheduled"])
+            item["state"] = "DISABLED" if info["disabled"] else ("NOT SCHEDULED" if not info["scheduled"] else "OK")
+            item["runs"] = len(runs.get(name, []))
+            if not info["cron"]:
+                item["note"] = "No schedule to check"
+            else:
+                try:
+                    slots = _expected_slots(info["cron"], now - window_sec, now - HEAL_GRACE_SEC)
+                except ValueError:
+                    slots = None
+                    item["note"] = "Schedule is not one this check reads"
+                if slots is not None:
+                    missed = [s for s in slots if not _is_covered(s, runs.get(name, []))]
+                    item["expected"] = len(slots)
+                    item["missed"] = len(missed)
+                    if missed:
+                        item["rerun"] = missed[-1]
+            items.append(item)
+        return items
+
+    @staticmethod
+    def _needs_enable(item: dict) -> bool:
+        return item["state"] != "MISSING" and (item["disabled"] or not item["scheduled"])
+
+    @classmethod
+    def _heal_action(cls, item: dict) -> str:
+        if item["state"] == "MISSING":
+            return "None"
+        if cls._needs_enable(item) and item["rerun"] is not None:
+            return "Enable and re-run latest missed"
+        if cls._needs_enable(item):
+            return "Enable"
+        if item["rerun"] is not None:
+            return "Re-run latest missed"
+        return "None"
+
+    def _heal_plan_row(self, item: dict) -> dict:
+        return {
+            "search": item["search"],
+            "state": item["state"],
+            "schedule": item["cron"] or "none",
+            "due_in_window": item["expected"],
+            "ran_in_window": item["runs"],
+            "missed": item["missed"],
+            "latest_missed": _local_time(item["rerun"]) if item["rerun"] is not None else "",
+            "action": self._heal_action(item),
+            "note": item["note"],
+        }
+
+    def _post(self, session_key: str, path: str, postargs: dict) -> bytes:
+        try:
+            response, content = rest.simpleRequest(path, sessionKey=session_key, postargs=postargs, raiseAllErrors=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("heal post %s failed: %s", path, exc)
+            raise SearchFailed("Splunk did not accept the change") from exc
+        status = int(getattr(response, "status", 0) or 0)
+        if not 200 <= status < 300:
+            logger.warning("heal post %s returned HTTP %s", path, status)
+            raise SearchFailed(f"Splunk did not accept the change (HTTP {status})")
+        return content
+
+    def _heal_saved_path(self, item: dict) -> str:
+        return (f"/servicesNS/{quote(item['owner'], safe='')}/{HEAL_APP}"
+                f"/saved/searches/{quote(item['search'], safe='')}")
+
+    def _heal_apply_rows(self, session_key: str, user: str, window_key: str) -> list:
+        """Apply: plan again on the server, then enable and re-run per search."""
+        results = []
+        for item in self._heal_items(session_key, user, window_key):
+            needs_enable = self._needs_enable(item)
+            result = {
+                "search": item["search"],
+                "enabled": "n/a" if item["state"] == "MISSING" else ("no" if needs_enable else "already on"),
+                "rerun_at": "", "sid": "", "status": "nothing to do", "error": "",
+            }
+            if item["state"] == "MISSING" or (not needs_enable and item["rerun"] is None):
+                results.append(result)
+                continue
+            try:
+                if needs_enable:
+                    base = self._heal_saved_path(item)
+                    if item["disabled"]:
+                        self._post(session_key, base + "/enable", {"output_mode": "json"})
+                    if not item["scheduled"]:
+                        self._post(session_key, base, {"is_scheduled": "1", "output_mode": "json"})
+                    result["enabled"] = "yes"
+                if item["rerun"] is not None:
+                    content = self._post(session_key, self._heal_saved_path(item) + "/dispatch", {
+                        "dispatch.now": str(int(item["rerun"])),
+                        "trigger_actions": "1",
+                        "force_dispatch": "1",
+                        "output_mode": "json",
+                    })
+                    try:
+                        sid = str(json.loads(content).get("sid") or "")
+                    except (ValueError, AttributeError) as exc:
+                        raise SearchFailed("re-run did not return a job id") from exc
+                    result["sid"] = sid
+                    result["rerun_at"] = _local_time(item["rerun"])
+                result["status"] = "done"
+            except SearchFailed as exc:
+                result["status"] = "error"
+                result["error"] = str(exc)
+            results.append(result)
+        return results
+
+    def _heal_plan_response(self, session_key: str, user: str, supplied: dict) -> dict:
+        try:
+            values = self._heal_values(supplied if isinstance(supplied, dict) else {})
+        except ValueError:
+            return self._render({"success": False, "error": "Choose a look-back of 1h, 6h or 24h"}, 400)
+        try:
+            items = self._heal_items(session_key, user, values["tok_heal_window"])
+        except SearchFailed as exc:
+            return self._render({"success": False, "error": str(exc)}, 500)
+        return self._render({"success": True, "rows": [self._heal_plan_row(i) for i in items]})
+
+    def _heal_apply_response(self, session_key: str, user: str, params: dict) -> dict:
+        try:
+            values = self._heal_values(params if isinstance(params, dict) else {})
+        except ValueError:
+            return self._render({"success": False, "error": "Choose a look-back of 1h, 6h or 24h"}, 400)
+        if values["tok_heal_confirm"] != "yes":
+            return self._render({"success": False, "error": "Confirm the heal before it runs"}, 400)
+        window_key = values["tok_heal_window"]
+        try:
+            rows = self._heal_apply_rows(session_key, user, window_key)
+        except SearchFailed as exc:
+            return self._render({"success": False, "error": str(exc)}, 500)
+        logger.info("heal apply window=%s by=%s: %s", window_key, user,
+                    "; ".join("%s=%s" % (r["search"], r["status"]) for r in rows))
         return self._render({"success": True, "rows": rows})

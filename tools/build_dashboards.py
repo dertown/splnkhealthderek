@@ -3105,7 +3105,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.84"
+APP_VERSION = "1.7.85"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3535,6 +3535,17 @@ search index=_internal sourcetype=splunkd component=DateParserVerbose log_level=
 """.strip()
 
 
+# Scheduler log rows for the app's own Exec Health searches. The heal panel uses
+# these to find scheduled slots that never ran. One row per run, not a list(),
+# because list() is capped at 100 values and a */5 search has 288 runs a day.
+Q_HEAL_RUNS = r"""
+search index=_internal sourcetype=scheduler savedsearch_name="Exec Health - *" earliest=-$tok_heal_window$
+| eval run_epoch=_time
+| fields savedsearch_name run_epoch
+| sort 0 savedsearch_name run_epoch
+""".strip()
+
+
 def emit_catalog() -> None:
     """Named searches the HTML pages may run. The REST handler only ever runs a
     name from this file, never SPL from the browser, and only the entries marked
@@ -3592,6 +3603,7 @@ def emit_catalog() -> None:
         "topo_overview": entry(Q_TOPO_OVERVIEW, "-24h", "now", count=740, timeout=120),
         "topo_full": entry(Q_TOPO_FULL, "-24h", "now", count=20000, timeout=150),
         "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_environment", "tok_topo_ingest", "tok_topo_family", "tok_topo_endpoint", "tok_topo_index"], count=200, timeout=120),
+        "heal_runs": entry(Q_HEAL_RUNS, "-24h", "now", ["tok_heal_window"], count=5000, timeout=120),
         "tcpin": entry(Q_TCPIN_PATHS, "-4h", "now", count=80),
         "topo_src_stats": entry(Q_TOPO_SRC_STATS, "-4h", "now", ["tok_data_source"], count=5),
         "topo_src_trend": entry(Q_TOPO_SRC_TREND, "-25h@m", "@m", ["tok_data_source"], count=120),

@@ -13,7 +13,7 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 | View | Purpose |
 | --- | --- |
 | **Executive overview** | The summary page. A verdict names the worst area. Each area card opens its dashboard, with the reason under it. Open agent findings are counted and do not change the color. GB/day vs the 7-day average, a pie of the top indexes, the last hour versus that hour's usual level, and empty hours for indexes marked active |
-| **Host Heartbeat & Instance Health** | Fleet-wide liveness: last indexed data vs last `_internal` heartbeat, each host's own heartbeat gap once it has a day of history, ingestion latency, the 24-hour 2σ baseline, and the last hour versus that same hour on earlier days. Also splunkd health, CPU/memory, and blocked queues |
+| **Host Heartbeat & Instance Health** | Fleet-wide liveness: last indexed data vs last `_internal` heartbeat, each host's own heartbeat gap once it has a day of history, ingestion latency, the 24-hour 2σ baseline, and the last hour versus that same hour on earlier days. Also splunkd health, CPU/memory, and blocked queues. Self-heal lists the app's Exec Health searches that are off or missed a run, and after a confirmed click turns them on and re-runs the newest missed check |
 | **HEC Token Performance** | Events per HEC token, 1-hour rolling window, flag if a ~100 eps token sits at 0 for 5+ minutes. Handler errors list the client, token, index, and sourcetype. A flow shows client → HEC token → index, with the sourcetype on the index step. Also lists HEC token configuration load failures, line-breaking truncation, and timestamp parse warnings |
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
 | **Data Topology** | The map opens as a summary: site (a shared domain, or an IPv4 /16) → ingestion path → sourcetype family → index. The busiest eight of each are named, and the rest is one Other node whose count still includes that tail. Hover a node to light its path through the map. Click a site, path, family, or index to open the hosts and sourcetypes inside it. Windows stays one family on the summary. Opening it lists the sourcetypes in the index; WinEventLog and XmlWinEventLog are split by the event-log channel in the source. Click Overview to return. Feeds you expect are a list in `lookups/feed_catalog.csv`: gone quiet, wrong sourcetype, and sources new this week. A catch-all index is any row whose state is catchall. The starting names are quarantine, lastchance, and main. Delete the ones this stack does not use. Click a host for its first/latest event and its own 24h trend (liveness stays on Host Heartbeat) |
@@ -55,7 +55,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.84.spl`.
+3. Upload `dist/splunk_exec_health-1.7.85.spl`.
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -79,8 +79,19 @@ On Cloud, override `exec_health_idx` and `exec_health_sc4s_idx` if `index=*` is 
 Health alerts ship with `enableSched = 0` and **no email action**. That is intentional: this app must not send mail until you decide it should. 
 
 1. **Settings > Searches, reports, and alerts** (filter to this app).
-2. Enable the core alerts after you have confirmed the searches return expected rows on your stack.
+2. Enable the core alerts after you have confirmed the searches return expected rows on your stack. Or use **Self-heal** on Host Heartbeat (below), which turns them on for you after a confirmed click.
 3. Add an email (or Slack) action **in Splunk Web**. On Cloud, use Splunk’s email settings / allowed notification add-ons.
+
+### Self-heal (Host Heartbeat)
+
+**Check** lists the five shipped Exec Health searches. For each one it shows whether the search is disabled or unscheduled, and how many scheduled runs in the look-back (1, 6 or 24 hours) did not happen. **Heal now** appears only when Check finds something to do. After you confirm it, the heal:
+
+- turns on each disabled or unscheduled Exec Health search (`enableSched`), and
+- re-runs the newest missed scheduled slot of that search once, with `dispatch.now` set to that slot and alert actions enabled, so Splunk records the triggered alert.
+
+It never changes the search text, the schedule, or any alert action (email stays as you set it, and off on install). It never touches other saved searches, never deletes anything, and never runs more than one re-run per search. Older missed slots are not replayed. Each apply writes a `heal apply` line to Splunk's internal log. The signed-in user needs write access to saved searches in this app, which `metadata/default.meta` grants to the admin and sc_admin roles.
+
+The first time you press Heal now on a new install, the five searches that ship off will be turned on. Check the list before you confirm.
 
 Do not put SMTP passwords, Slack webhook URLs, API tokens, or HEC token **secrets** in `default/` or `local/` of this app. Notification credentials belong in Splunk’s alert-action / email configuration, not in source control.
 
@@ -196,5 +207,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.84.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.85.spl --included-tags private_app
 ```

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.84">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.85">
 </head>
 <body>
 <div class="page">
@@ -17,6 +17,16 @@
     <button class="btn" id="apply">Apply</button>
   </div>
   <div class="stats-row" id="stats"></div>
+  <div class="section"><h2 class="section-title" data-help="Checks the five Exec Health searches this app ships. A disabled or unscheduled search does not run, so its checks are missed while it is off. Check lists which searches are off and which scheduled runs did not happen in the look-back. Heal now turns the disabled searches on and re-runs the newest missed run of each one, so Splunk records it. Email and other alert actions keep their current settings. No other search is changed, and nothing is deleted. Each click is limited to five searches.">Self-heal: disabled and missed Exec Health checks</h2>
+    <p class="note" id="healNote">Check shows what would change. Nothing changes until you press Heal now and confirm.</p>
+    <div class="controls">
+      <label class="fld">Look back<select id="healWindow"><option value="1h">1 hour</option><option value="6h" selected>6 hours</option><option value="24h">24 hours</option></select></label>
+      <button class="btn secondary" id="healCheck">Check</button>
+      <button class="btn" id="healRun" disabled>Heal now</button>
+    </div>
+    <div id="healDone"></div>
+    <div id="healOut"></div>
+  </div>
   <div class="section"><h2 class="section-title" data-help="Compares the last event a host sent with the last time it phoned home on _internal. A host can be up and still not be sending data. This uses the same cutoff for every host.">Last data received vs last internal heartbeat</h2><div id="phone"></div></div>
   <div class="section"><h2 class="section-title" data-help="The usual time between this host's _internal events over the last 7 days, and the gap since the last one. Quiet means the current gap is longer than that host's own pattern. Learning means there is not yet a day of history, so the fixed cutoff above still applies.">Heartbeat vs this host's usual gap</h2><div id="heartbeatBand"><p class="note">Loading each host's usual gap.</p></div></div>
   <div class="section"><h2 class="section-title" data-help="Seconds between the event time and the index time, over the last 15 minutes. A host whose clock is ahead of the indexer is marked separately from one that is simply late.">Ingestion latency, last 15 minutes (seconds)</h2><div id="latency"></div></div>
@@ -28,8 +38,8 @@
   </div>
   <div class="section"><h2 class="section-title" data-help="Ingestion queues that are blocked. A blocked queue stops data from moving through this instance.">Blocked ingestion queues</h2><div id="queues"></div></div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.84"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.84"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.85"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.85"></script>
 <script>
 (function () {
   Health.link('home', 'executive_overview');
@@ -71,6 +81,62 @@
     }, function (error) { Health.fail(document.getElementById('hostSeason'), error); });
   }
   document.getElementById('apply').addEventListener('click', load);
+
+  var PLAN_COLUMNS = [
+    { key: 'search', label: 'Search' }, { key: 'state', label: 'State' },
+    { key: 'schedule', label: 'Schedule' }, { key: 'due_in_window', label: 'Due in window' },
+    { key: 'ran_in_window', label: 'Ran in window' }, { key: 'missed', label: 'Missed' },
+    { key: 'latest_missed', label: 'Latest missed' }, { key: 'action', label: 'Action' },
+    { key: 'note', label: 'Note' }
+  ];
+  var RESULT_COLUMNS = [
+    { key: 'search', label: 'Search' }, { key: 'enabled', label: 'Turned on' },
+    { key: 'rerun_at', label: 'Re-run for' }, { key: 'status', label: 'Status' },
+    { key: 'error', label: 'Error' }
+  ];
+  var healBtn = document.getElementById('healRun');
+  var healNote = document.getElementById('healNote');
+
+  function healWindow() { return document.getElementById('healWindow').value; }
+
+  function checkHeal() {
+    healBtn.disabled = true;
+    healNote.textContent = 'Checking the Exec Health searches for this look-back.';
+    return Health.heal({ tok_heal_window: healWindow() }).then(function (rows) {
+      Health.table(document.getElementById('healOut'), rows, PLAN_COLUMNS);
+      var pending = rows.filter(function (row) { return row.action !== 'None'; }).length;
+      healBtn.disabled = pending === 0;
+      healNote.textContent = pending
+        ? pending + ' search(es) need attention. Heal now turns them on and re-runs the newest missed run of each one.'
+        : 'All five Exec Health searches are on, and no scheduled run was missed in this look-back.';
+    }, function (error) {
+      Health.fail(document.getElementById('healOut'), error);
+      healNote.textContent = 'The check could not run.';
+    });
+  }
+
+  document.getElementById('healCheck').addEventListener('click', checkHeal);
+  document.getElementById('healWindow').addEventListener('change', function () {
+    healBtn.disabled = true;
+    healNote.textContent = 'Press Check to see the searches for this look-back.';
+  });
+  healBtn.addEventListener('click', function () {
+    var win = healWindow();
+    var ok = window.confirm('Turn on the disabled Exec Health searches and re-run the newest missed run of each one (look-back ' + win + ')? Email and other alert actions keep their current settings. No other search is changed.');
+    if (!ok) return;
+    healBtn.disabled = true;
+    healNote.textContent = 'Healing. Each search is turned on, then its missed run is started.';
+    Health.healRun({ tok_heal_window: win, tok_heal_confirm: 'yes' }).then(function (rows) {
+      Health.table(document.getElementById('healDone'), rows, RESULT_COLUMNS);
+      healNote.textContent = 'Done. What each search did is listed above. Checking again.';
+      return checkHeal();
+    }, function (error) {
+      Health.fail(document.getElementById('healDone'), error);
+      healNote.textContent = 'The heal did not start, so nothing was changed. Press Check to see the current state.';
+      healBtn.disabled = false;
+    });
+  });
+
   load();
 })();
 </script>
