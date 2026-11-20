@@ -1,12 +1,15 @@
 """Derek+ AI provider call, run from the search head.
 
-Streaming search command (chunked protocol v2, standard library only). Each input
-row supplies provider, model, endpoint, api_key, ai_brief, and is_ping. The
-command calls the provider over HTTPS and adds ai_result, ai_reply, ai_error,
-and ai_http. It drops api_key from the output so the key never reaches results.
+Streaming search command (chunked protocol v2, standard library plus Splunk's own
+splunk.rest). Each input row supplies provider, model, endpoint, ai_brief, and
+is_ping. The command calls the provider over HTTPS and adds ai_result, ai_reply,
+ai_error, and ai_http. It drops any api_key field from the output.
 
-The key comes from the saved KV Store row on the search that invokes this command.
-It is never written to a file, logged, or placed in the search string.
+The key is read from Splunk's credential store (storage/passwords, app
+splunk_exec_health, realm splunk_exec_health_ai, user provider_api_key), where
+bin/healthdash.py saved it, using the session key Splunk passes to this command.
+Reading it needs the list_storage_passwords capability. The key is never written
+to a file, logged, placed in the search string, or taken from search results.
 
 Anthropic uses the Messages API with x-api-key. OpenAI, Cisco, and custom
 OpenAI-compatible endpoints use a Bearer token. Azure OpenAI uses api-key.
@@ -24,6 +27,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+APP = "splunk_exec_health"
+CRED_REALM = "splunk_exec_health_ai"
+CRED_NAME = "provider_api_key"
 ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_DEFAULT_MODEL = "claude-haiku-5-5"
 RETIRED_MODEL_RE = re.compile(r"^(claude-opus-4$|claude-3-)")
@@ -202,19 +208,57 @@ def clean_error(message, key):
     return re.sub(r"\s+", " ", text).strip()[:400]
 
 
+def read_stored_key(session_key):
+    """Return the provider key from storage/passwords, or "" when it is not there."""
+    if not session_key:
+        return ""
+    try:
+        import splunk.rest as rest  # provided by Splunk's Python; not packaged
+    except ImportError:
+        return ""
+    entity = "/servicesNS/nobody/%s/storage/passwords/%s" % (
+        APP, urllib.parse.quote("%s:%s:" % (CRED_REALM, CRED_NAME), safe=""))
+    try:
+        resp, content = rest.simpleRequest(entity, sessionKey=session_key,
+                                           getargs={"output_mode": "json"}, raiseAllErrors=False)
+        if resp.status != 200:
+            return ""
+        entries = json.loads(content).get("entry") or []
+        return str(entries[0]["content"].get("clear_password") or "").strip() if entries else ""
+    except Exception:  # noqa: BLE001 - treated as no key; the row reports it
+        return ""
+
+
+class KeySource:
+    """Reads the key once per search, on the first row that needs it."""
+
+    def __init__(self):
+        self.session_key = ""
+        self._key = None
+
+    def get(self):
+        if self._key is None:
+            self._key = read_stored_key(self.session_key)
+        return self._key
+
+
+KEYS = KeySource()
+
+
 def process_row(row):
     provider = (row.get("provider") or "").strip().lower()
-    key = (row.get("api_key") or "").strip()
     model = (row.get("model") or "").strip()
     endpoint = (row.get("endpoint") or "").strip()
     prompt = row.get("ai_brief") or ""
     is_ping = (row.get("is_ping") or "").strip() == "1"
     result = {"ai_result": "failed", "ai_reply": "", "ai_error": "", "ai_http": ""}
+    key = ""
     try:
         if provider not in ("anthropic", "openai", "cisco", "azure", "custom"):
             raise ProviderError("No provider is set")
+        key = KEYS.get()
         if not KEY_RE.match(key):
-            raise ProviderError("API key is missing or malformed. Enter the key and click SAVE")
+            raise ProviderError("API key is not in the credential store or is malformed. Enter the key and click SAVE")
         reply, status = call_provider(provider, endpoint, key, model, prompt, is_ping)
         result.update(ai_result="replied", ai_reply=reply[:MAX_REPLY], ai_http=str(status))
     except ProviderError as exc:
@@ -268,6 +312,7 @@ def main():
             return 0
         meta, body = chunk
         if meta.get("action") == "getinfo":
+            KEYS.session_key = str((meta.get("searchinfo") or {}).get("session_key") or "")
             write_chunk(stdout, {"type": "streaming", "generating": False})
             continue
         try:
