@@ -82,7 +82,7 @@ body.has-nav .page { max-width: none; margin: 0 0 0 220px; padding: 24px 28px 48
 .hero-meta a { color: var(--accent); text-decoration: none; }
 .hero-meta a:hover { text-decoration: underline; }
 .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 28px; }
-.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; text-align: center; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; text-align: center; min-height: 76px; }
 .stat .val { font-size: 1.35rem; font-weight: 700; color: var(--accent); }
 .stat .val.ok { color: var(--success); }
 .stat .val.bad { color: var(--error); }

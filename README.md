@@ -51,10 +51,11 @@ The viewing role needs search access to `_internal` and `_introspection` (HEC pe
 
 ## Dist / download
 
-The installable Cloud package lives in [`dist/`](dist/):
+The installable Cloud package lives in [`dist/`](dist/). GitHub keeps `latest.spl` plus the **last two versions**:
 
 - **[latest.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/latest.spl)** — always the current build
-- **[splunk_exec_health-1.7.88.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/splunk_exec_health-1.7.88.spl)** — same package, versioned name
+- **[splunk_exec_health-1.7.89.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/splunk_exec_health-1.7.89.spl)** — 1.7.89
+- **[splunk_exec_health-1.7.88.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/splunk_exec_health-1.7.88.spl)** — previous
 
 Browse the folder: https://github.com/dertown/splnkhealthderek/tree/main/dist
 
@@ -66,7 +67,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/latest.spl` (or `dist/splunk_exec_health-1.7.88.spl`).
+3. Upload `dist/latest.spl` (or `dist/splunk_exec_health-1.7.89.spl`).
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -241,5 +242,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.88.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.89.spl --included-tags private_app
 ```

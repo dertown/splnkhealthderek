@@ -7,6 +7,7 @@ __pycache__/
 *.spl
 !dist/latest.spl
 !dist/splunk_exec_health-1.7.88.spl
+!dist/splunk_exec_health-1.7.89.spl
 lookups/*.csv.bak
 .idea/
 .vscode/

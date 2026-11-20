@@ -142,6 +142,7 @@ var Health = (function () {
   var PILL_COLUMNS = ['severity', 'status', 'state', 'baseline_state', 'latency_state', 'hec_state', 'decision', 'recurring', 'approve', 'dismiss', 'key_state', 'conn_status', 'ai_status', 'tile_status', 'overall_status', 'agent_status', 'heartbeat_band', 'season_state', 'usage'];
 
   function table(el, rows, columns, onClick) {
+    if (el && /\bstats-row\b/.test(el.className || '')) el.className = el.className.replace(/\bstats-row\b/g, '').trim();
     columns = columns || Object.keys((rows[0] || {})).filter(function (key) { return key.charAt(0) !== '_' && key !== 'api_key'; })
       .map(function (key) { return { key: key, label: key.replace(/_/g, ' ') }; });
     if (!rows.length) { el.innerHTML = '<p class="note">Nothing to show.</p>'; return; }
@@ -188,6 +189,8 @@ var Health = (function () {
   }
 
   function stats(el, items) {
+    if (!el) return;
+    if (!/\bstats-row\b/.test(el.className || '')) el.className = ((el.className || '') + ' stats-row').trim();
     el.innerHTML = items.map(function (item) {
       return '<div class="stat"><div class="val ' + (item.kind || '') + '">' + esc(item.val) + '</div><div class="lbl">' + esc(item.lbl) + '</div></div>';
     }).join('');

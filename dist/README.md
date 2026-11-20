@@ -1,12 +1,11 @@
 # Dist
 
-Download the packaged app from this folder. `latest.spl` is always the current build. The versioned file is the same package with the version in the name.
+Download the packaged app from this folder. `latest.spl` is always the current build. GitHub keeps that file plus the **last two versions**. Older local builds stay on the machine that ran `bash tools/package.sh`.
 
 | File | What it is |
 | --- | --- |
 | [latest.spl](latest.spl) | Current Splunk Health Derek+ Cloud package |
-| [splunk_exec_health-1.7.88.spl](splunk_exec_health-1.7.88.spl) | Same package, versioned name |
+| [splunk_exec_health-1.7.88.spl](splunk_exec_health-1.7.88.spl) | Version 1.7.88 |
+| [splunk_exec_health-1.7.89.spl](splunk_exec_health-1.7.89.spl) | Version 1.7.89 |
 
 Install: **Apps → Manage apps → Install app from file**, then upload the `.spl`.
-
-Older local builds stay on the machine that ran `bash tools/package.sh`. Only the current `.spl` is kept in git.

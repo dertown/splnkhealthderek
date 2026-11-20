@@ -109,3 +109,46 @@ for runtime_csv in ("dq_agent_ai_config.csv", "dq_agent_approvals.csv"):
         raise SystemExit(runtime_csv + " must not ship in the package; runtime data lives in KV Store and an upgrade would wipe it")
 print(f"packaged {path} ({path.stat().st_size} bytes, {len(names)} entries)")
 PY
+
+# GitHub dist/ keeps latest.spl plus the two newest versioned packages. Older
+# .spl files stay on this machine and stay gitignored.
+python3 - <<PY
+import re
+from pathlib import Path
+root = Path("$ROOT")
+dist = root / "dist"
+app_id = "$APP_ID"
+packs = []
+for path in dist.glob(app_id + "-*.spl"):
+    match = re.fullmatch(re.escape(app_id) + r"-(\d+(?:\.\d+)*)\.spl", path.name)
+    if match:
+        packs.append((tuple(int(part) for part in match.group(1).split(".")), path))
+packs.sort()
+keep = [path for _, path in packs[-2:]]
+keep_names = [path.name for path in keep]
+gitignore = root / ".gitignore"
+lines = [line for line in gitignore.read_text(encoding="utf-8").splitlines()
+         if not line.startswith("!dist/splunk_exec_health-")]
+if "!dist/latest.spl" not in lines:
+    try:
+        at = next(i for i, line in enumerate(lines) if line == "*.spl") + 1
+    except StopIteration:
+        at = len(lines)
+    lines.insert(at, "!dist/latest.spl")
+at = next(i for i, line in enumerate(lines) if line == "!dist/latest.spl")
+for name in keep_names:
+    at += 1
+    lines.insert(at, "!dist/" + name)
+gitignore.write_text("\n".join(lines) + "\n", encoding="utf-8")
+rows = ["| [latest.spl](latest.spl) | Current Splunk Health Derek+ Cloud package |"]
+rows += [f"| [{name}]({name}) | Version {name[len(app_id)+1:-4]} |" for name in keep_names]
+(dist / "README.md").write_text(
+    "# Dist\\n\\n"
+    "Download the packaged app from this folder. \`latest.spl\` is always the current build. "
+    "GitHub keeps that file plus the **last two versions**. Older local builds stay on the machine that ran \`bash tools/package.sh\`.\\n\\n"
+    "| File | What it is |\\n| --- | --- |\\n" + "\\n".join(rows) + "\\n\\n"
+    "Install: **Apps → Manage apps → Install app from file**, then upload the \`.spl\`.\\n",
+    encoding="utf-8",
+)
+print("git dist keeps: latest.spl " + " ".join(keep_names))
+PY
