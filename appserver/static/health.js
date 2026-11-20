@@ -1,8 +1,8 @@
 /* Shared helpers for the Splunk Health Derek+ HTML pages. */
 var Health = (function () {
-  var PILL_GOOD = ['GREEN', 'OK', 'ok', 'Healthy', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no', 'Turned off on purpose', 'ON PATTERN'];
-  var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING', 'Gone quiet', 'No events in 30 days', 'Wrong sourcetype', 'QUIET', 'BELOW'];
-  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING', 'Source gone quiet', 'New this week', 'In the catch-all', 'LEARNING', 'DISABLED', 'NOT SCHEDULED'];
+  var PILL_GOOD = ['GREEN', 'OK', 'ok', 'Healthy', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no', 'Turned off on purpose', 'ON PATTERN', 'In use'];
+  var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING', 'Gone quiet', 'No events in 30 days', 'Wrong sourcetype', 'QUIET', 'BELOW', 'Unused'];
+  var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING', 'Source gone quiet', 'New this week', 'In the catch-all', 'LEARNING', 'DISABLED', 'NOT SCHEDULED', 'Disabled'];
 
   function root() {
     var path = window.location.pathname || '';
@@ -51,8 +51,33 @@ var Health = (function () {
       }
       var body = data.payload !== undefined ? (typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload) : data;
       if (!response.ok || body.success === false) throw new Error(body.error || ('Request failed (' + response.status + ')'));
-      return body.rows || [];
+      var rows = body.rows || [];
+      if (body.cached_at) rows.cachedAt = body.cached_at;
+      return rows;
     });
+  }
+
+  function liveMode() {
+    return /(?:^|[?&])live=1(?:&|$)/.test(window.location.search || '');
+  }
+
+  // One note per page: the oldest cache any panel was read from, and a link
+  // that reloads the page with every search run live.
+  var oldestCache = null;
+  function noteCache(epoch) {
+    if (!epoch || (oldestCache && oldestCache <= epoch) || !document.body) return;
+    oldestCache = epoch;
+    var note = document.getElementById('cacheNote');
+    if (!note) {
+      note = document.createElement('div');
+      note.id = 'cacheNote';
+      note.className = 'cache-note';
+      document.body.appendChild(note);
+    }
+    var when = new Date(epoch * 1000);
+    var sep = window.location.search ? '&' : '?';
+    note.innerHTML = 'Some panels are from the cache built at ' + esc(when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) +
+      '. <a href="' + esc(window.location.pathname + window.location.search + sep + 'live=1') + '">Run live</a>';
   }
 
   function query(name, params) {
@@ -60,7 +85,9 @@ var Health = (function () {
     Object.keys(params || {}).forEach(function (key) {
       qs += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
     });
-    return fetch(api('query') + '?' + qs, { credentials: 'same-origin', headers: headers() }).then(handle);
+    if (liveMode()) qs += '&fresh=1';
+    return fetch(api('query') + '?' + qs, { credentials: 'same-origin', headers: headers() }).then(handle)
+      .then(function (rows) { if (rows.cachedAt) noteCache(rows.cachedAt); return rows; });
   }
 
   function act(name, params) {
@@ -88,6 +115,14 @@ var Health = (function () {
     }).then(handle);
   }
 
+  function koDisable(params) {
+    return fetch(api('ko'), {
+      method: 'POST', credentials: 'same-origin',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+      body: JSON.stringify({ params: params || {} })
+    }).then(handle);
+  }
+
   function esc(value) {
     return String(value === undefined || value === null ? '' : value)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -104,7 +139,7 @@ var Health = (function () {
     return '<span class="pill ' + kind + '">' + esc(text) + '</span>';
   }
 
-  var PILL_COLUMNS = ['severity', 'status', 'state', 'baseline_state', 'latency_state', 'hec_state', 'decision', 'recurring', 'approve', 'dismiss', 'key_state', 'conn_status', 'ai_status', 'tile_status', 'overall_status', 'agent_status', 'heartbeat_band', 'season_state'];
+  var PILL_COLUMNS = ['severity', 'status', 'state', 'baseline_state', 'latency_state', 'hec_state', 'decision', 'recurring', 'approve', 'dismiss', 'key_state', 'conn_status', 'ai_status', 'tile_status', 'overall_status', 'agent_status', 'heartbeat_band', 'season_state', 'usage'];
 
   function table(el, rows, columns, onClick) {
     columns = columns || Object.keys((rows[0] || {})).filter(function (key) { return key.charAt(0) !== '_' && key !== 'api_key'; })
@@ -116,6 +151,17 @@ var Health = (function () {
     rows.forEach(function (row, index) {
       html += '<tr' + (onClick ? ' class="clickable" data-row="' + index + '"' : '') + '>';
       columns.forEach(function (col) {
+        if (col.button) {
+          var label = typeof col.button === 'function' ? col.button(row) : col.button;
+          var off = col.off && col.off(row);
+          html += '<td data-col="' + esc(col.key) + '">';
+          if (label) {
+            html += '<button type="button" class="btn secondary" data-row="' + index + '" data-col="' + esc(col.key) + '"'
+              + (off ? ' disabled' : '') + '>' + esc(label) + '</button>';
+          }
+          html += '</td>';
+          return;
+        }
         var value = row[col.key];
         html += '<td data-col="' + esc(col.key) + '">' + (PILL_COLUMNS.indexOf(col.key) >= 0 || col.pill ? pill(value) : esc(value)) + '</td>';
       });
@@ -124,8 +170,16 @@ var Health = (function () {
     html += '</tbody></table></div>';
     el.innerHTML = html;
     if (onClick) {
+      Array.prototype.forEach.call(el.querySelectorAll('button[data-row]'), function (btn) {
+        btn.addEventListener('click', function (event) {
+          event.stopPropagation();
+          if (btn.disabled) return;
+          onClick(rows[Number(btn.getAttribute('data-row'))], btn.getAttribute('data-col'));
+        });
+      });
       Array.prototype.forEach.call(el.querySelectorAll('tr.clickable'), function (tr) {
         tr.addEventListener('click', function (event) {
+          if (event.target.closest('button')) return;
           var cell = event.target.closest('td');
           onClick(rows[Number(tr.getAttribute('data-row'))], cell ? cell.getAttribute('data-col') : '');
         });
@@ -326,6 +380,7 @@ var Health = (function () {
       { view: 'hec_performance', label: 'HEC Tokens' },
       { view: 'sc4s_edge', label: 'SC4S & Edge' },
       { view: 'data_topology', label: 'Data Topology' },
+      { view: 'knowledge_objects', label: 'Knowledge objects' },
       { group: 'Agent' },
       { view: 'data_quality_agent', label: 'Data Quality Agent' },
       { view: 'health_reports', label: 'Reports' },
@@ -374,5 +429,5 @@ var Health = (function () {
 
   mountNav(0);
   help(document);
-  return { query: query, act: act, heal: heal, healRun: healRun, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply };
+  return { query: query, act: act, heal: heal, healRun: healRun, koDisable: koDisable, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply };
 })();

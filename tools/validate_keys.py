@@ -341,7 +341,12 @@ def check_savedsearches() -> dict:
             err("savedsearches.conf", f"[{stanza}] alert.suppress.fields only applies when alert.digest_mode = 0")
         if keys.get("enableSched") == "1" and "cron_schedule" not in keys:
             err("savedsearches.conf", f"[{stanza}] scheduled without cron_schedule")
-        if keys.get("enableSched") != "0":
+        cache = stanza.startswith("Exec Health Cache - ")
+        if cache and keys.get("alert.track") != "0":
+            err("savedsearches.conf", f"[{stanza}] cache searches must not track alerts")
+        if cache and "outputlookup exec_health_cache_" not in keys.get("search", ""):
+            err("savedsearches.conf", f"[{stanza}] cache searches may only write exec_health_cache_* collections")
+        if keys.get("enableSched") != "0" and not cache:
             warn("savedsearches.conf", f"[{stanza}] ships enabled; README says alerts ship disabled")
         if keys.get("action.email") not in (None, "0"):
             warn("savedsearches.conf", f"[{stanza}] ships with an email action")

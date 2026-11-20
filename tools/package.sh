@@ -74,6 +74,7 @@ OUT_TGZ="$DIST/${APP_ID}-${VERSION}.tgz"
 OUT_SPL="$DIST/${APP_ID}-${VERSION}.spl"
 tar -czf "$OUT_TGZ" -C "$STAGING" "$APP_ID"
 cp "$OUT_TGZ" "$OUT_SPL"
+cp "$OUT_SPL" "$DIST/latest.spl"
 
 python3 - <<PY
 import tarfile

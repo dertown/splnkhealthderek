@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.i18n_register=window.i18n_register||function(){};</script>
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.88">
+</head>
+<body>
+<div class="page">
+  <div class="hero">
+    <h1>Knowledge objects</h1>
+    <p class="tagline">What is on this search head, and what has not been used. Dashboards and apps use last view from the UI log. Macros and lookup files are unused when no saved search references them; last used is the latest scheduled run of a search that does.</p>
+    <div class="hero-meta"><a id="home" href="#">Executive overview</a></div>
+  </div>
+  <div class="controls">
+    <label class="fld">Look back<select id="koWindow"><option value="7d">7 days</option><option value="30d" selected>30 days</option><option value="90d">90 days</option></select></label>
+    <label class="fld">Show<select id="koFilter"><option value="all">All</option><option value="Unused">Unused</option><option value="Disabled">Disabled</option><option value="In use">In use</option></select></label>
+    <button class="btn" id="apply">Apply</button>
+  </div>
+  <p class="note" id="koNote">Disable turns off a dashboard, an app, or a macro after you confirm. Lookup files cannot be disabled. This app and the search and launcher apps stay on.</p>
+  <div class="stats-row" id="stats"><div class="stat"><div class="val">…</div><div class="lbl">Loading</div></div></div>
+  <div class="section">
+    <h2 class="section-title" data-help="Views on this search head from REST. Last used is the last GET of that view in the UI access log during the look-back. Hidden or disabled views are Disabled. A view with no GET in the look-back is Unused.">Dashboards</h2>
+    <div class="two">
+      <div id="dashChart"><p class="note">Loading dashboards.</p></div>
+      <div id="dashStats"></div>
+    </div>
+    <div id="dashTable"><p class="note">Loading dashboard list.</p></div>
+  </div>
+  <div class="section">
+    <h2 class="section-title" data-help="Installed apps on this search head. Last used is the last UI request under /app/that-app. Disabled apps stay Disabled even if something still hits the path. An enabled app with no UI request in the look-back is Unused.">Apps</h2>
+    <div class="two">
+      <div id="appChart"><p class="note">Loading apps.</p></div>
+      <div id="appStats"></div>
+    </div>
+    <div id="appTable"><p class="note">Loading app list.</p></div>
+  </div>
+  <div class="section">
+    <h2 class="section-title" data-help="Search macros from REST. Referenced means a saved search contains `name. Last used is the latest scheduler run of such a search. Macros used only in dashboards, Python, or modular inputs look Unused here. KOM can go further; this page stays on saved searches.">Macros</h2>
+    <div class="two">
+      <div id="macroChart"><p class="note">Loading macros.</p></div>
+      <div id="macroStats"></div>
+    </div>
+    <div id="macroTable"><p class="note">Loading macro list.</p></div>
+  </div>
+  <div class="section">
+    <h2 class="section-title" data-help="Lookup CSV files from REST. Referenced means a saved search uses lookup, inputlookup, or outputlookup on that file. Last used is the latest scheduler run of such a search. Automatic lookups and lookups used only in dashboards look Unused here.">Lookup files</h2>
+    <div class="two">
+      <div id="lookupChart"><p class="note">Loading lookup files.</p></div>
+      <div id="lookupStats"></div>
+    </div>
+    <div id="lookupTable"><p class="note">Loading lookup list.</p></div>
+  </div>
+</div>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.88"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.88"></script>
+<script src="../../static/app/splunk_exec_health/knowledge.js?v=1.7.88"></script>
+</body>
+</html>

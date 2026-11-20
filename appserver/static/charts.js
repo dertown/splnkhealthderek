@@ -71,7 +71,7 @@ var Charts = (function () {
     el(node, svg);
   }
 
-  function pie(node, rows, labelKey, valueKey) {
+  function pie(node, rows, labelKey, valueKey, unit) {
     var total = rows.reduce(function (sum, row) { return sum + (Number(row[valueKey]) || 0); }, 0);
     if (!rows.length || total <= 0) { node.innerHTML = '<p class="note">No data for this chart.</p>'; return; }
     var cx = 120, cy = 120, radius = 100, inner = 58;
@@ -89,9 +89,10 @@ var Charts = (function () {
       angle = next;
     });
     svg += '</svg>';
+    var suffix = unit === undefined || unit === null ? ' GB' : unit;
     var legend = rows.map(function (row, index) {
       return '<div><span class="pill" style="color:' + COLORS[index % COLORS.length] + ';">' + esc(row[labelKey]) + '</span> '
-        + esc(row[valueKey]) + ' GB</div>';
+        + esc(row[valueKey]) + suffix + '</div>';
     }).join('');
     el(node, '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">' + svg + '<div>' + legend + '</div></div>');
   }

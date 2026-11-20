@@ -19,6 +19,16 @@ plan (GET) changes nothing. Its apply (POST, after a click that confirms it)
 re-enables the app's own Exec Health saved searches and re-runs the newest
 scheduled slot that never ran. It only touches names shipped in
 default/savedsearches.conf, and it recomputes the plan itself on apply.
+
+Knowledge objects can be disabled from that page after a confirmed click.
+That POST only disables a dashboard, app, or macro that already exists, and
+it never deletes anything. Lookup files have no disable in Splunk, so they
+are refused. This app, the search and launcher apps, and this page itself
+cannot be disabled from here.
+
+Searches with a "cache" entry are answered from the KV Store collection that
+their scheduled "Exec Health Cache - ..." search fills, when that cache is fresh.
+Otherwise, or when the page asks with fresh=1, the live search runs as before.
 """
 from __future__ import annotations
 
@@ -60,6 +70,12 @@ PARAMS = {
     "tok_cfg_save": (r"^save\|[a-z]*\|[A-Za-z0-9._-]*\|[0-9]+$", "save|||0"),
     "tok_heal_window": (r"^(1h|6h|24h)$", "6h"),
     "tok_heal_confirm": (r"^(yes|no)$", "no"),
+    "tok_ko_window": (r"^(7d|30d|90d)$", "30d"),
+    "tok_ko_kind": (r"^(dashboard|app|macro|lookup)$", "dashboard"),
+    "tok_ko_app": (r"^[\w.\-]{1,128}$", "search"),
+    "tok_ko_name": (r"^[\w.:(),\-]{1,200}$", "none"),
+    "tok_ko_owner": (r"^[\w.\-]{1,128}$", "nobody"),
+    "tok_ko_confirm": (r"^(yes|no)$", "no"),
 }
 
 WRITES = {"decide", "ask", "ticket", "save_config", "conn_test"}
@@ -82,6 +98,22 @@ HEAL_GRACE_SEC = 900
 HEAL_COVER_BEFORE = 120
 HEAL_COVER_AFTER = 300
 _CRON_LIMITS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
+
+# Written by the "Exec Health Cache - ..." searches: one record per dataset with
+# cached_at (epoch) and, for knowledge-object usage, covered_from (epoch).
+CACHE_META = "exec_health_cache_meta"
+
+# Knowledge-object disable. Apps and views use Splunk's /disable or disabled=1.
+# Lookup CSV files have no disable action, so they are refused.
+KO_KINDS = frozenset({"dashboard", "app", "macro"})
+KO_PROTECTED_APPS = frozenset({
+    "splunk_exec_health", "search", "launcher", "learned", "introspection_generator",
+    "splunk_httpinput", "splunk_instrumentation", "splunk_monitoring_console",
+})
+KO_PROTECTED_VIEWS = frozenset({
+    ("splunk_exec_health", "knowledge_objects"),
+    ("splunk_exec_health", "executive_overview"),
+})
 
 
 class SearchFailed(Exception):
@@ -280,6 +312,9 @@ class HealthDashHandler(PersistentServerConnectionApplication):
             if method == "post" and path == "heal":
                 body = self._body(args)
                 return self._heal_apply_response(session_key, user, body.get("params") or {})
+            if method == "post" and path == "ko":
+                body = self._body(args)
+                return self._ko_disable_response(session_key, user, body.get("params") or {})
         except Exception as exc:  # noqa: BLE001 - report a clean message, keep the detail in the log
             logger.warning("healthdash request failed: %s", exc)
             return self._render({"success": False, "error": "The search could not run"}, 500)
@@ -322,11 +357,61 @@ class HealthDashHandler(PersistentServerConnectionApplication):
         spec = self.catalog.get(name)
         if spec is None or bool(spec.get("write")) != write or (write and name not in WRITES):
             return self._render({"success": False, "error": "Unknown search"}, 404)
+        rows, cached_at = None, None
+        cache = spec.get("cache")
+        if cache and not write and str(supplied.get("fresh", "")) != "1":
+            cached_at = self._cache_time(session_key, cache, supplied)
+            if cached_at is not None:
+                reader = dict(spec, spl=cache["spl"], earliest=cache["earliest"], latest=cache["latest"])
+                try:
+                    rows = self._oneshot(session_key, user, name, reader, supplied)
+                except SearchFailed as exc:
+                    logger.warning("cache read %s failed, running live: %s", name, exc)
+                    rows, cached_at = None, None
         try:
-            rows = self._oneshot(session_key, user, name, spec, supplied)
+            if rows is None:
+                rows = self._oneshot(session_key, user, name, spec, supplied)
         except SearchFailed as exc:
             return self._render({"success": False, "error": str(exc)}, exc.status)
-        return self._render({"success": True, "rows": rows})
+        body = {"success": True, "rows": rows}
+        if cached_at is not None:
+            body["cached_at"] = int(cached_at)
+        return self._render(body)
+
+    def _cache_time(self, session_key: str, cache: dict, supplied: dict):
+        """When the cache was built, if it is fresh enough to answer; otherwise None.
+
+        A cache with cover_param must also hold at least that many days of history.
+        """
+        dataset = str(cache.get("dataset", ""))
+        if not re.fullmatch(r"[a-z_]{1,40}", dataset):
+            return None
+        try:
+            response, content = rest.simpleRequest(
+                f"/servicesNS/nobody/{HEAL_APP}/storage/collections/data/{CACHE_META}/{dataset}",
+                sessionKey=session_key, getargs={"output_mode": "json"}, raiseAllErrors=False,
+            )
+            if int(getattr(response, "status", 0) or 0) != 200:
+                return None
+            record = json.loads(content)
+            cached_at = float(record.get("cached_at"))
+        except Exception:  # noqa: BLE001 - no cache, unreadable, or wrong shape: run live
+            return None
+        now = time.time()
+        if not 0 <= now - cached_at <= float(cache.get("max_age", 0)):
+            return None
+        param = cache.get("cover_param")
+        if param:
+            pattern, default = PARAMS[param]
+            value = str(supplied.get(param) or default)
+            days = re.fullmatch(r"(\d{1,3})d", value) if re.fullmatch(pattern, value) else None
+            try:
+                covered = float(record.get("covered_from"))
+            except (TypeError, ValueError):
+                return None
+            if days is None or covered > now - int(days.group(1)) * 86400:
+                return None
+        return cached_at
 
     def _oneshot(self, session_key: str, user: str, name: str, spec: dict, supplied: dict) -> list:
         """Run one named catalog search as the signed-in user and return its rows."""
@@ -587,3 +672,84 @@ class HealthDashHandler(PersistentServerConnectionApplication):
         logger.info("heal apply window=%s by=%s: %s", window_key, user,
                     "; ".join("%s=%s" % (r["search"], r["status"]) for r in rows))
         return self._render({"success": True, "rows": rows})
+
+    def _ko_values(self, supplied: dict) -> dict:
+        values = {}
+        for name in ("tok_ko_kind", "tok_ko_app", "tok_ko_name", "tok_ko_owner", "tok_ko_confirm"):
+            pattern, default = PARAMS[name]
+            raw = supplied.get(name, "")
+            value = default if raw == "" or raw is None else str(raw)
+            if not re.fullmatch(pattern, value):
+                raise ValueError(f"rejected {name}")
+            values[name] = value
+        return values
+
+    def _get_json(self, session_key: str, path: str) -> dict:
+        try:
+            response, content = rest.simpleRequest(
+                path, sessionKey=session_key, getargs={"output_mode": "json"}, raiseAllErrors=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ko get %s failed: %s", path, exc)
+            raise SearchFailed("could not read that object") from exc
+        status = int(getattr(response, "status", 0) or 0)
+        if status == 404:
+            raise SearchFailed("that object is not on this search head")
+        if not 200 <= status < 300:
+            raise SearchFailed(f"could not read that object (HTTP {status})")
+        try:
+            return json.loads(content)
+        except ValueError as exc:
+            raise SearchFailed("could not read that object") from exc
+
+    def _ko_entity_path(self, kind: str, app: str, name: str, owner: str) -> str:
+        if kind == "app":
+            return "/services/apps/local/%s" % quote(name, safe="")
+        owner = owner or "nobody"
+        if kind == "dashboard":
+            return "/servicesNS/%s/%s/data/ui/views/%s" % (
+                quote(owner, safe=""), quote(app, safe=""), quote(name, safe=""),
+            )
+        return "/servicesNS/%s/%s/admin/macros/%s" % (
+            quote(owner, safe=""), quote(app, safe=""), quote(name, safe=""),
+        )
+
+    def _ko_disable_response(self, session_key: str, user: str, params: dict) -> dict:
+        try:
+            values = self._ko_values(params if isinstance(params, dict) else {})
+        except ValueError:
+            return self._render({"success": False, "error": "That object cannot be disabled from this page"}, 400)
+        if values["tok_ko_confirm"] != "yes":
+            return self._render({"success": False, "error": "Confirm before disabling"}, 400)
+        kind, app, name, owner = (
+            values["tok_ko_kind"], values["tok_ko_app"], values["tok_ko_name"], values["tok_ko_owner"],
+        )
+        if name in ("", "none") or kind not in KO_KINDS:
+            return self._render({"success": False, "error": "Lookup files cannot be disabled. Pick a dashboard, app, or macro."}, 400)
+        if kind == "app":
+            app = name
+        if kind == "app" and name in KO_PROTECTED_APPS:
+            return self._render({"success": False, "error": "That app is left on so this stack stays usable"}, 400)
+        if kind == "dashboard" and (app, name) in KO_PROTECTED_VIEWS:
+            return self._render({"success": False, "error": "That view is left on so this app stays usable"}, 400)
+        path = self._ko_entity_path(kind, app, name, owner)
+        try:
+            payload = self._get_json(session_key, path)
+            entries = payload.get("entry") or []
+            if not entries:
+                raise SearchFailed("that object is not on this search head")
+            body = entries[0].get("content") or {}
+            if _flag(body.get("disabled")):
+                return self._render({"success": True, "rows": [{
+                    "kind": kind, "app_name": app, "ko_name": name, "status": "already off", "error": "",
+                }]})
+            if kind == "app":
+                self._post(session_key, path + "/disable", {"output_mode": "json"})
+            else:
+                self._post(session_key, path, {"disabled": "1", "output_mode": "json"})
+        except SearchFailed as exc:
+            return self._render({"success": False, "error": str(exc)}, 500)
+        logger.info("ko disable kind=%s app=%s name=%s by=%s", kind, app, name, user)
+        return self._render({"success": True, "rows": [{
+            "kind": kind, "app_name": app, "ko_name": name, "status": "disabled", "error": "",
+        }]})
