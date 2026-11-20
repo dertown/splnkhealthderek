@@ -49,3 +49,12 @@ export = none
 [commands/derekaiping]
 access = read : [ admin, sc_admin ], write : [ admin, sc_admin ]
 export = none
+
+# The AI provider key lives in storage/passwords (realm splunk_exec_health_ai), not
+# in KV Store or any search. bin/healthdash.py writes it when SAVE is clicked, and
+# bin/derekaiping.py reads it for provider calls, both as the signed-in user. Both
+# also need the list_storage_passwords capability (admin and sc_admin have it).
+# Only roles listed here can see or change the stored key.
+[passwords]
+access = read : [ admin, sc_admin ], write : [ admin, sc_admin ]
+export = none
