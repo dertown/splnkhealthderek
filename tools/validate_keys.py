@@ -745,7 +745,7 @@ def check_html_backend() -> None:
         # text is kept in _audit and the job inspector, so it must never carry the key.
         if "tok_cfg_key" in spec["spl"] or "tok_cfg_key" in declared:
             err("health_queries.json", f"{name} places the AI provider key (tok_cfg_key) into search text")
-    if writes != {"decide", "ask", "ticket", "save_config", "conn_test"}:
+    if writes != {"decide", "ask", "ticket", "save_config", "conn_test", "ko_cleanup", "ko_classify"}:
         err("health_queries.json", f"write searches are {sorted(writes)}")
     for banned in ("verify=False", "CERT_NONE", "http://"):
         if banned in handler:

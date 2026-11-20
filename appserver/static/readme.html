@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.91">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.93">
 </head>
 <body>
 <div class="page">
@@ -20,7 +20,7 @@
       <a class="card" id="p3" href="#"><h3>HEC Tokens</h3><p>Per-token volume and silence detection.</p><div class="arrow">Open →</div></a>
       <a class="card" id="p4" href="#"><h3>SC4S &amp; Edge</h3><p>Syslog sources and Edge Processor in versus out.</p><div class="arrow">Open →</div></a>
       <a class="card" id="p5" href="#"><h3>Data Topology</h3><p>Source to ingest path to index. Click a source for its history.</p><div class="arrow">Open →</div></a>
-      <a class="card" id="p6" href="#"><h3>Knowledge objects</h3><p>Dashboards, apps, macros, and lookup files: on the search head, last used, unused or disabled.</p><div class="arrow">Open →</div></a>
+      <a class="card" id="p6" href="#"><h3>Knowledge objects</h3><p>Dashboards, apps, macros, and lookup files: last used, unused or disabled. Ask AI for cleanup suggestions and an estimated savings range.</p><div class="arrow">Open →</div></a>
       <a class="card" id="p7" href="#"><h3>Data Quality Agent</h3><p>Click a row for an AI suggested fix, then Approve or Dismiss.</p><div class="arrow">Open →</div></a>
       <a class="card" id="p8" href="#"><h3>Reports</h3><p>A timestamped compilation of overall health, or one report for a single dashboard, including Knowledge objects.</p><div class="arrow">Open →</div></a>
     </div>
@@ -49,7 +49,7 @@
     </div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.91"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.93"></script>
 <script>
 ['p1', 'executive_overview', 'p2', 'host_heartbeat', 'p3', 'hec_performance', 'p4', 'sc4s_edge', 'p5', 'data_topology', 'p6', 'knowledge_objects', 'p7', 'data_quality_agent', 'p8', 'health_reports']
   .reduce(function (pairs, value, index, all) { if (index % 2 === 0) Health.link(value, all[index + 1]); return pairs; }, 0);

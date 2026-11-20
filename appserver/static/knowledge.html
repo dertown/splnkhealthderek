@@ -3,18 +3,19 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.91">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.93">
 </head>
 <body>
 <div class="page">
   <div class="hero">
     <h1>Knowledge objects</h1>
-    <p class="tagline">What is on this search head, and what has not been used. Dashboards and apps use last view from the UI log. Macros and lookup files are unused when no saved search references them; last used is the latest scheduled run of a search that does.</p>
-    <div class="hero-meta"><a id="home" href="#">Executive overview</a></div>
+    <p class="tagline">What is on this search head, and what has not been used. Dashboards and apps use last view from the UI log. Macros and lookup files are unused when no saved search references them. Technology Add-ons, supporting add-ons, and Splunk premium apps are Required even without UI hits, because the stack needs them to run.</p>
+    <div class="hero-meta"><a id="home" href="#">Executive overview</a><span>·</span><a id="setup" href="#">AI provider setup</a></div>
   </div>
   <div class="controls">
     <label class="fld">Look back<select id="koWindow"><option value="7d">7 days</option><option value="30d" selected>30 days</option><option value="90d">90 days</option></select></label>
-    <label class="fld">Show<select id="koFilter"><option value="all">All</option><option value="Unused">Unused</option><option value="Disabled">Disabled</option><option value="In use">In use</option></select></label>
+    <label class="fld">Show<select id="koFilter"><option value="all">All</option><option value="Unused">Unused</option><option value="Disabled">Disabled</option><option value="In use">In use</option><option value="Required">Required</option></select></label>
+    <label class="fld chk"><input type="checkbox" id="koHideSystem" checked> Hide TAs and premium apps</label>
     <div class="fld">Apps
       <div class="app-filter" id="appFilter">
         <button type="button" class="app-filter-btn" id="appFilterBtn" aria-expanded="false">All apps</button>
@@ -29,9 +30,15 @@
       </div>
     </div>
     <button class="btn" id="apply">Apply</button>
+    <button class="btn secondary" id="koCleanup" type="button">Ask AI to clean up</button>
   </div>
-  <p class="note" id="koNote">App names fill as soon as the page opens. Tick the apps you want to view; leave them clear to see every app. Disable turns off a dashboard, an app, or a macro after you confirm. Lookup files cannot be disabled. This app and the search and launcher apps stay on.</p>
+  <p class="note" id="koNote">App names fill as soon as the page opens. Tick the apps you want to view; leave them clear to see every app. TAs, SA/DA add-ons, and Splunk premium apps are hidden by default so they are not listed as unused. If an AI provider is saved, the page asks it to mark any remaining system apps. Ask AI to clean up uses only the leftover unused objects. Nothing is disabled until you confirm a Disable button. Lookup files cannot be disabled.</p>
   <div class="stats-row" id="stats"><div class="stat"><div class="val">…</div><div class="lbl">Loading</div></div></div>
+  <div class="section">
+    <h2 class="section-title" data-help="The saved AI provider ranks unused dashboards, apps, macros, and lookup files to disable, and estimates search-head CPU, scheduled-search, and memory savings as ranges. Those numbers are estimates, not measurements. The app never disables anything from this reply.">AI cleanup suggestions</h2>
+    <p class="note" id="koCleanupNote">Save an AI provider under Configure, then click Ask AI to clean up. The ask uses the apps currently ticked in the filter.</p>
+    <div id="koCleanupOut"></div>
+  </div>
   <div class="section">
     <h2 class="section-title" data-help="Views on this search head from REST. Last used is the last GET of that view in the UI access log during the look-back. Hidden or disabled views are Disabled. A view with no GET in the look-back is Unused.">Dashboards</h2>
     <div class="two">
@@ -41,7 +48,7 @@
     <div id="dashTable"><p class="note">Loading dashboard list.</p></div>
   </div>
   <div class="section">
-    <h2 class="section-title" data-help="Installed apps on this search head. Last used is the last UI request under /app/that-app. Disabled apps stay Disabled even if something still hits the path. An enabled app with no UI request in the look-back is Unused.">Apps</h2>
+    <h2 class="section-title" data-help="Installed apps on this search head. Last used is the last UI request under /app/that-app. TAs, supporting add-ons, CIM, ES, ITSI, SOAR, UBA, ESCU, and other premium folders are Required even with no UI hit. Disabled apps stay Disabled. An enabled custom app with no UI request in the look-back is Unused.">Apps</h2>
     <div class="two">
       <div id="appChart"><p class="note">Loading apps.</p></div>
       <div id="appStats"></div>
@@ -65,8 +72,8 @@
     <div id="lookupTable"><p class="note">Loading lookup list.</p></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.91"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.91"></script>
-<script src="../../static/app/splunk_exec_health/knowledge.js?v=1.7.91"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.93"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.93"></script>
+<script src="../../static/app/splunk_exec_health/knowledge.js?v=1.7.93"></script>
 </body>
 </html>
