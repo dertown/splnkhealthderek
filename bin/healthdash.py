@@ -2,10 +2,10 @@
 
 The browser asks for a search by name. The handler runs only the named searches in
 default/health_queries.json, as the signed-in user, and never SPL sent from the
-browser. A click can only run the five searches marked write=True (record a
+browser. A click can only run the searches marked write=True (record a
 decision, ask the AI provider, draft a support ticket, save the AI config, test
-the connection). Those writes change only this app's own records; the ticket is
-only text returned to the page.
+the connection, or ask for knowledge-object cleanup). Those writes change only
+this app's own records; the ticket and cleanup reply are text returned to the page.
 
 The one change to Splunk configuration is the self-heal on Host Heartbeat. Its
 plan (GET) changes nothing. Its apply (POST, after a click that confirms it)
@@ -71,7 +71,7 @@ PARAMS = {
     "tok_ko_confirm": (r"^(yes|no)$", "no"),
 }
 
-WRITES = {"decide", "ask", "ticket", "save_config", "conn_test"}
+WRITES = {"decide", "ask", "ticket", "save_config", "conn_test", "ko_cleanup"}
 TOKEN_RE = re.compile(r"\$([a-z_]+)\$")
 
 # Self-heal settings. A scheduled slot counts as run if the scheduler logged a run

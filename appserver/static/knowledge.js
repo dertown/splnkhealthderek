@@ -1,6 +1,7 @@
 /* Knowledge objects page: dashboards, apps, macros, lookup files. */
 (function () {
   Health.link('home', 'executive_overview');
+  Health.link('setup', 'ai_provider_setup');
 
   var ORDER = ['In use', 'Disabled', 'Unused'];
   var DASH_COLS = [
@@ -161,8 +162,87 @@
     });
   }
 
+  function usageTally(rows) {
+    var t = { total: rows.length, unused: 0, disabled: 0, inuse: 0 };
+    rows.forEach(function (row) {
+      var u = usageOf(row);
+      if (u === 'Unused') t.unused += 1;
+      else if (u === 'Disabled') t.disabled += 1;
+      else t.inuse += 1;
+    });
+    return t;
+  }
+
+  function sampleUnused(rows, n) {
+    return forApps(rows).filter(function (row) { return usageOf(row) === 'Unused'; }).slice(0, n).map(function (row) {
+      return (row.app_name || '') + '/' + (row.ko_name || row.app_name || '') + ' last=' + (row.last_used || 'never')
+        + (row.refs != null ? ' refs=' + row.refs : '');
+    });
+  }
+
+  function cleanupFacts() {
+    var dash = forApps(cache.dash), apps = forApps(cache.apps), macros = forApps(cache.macros), lookups = forApps(cache.lookups);
+    var d = usageTally(dash), a = usageTally(apps), m = usageTally(macros), l = usageTally(lookups);
+    var pick = picker ? picker.selected() : { count: 0, total: 0 };
+    var lines = [
+      'Look-back ' + (document.getElementById('koWindow').value || '30d') + '.',
+      pick.count && pick.count !== pick.total ? 'Apps selected: ' + Object.keys(pick.set).slice(0, 40).join(', ') + '.' : 'Apps: all.',
+      'Dashboards total ' + d.total + ' unused ' + d.unused + ' disabled ' + d.disabled + ' in-use ' + d.inuse + '.',
+      'Apps total ' + a.total + ' unused ' + a.unused + ' disabled ' + a.disabled + ' in-use ' + a.inuse + '.',
+      'Macros total ' + m.total + ' unused ' + m.unused + ' disabled ' + m.disabled + ' in-use ' + m.inuse + '.',
+      'Lookups total ' + l.total + ' unused ' + l.unused + ' in-use ' + l.inuse + '. Lookups cannot be disabled from this app.',
+      'Protected: do not disable splunk_exec_health, search, launcher, learned, splunk_monitoring_console.',
+      'Unused dashboard sample: ' + (sampleUnused(cache.dash, 12).join('; ') || 'none') + '.',
+      'Unused app sample: ' + (sampleUnused(cache.apps, 8).join('; ') || 'none') + '.',
+      'Unused macro sample: ' + (sampleUnused(cache.macros, 12).join('; ') || 'none') + '.',
+      'Unused lookup sample: ' + (sampleUnused(cache.lookups, 8).join('; ') || 'none') + '.'
+    ];
+    return lines.join(' ').replace(/[|"`$\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5800);
+  }
+
+  function localSavings(d, a, m) {
+    var unused = d.unused + a.unused + m.unused;
+    var load = unused > 200 ? 'high' : unused > 40 ? 'medium' : unused > 0 ? 'low' : 'none';
+    var pct = unused < 1 ? 0 : Math.min(25, Math.round(unused / Math.max(d.total + a.total + m.total, 1) * 40));
+    return 'Local estimate only: disabling ' + unused + ' unused objects is a ' + load
+      + ' knowledge-object load reduction, roughly ' + pct + '% of the listed inventory. Not a measured CPU saving.';
+  }
+
+  var asking = false;
+  function askCleanup() {
+    var note = document.getElementById('koCleanupNote');
+    var out = document.getElementById('koCleanupOut');
+    if (asking) return;
+    if (!cache.dash.length && !cache.apps.length) {
+      note.textContent = 'Wait for the inventory to load, then ask again.';
+      return;
+    }
+    var facts = cleanupFacts();
+    var d = usageTally(forApps(cache.dash)), a = usageTally(forApps(cache.apps)), m = usageTally(forApps(cache.macros));
+    out.innerHTML = '<p class="note">Asking the saved provider…</p>';
+    note.textContent = localSavings(d, a, m);
+    asking = true;
+    document.getElementById('koCleanup').disabled = true;
+    Health.act('ko_cleanup', { tok_ai_brief: facts }).then(function (rows) {
+      var row = (rows && rows[0]) || {};
+      if (row.status === 'replied' && row.reply && row.reply !== 'none') {
+        out.innerHTML = Health.reply(row.reply, { from_ai: row.provider, requested_at: 'estimate, not measured' });
+        var sav = String(row.reply).split('\n').filter(function (line) { return /^SAVINGS:/i.test(line); })[0];
+        note.textContent = (sav ? sav.replace(/^SAVINGS:\s*/i, '') + ' ' : '') + localSavings(d, a, m);
+      } else {
+        out.innerHTML = '<p class="note">The provider did not reply. Save an AI provider under Configure, then try again. ' + Health.esc(row.cleanup_error || 'No rows. The provider is off or the key is missing.') + '</p>';
+      }
+    }, function (error) {
+      Health.fail(out, error);
+    }).then(function () {
+      asking = false;
+      document.getElementById('koCleanup').disabled = false;
+    });
+  }
+
   document.getElementById('apply').addEventListener('click', load);
   document.getElementById('koFilter').addEventListener('change', paintAll);
+  document.getElementById('koCleanup').addEventListener('click', askCleanup);
   loadNames();
   load();
 })();
