@@ -49,6 +49,15 @@ The app does not use cluster-manager REST, SHC captain REST, modular inputs, `in
 
 The viewing role needs search access to `_internal` and `_introspection` (HEC per-token metrics live in `_introspection`). Add `_metrics` if you use Edge Processor. On Splunk Cloud, `sc_admin` has this by default; grant those indexes to other roles that should open the app.
 
+## Dist / download
+
+The installable Cloud package lives in [`dist/`](dist/):
+
+- **[latest.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/latest.spl)** — always the current build
+- **[splunk_exec_health-1.7.88.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/splunk_exec_health-1.7.88.spl)** — same package, versioned name
+
+Browse the folder: https://github.com/dertown/splnkhealthderek/tree/main/dist
+
 ## Install
 
 ### Splunk Cloud
@@ -57,7 +66,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/splunk_exec_health-1.7.87.spl`.
+3. Upload `dist/latest.spl` (or `dist/splunk_exec_health-1.7.88.spl`).
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -78,7 +87,7 @@ On Cloud, override `exec_health_idx` and `exec_health_sc4s_idx` if `index=*` is 
 
 ## Enable alerts
 
-Health alerts ship with `enableSched = 0` and **no email action**. That is intentional: this app must not send mail until you decide it should. 
+Health alerts ship with `enableSched = 0` and **no email action**. That is intentional: this app must not send mail until you decide it should. The **Exec Health Cache - …** searches are the exception: they ship scheduled because they only refresh this app's KV Store caches and never alert (see [Result caches](#result-caches-large-estates)).
 
 1. **Settings > Searches, reports, and alerts** (filter to this app).
 2. Enable the core alerts after you have confirmed the searches return expected rows on your stack. Or use **Self-heal** on Host Heartbeat (below), which turns them on for you after a confirmed click.
@@ -189,10 +198,32 @@ Edge tiles use `mstats rate_sum` against the Edge Processor counters in `_metric
 
 ## Search load
 
-- Prefer `tstats` / `mstats` over raw event scans.
+- Prefer `tstats` / `mstats` over raw event scans. Ingestion latency on Host Heartbeat now reads `tstats` per host per minute (`min`/`max` of `_indextime`) instead of every raw event in the last 15 minutes, so each figure is within about 30 seconds of the per-event value.
 - License GB/day reads `license_usage.log`, which is already summarized.
 - Default auto-refresh is 5 minutes (15 minutes for the 15-day license series, which covers complete days only).
 - Narrow `exec_health_idx` if `index=*` is too wide (recommended on Splunk Cloud).
+
+### Result caches (large estates)
+
+The heaviest panels are answered from KV Store instead of rerunning their search on every page load. Each one has a scheduled **Exec Health Cache - …** search that runs the same SPL as the live panel, writes the rows to its own `exec_health_cache_*` collection, and records when it ran in `exec_health_cache_meta`. When a page asks for that panel, the REST handler reads the record (one KV Store REST call, no search) and, if the cache is fresh, runs a short `inputlookup` instead.
+
+| Cache search | Panels | Runs | Used while younger than |
+| --- | --- | --- | --- |
+| Executive status by area | Executive status by area, overall health | every 5 min | 15 min |
+| Data quality agent findings | Agent work queue, executive agent tile | every 15 min | 30 min |
+| Host 24-hour volume baseline | Host Heartbeat 2-sigma table | every 15 min | 20 min |
+| Host heartbeat pattern | Host Heartbeat usual-gap table | hourly | 2 h 10 min |
+| Host / Index same-hour volume | Host Heartbeat and executive same-hour tables | hourly | 65 min |
+| Feed catalog empty hours | Executive empty-hours table | hourly | 65 min |
+| Data topology map | Data Topology full map | every 30 min | 60 min |
+| Knowledge object usage | Knowledge objects last-used / views | hourly | 2 h 10 min |
+
+- **Decisions stay live.** The findings cache holds only the raw issues. APPROVE / DISMISS status, playbooks, and the AI brief are applied when the page reads it, so a decision shows at once.
+- **Heartbeat stays current.** The heartbeat cache holds the 7-day gap statistics; every read adds a 2-hour `tstats` for the newest heartbeat, so a host that went quiet after the cache ran is still flagged.
+- **Knowledge-object usage is incremental.** Each hourly run rescans only yesterday and today of `_internal` web access and scheduler logs and keeps one row per object per day for 92 days. The page uses the cache only once it covers the 7/30/90-day window you picked; until then it runs the live search. Run **Exec Health Cache - Knowledge object usage backfill (90 days)** once by hand after install to load the history right away.
+- **Always a fallback.** A missing, stale, or failed cache runs the live search exactly as before. The page shows a small note with the time of the oldest cache it used and a **Run live** link (adds `?live=1`, which skips every cache for that page).
+- The cache searches ship **scheduled** (`enableSched = 1`) because they only write this app's own collections; they have no alert or email action. Disable any of them in **Settings > Searches, reports, and alerts** and its panel goes back to running live. The collections are not replicated to indexers and are safe to empty.
+- Scheduled searches owned by `nobody` run as Splunk's system user; if your stack restricts that user, set the owner of the cache searches to an admin.
 
 This app is an executive overlay. It does not replace the Cloud Monitoring Console.
 
@@ -201,7 +232,8 @@ This app is an executive overlay. It does not replace the Cloud Monitoring Conso
 The view XML, `default/savedsearches.conf` and `default/health_queries.json` are generated from `tools/build_dashboards.py`. The pages themselves are HTML in `appserver/static`. `tools/validate_keys.py` checks every conf key, macro, lookup, the query catalog and the REST handler; `package.sh` runs it and refuses to package on errors.
 
 ```bash
-python3 tools/build_dashboards.py
+python3 tools/build_dashboards.py   # or, when only searches changed:
+python3 -c "import sys; sys.path.insert(0,'tools'); import build_dashboards as b; b.emit_searches()"
 python3 tools/validate_keys.py
 bash tools/package.sh
 ```
@@ -209,5 +241,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.87.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.88.spl --included-tags private_app
 ```

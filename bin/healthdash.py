@@ -18,6 +18,10 @@ That POST only disables a dashboard, app, or macro that already exists, and
 it never deletes anything. Lookup files have no disable in Splunk, so they
 are refused. This app, the search and launcher apps, and this page itself
 cannot be disabled from here.
+
+Searches with a "cache" entry are answered from the KV Store collection that
+their scheduled "Exec Health Cache - ..." search fills, when that cache is fresh.
+Otherwise, or when the page asks with fresh=1, the live search runs as before.
 """
 from __future__ import annotations
 
@@ -80,6 +84,10 @@ HEAL_GRACE_SEC = 900
 HEAL_COVER_BEFORE = 120
 HEAL_COVER_AFTER = 300
 _CRON_LIMITS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
+
+# Written by the "Exec Health Cache - ..." searches: one record per dataset with
+# cached_at (epoch) and, for knowledge-object usage, covered_from (epoch).
+CACHE_META = "exec_health_cache_meta"
 
 # Knowledge-object disable. Apps and views use Splunk's /disable or disabled=1.
 # Lookup CSV files have no disable action, so they are refused.
@@ -280,11 +288,61 @@ class HealthDashHandler(PersistentServerConnectionApplication):
         spec = self.catalog.get(name)
         if spec is None or bool(spec.get("write")) != write or (write and name not in WRITES):
             return self._render({"success": False, "error": "Unknown search"}, 404)
+        rows, cached_at = None, None
+        cache = spec.get("cache")
+        if cache and not write and str(supplied.get("fresh", "")) != "1":
+            cached_at = self._cache_time(session_key, cache, supplied)
+            if cached_at is not None:
+                reader = dict(spec, spl=cache["spl"], earliest=cache["earliest"], latest=cache["latest"])
+                try:
+                    rows = self._oneshot(session_key, user, name, reader, supplied)
+                except SearchFailed as exc:
+                    logger.warning("cache read %s failed, running live: %s", name, exc)
+                    rows, cached_at = None, None
         try:
-            rows = self._oneshot(session_key, user, name, spec, supplied)
+            if rows is None:
+                rows = self._oneshot(session_key, user, name, spec, supplied)
         except SearchFailed as exc:
             return self._render({"success": False, "error": str(exc)}, 500)
-        return self._render({"success": True, "rows": rows})
+        body = {"success": True, "rows": rows}
+        if cached_at is not None:
+            body["cached_at"] = int(cached_at)
+        return self._render(body)
+
+    def _cache_time(self, session_key: str, cache: dict, supplied: dict):
+        """When the cache was built, if it is fresh enough to answer; otherwise None.
+
+        A cache with cover_param must also hold at least that many days of history.
+        """
+        dataset = str(cache.get("dataset", ""))
+        if not re.fullmatch(r"[a-z_]{1,40}", dataset):
+            return None
+        try:
+            response, content = rest.simpleRequest(
+                f"/servicesNS/nobody/{HEAL_APP}/storage/collections/data/{CACHE_META}/{dataset}",
+                sessionKey=session_key, getargs={"output_mode": "json"}, raiseAllErrors=False,
+            )
+            if int(getattr(response, "status", 0) or 0) != 200:
+                return None
+            record = json.loads(content)
+            cached_at = float(record.get("cached_at"))
+        except Exception:  # noqa: BLE001 - no cache, unreadable, or wrong shape: run live
+            return None
+        now = time.time()
+        if not 0 <= now - cached_at <= float(cache.get("max_age", 0)):
+            return None
+        param = cache.get("cover_param")
+        if param:
+            pattern, default = PARAMS[param]
+            value = str(supplied.get(param) or default)
+            days = re.fullmatch(r"(\d{1,3})d", value) if re.fullmatch(pattern, value) else None
+            try:
+                covered = float(record.get("covered_from"))
+            except (TypeError, ValueError):
+                return None
+            if days is None or covered > now - int(days.group(1)) * 86400:
+                return None
+        return cached_at
 
     def _oneshot(self, session_key: str, user: str, name: str, spec: dict, supplied: dict) -> list:
         """Run one named catalog search as the signed-in user and return its rows."""

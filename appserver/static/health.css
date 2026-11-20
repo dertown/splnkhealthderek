@@ -227,3 +227,5 @@ input, select {
 .footer-links a:hover { text-decoration: underline; }
 code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
 pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 0.8rem; }
+.cache-note { position: fixed; right: 16px; bottom: 12px; z-index: 20; max-width: 360px; padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 0.8rem; }
+.cache-note a { color: var(--accent); }

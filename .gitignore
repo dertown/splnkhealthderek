@@ -5,6 +5,8 @@ __pycache__/
 .DS_Store
 *.tgz
 *.spl
+!dist/latest.spl
+!dist/splunk_exec_health-1.7.88.spl
 lookups/*.csv.bak
 .idea/
 .vscode/

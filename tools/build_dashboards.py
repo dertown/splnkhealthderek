@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
@@ -1090,19 +1091,29 @@ def heartbeat_learned_core(host_clause: str = "") -> str:
     buckets that actually phoned home. A host needs 48 gaps and 24 hours of
     history. Until then the fixed heartbeat cutoff still applies.
     """
+    return heartbeat_learned_stats(host_clause) + "\n" + HEARTBEAT_BANDS
+
+
+# Runs to now, not @h: current_gap is measured against now(), so stopping at the
+# hour would make every host look QUIET late in the hour.
+def heartbeat_learned_stats(host_clause: str = "") -> str:
     where_host = f" {host_clause}" if host_clause else ""
     return (
-        f"| tstats count where index=_internal{where_host} earliest=-7d@h latest=@h by host _time span=5m\n"
+        f"| tstats count where index=_internal{where_host} earliest=-7d@h latest=now by host _time span=5m\n"
         "| sort 0 host _time\n"
         "| streamstats current=f window=1 last(_time) as prev_beat by host\n"
         "| eval gap_sec=if(isnotnull(prev_beat), _time-prev_beat, null())\n"
-        "| stats min(_time) as first_bucket, max(_time) as last_bucket, median(gap_sec) as typical_gap, perc95(gap_sec) as p95_gap, count(gap_sec) as samples by host\n"
-        "| eval history_sec=last_bucket-first_bucket, current_gap=round(now()-last_bucket, 0)\n"
-        "| eval typical_gap=round(typical_gap, 0), p95_gap=round(p95_gap, 0)\n"
-        "| eval ready=if(samples>=`exec_health_heartbeat_samples` AND history_sec>=86400, 1, 0)\n"
-        "| eval bound_sec=if(ready=1, round(max(2*p95_gap, 3*typical_gap), 0), null())\n"
-        '| eval heartbeat_band=case(ready=0, "LEARNING", current_gap>bound_sec, "QUIET", 1=1, "ON PATTERN")'
+        "| stats min(_time) as first_bucket, max(_time) as last_bucket, median(gap_sec) as typical_gap, perc95(gap_sec) as p95_gap, count(gap_sec) as samples by host"
     )
+
+
+HEARTBEAT_BANDS = (
+    "| eval history_sec=last_bucket-first_bucket, current_gap=round(now()-last_bucket, 0)\n"
+    "| eval typical_gap=round(typical_gap, 0), p95_gap=round(p95_gap, 0)\n"
+    "| eval ready=if(samples>=`exec_health_heartbeat_samples` AND history_sec>=86400, 1, 0)\n"
+    "| eval bound_sec=if(ready=1, round(max(2*p95_gap, 3*typical_gap), 0), null())\n"
+    '| eval heartbeat_band=case(ready=0, "LEARNING", current_gap>bound_sec, "QUIET", 1=1, "ON PATTERN")'
+)
 
 
 def host_season_core(host_clause: str = "") -> str:
@@ -1601,18 +1612,22 @@ def host_state_counts(clause: str) -> str:
 
 Q_STATE_COUNTS = host_state_counts("host=$host_filter$")
 
-Q_HEARTBEAT_LEARNED = heartbeat_learned_core("host=$host_filter$") + r"""
+HEARTBEAT_VIEW = r"""
 | eval usual_gap=tostring(typical_gap, "duration"), current=tostring(current_gap, "duration"), bound=if(isnotnull(bound_sec), tostring(bound_sec, "duration"), "n/a")
 | eval _color_rank=case(heartbeat_band="QUIET", 1, heartbeat_band="LEARNING", 2, 1=1, 3)
 | table host, usual_gap, current, bound, samples, heartbeat_band, _color_rank
 | sort _color_rank, host
 """
 
-Q_HOST_SEASON = host_season_core("host=$host_filter$") + r"""
+HOST_SEASON_VIEW = r"""
 | eval _color_rank=case(season_state="BELOW", 1, season_state="LEARNING", 2, 1=1, 3)
 | table host, hour, events, typical, lower, samples, season_state, _color_rank
 | sort _color_rank, host
 """
+
+Q_HEARTBEAT_LEARNED = heartbeat_learned_core("host=$host_filter$") + HEARTBEAT_VIEW
+
+Q_HOST_SEASON = host_season_core("host=$host_filter$") + HOST_SEASON_VIEW
 
 Q_INDEX_SEASON = index_season_core() + r"""
 | eval _color_rank=case(season_state="BELOW", 1, season_state="LEARNING", 2, 1=1, 3)
@@ -1630,10 +1645,15 @@ Q_HEALTH_FEATURES = (
 """.strip()
 )
 
+# tstats per host per event-time minute instead of reading every raw event. The
+# lag of a minute is its newest index time minus the middle of that minute, so
+# each figure is within about 30 seconds of the per-event value. The clock-ahead
+# test uses the oldest index time against the end of the minute, so it never
+# fires on rounding alone.
 Q_LATENCY = r"""
-search index=`exec_health_idx` host=$host_filter$ earliest=-15m@m latest=now
-| eval lag=_indextime-_time
-| stats count as events, avg(lag) as avg_lag, perc95(lag) as p95_lag, max(lag) as max_lag, min(lag) as min_lag by host
+| tstats count as events, min(_indextime) as first_indexed, max(_indextime) as last_indexed where index=`exec_health_idx` host=$host_filter$ earliest=-15m@m latest=now by host _time span=1m
+| eval lag=last_indexed-(_time+30), early=first_indexed-(_time+60)
+| stats sum(events) as events, avg(lag) as avg_lag, perc95(lag) as p95_lag, max(lag) as max_lag, min(early) as min_lag by host
 | eval avg_lag_sec=round(avg_lag, 1), p95_lag_sec=round(p95_lag, 1), max_lag_sec=round(max_lag, 1)
 | eval latency_state=case(
     min_lag < -300, "CLOCK AHEAD",
@@ -1645,12 +1665,14 @@ search index=`exec_health_idx` host=$host_filter$ earliest=-15m@m latest=now
 | sort _color_rank, -p95_lag_sec
 """.strip()
 
-Q_BASELINE_ALL = host_baseline_core("host=$host_filter$") + r"""
+BASELINE_VIEW = r"""
 | eval current_eps=round(events/900, 2), baseline_eps=round(mean_vol/900, 2)
 | eval _color_rank=case(baseline_state="ALERT", 1, baseline_state="WARMUP", 2, 1=1, 3)
 | table host, events, mean_vol, stdev_vol, lower_bound, current_eps, baseline_eps, z_score, baseline_state, _color_rank
 | sort _color_rank, host
 """
+
+Q_BASELINE_ALL = host_baseline_core("host=$host_filter$") + BASELINE_VIEW
 
 Q_HOST_LIST = r"""
 | tstats count where index=`exec_health_idx` by host
@@ -3105,7 +3127,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.87"
+APP_VERSION = "1.7.88"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3285,6 +3307,8 @@ SAVEDSEARCHES = ROOT / "default" / "savedsearches.conf"
 SS_HEADER = """# GENERATED by tools/build_dashboards.py — edit the generator, not this file.
 # Scheduled alerts are disabled on install so this app cannot email or page
 # until an admin enables them and configures notification settings in Splunk Web.
+# The "Exec Health Cache - ..." searches ship scheduled: they only refresh this
+# app's KV Store caches so large estates load fast, and they never alert.
 # Do not store SMTP passwords, API tokens, or Slack webhook URLs in this file.
 """
 
@@ -3413,13 +3437,14 @@ SAVED_SEARCHES = [
 
 def render_savedsearches() -> str:
     out = [SS_HEADER.rstrip("\n")]
-    for name, search, description, specific in SAVED_SEARCHES:
+    searches = [(s, SS_COMMON) for s in SAVED_SEARCHES] + [(s, CACHE_COMMON) for s in CACHE_SAVED_SEARCHES]
+    for (name, search, description, specific), common in searches:
         lines = [ln.rstrip() for ln in search.strip().splitlines() if ln.strip()]
         body = " \\\n".join(lines)
         out.append(f"\n[{name}]")
         out.append(f"search = {body}")
         out.append(f"description = {description}")
-        merged = dict(SS_COMMON)
+        merged = dict(common)
         merged.update(dict(specific))
         for key, value in sorted(merged.items()):
             out.append(f"{key} = {value}")
@@ -3669,33 +3694,309 @@ search index=_internal sourcetype=scheduler savedsearch_name="Exec Health - *" e
 """.strip()
 
 
+# ---------------------------------------------------------------------------
+# Result caches
+# ---------------------------------------------------------------------------
+# A scheduled "Exec Health Cache - ..." search runs the same SPL as the live
+# panel and writes its rows to a KV Store collection, then records when it ran
+# in exec_health_cache_meta. The REST handler reads that record and, when the
+# cache is fresh, runs the cheap inputlookup reader instead of the live search.
+# A missing, stale, or failed cache always falls back to the live search.
+# KV Store field names cannot start with "_", so _x is stored as u_x.
+
+CACHE_SS_PREFIX = "Exec Health Cache - "
+CACHE_META = "exec_health_cache_meta"
+CACHE_META_FIELDS = ["_key", "dataset", "cached_at", "rows", "covered_from"]
+
+
+def cache_collection(dataset: str) -> str:
+    return f"exec_health_cache_{dataset}"
+
+
+def _table_fields(spl: str) -> list:
+    tables = [ln for ln in spl.strip().splitlines() if ln.startswith("| table ")]
+    if not tables:
+        raise SystemExit("cache producer needs a final | table")
+    return [f for f in re.split(r"[,\s]+", tables[-1][len("| table "):].strip()) if f]
+
+
+def _stored(field: str) -> str:
+    return "u" + field if field.startswith("_") else field
+
+
+def _meta_write(dataset: str, stats: str = "stats count AS rows") -> str:
+    return (
+        f"\n| {stats}"
+        f'\n| eval _key="{dataset}", dataset="{dataset}", cached_at=now()'
+        f"\n| outputlookup append=true key_field=_key {CACHE_META}"
+    )
+
+
+def cache_producer(dataset: str, spl: str, fields: list | None = None) -> str:
+    """Live SPL plus the write to the cache collection and the meta record."""
+    fields = fields or _table_fields(spl)
+    body = spl.strip()
+    renames = [f"{f} AS {_stored(f)}" for f in fields if f.startswith("_")]
+    if renames:
+        body += "\n| rename " + ", ".join(renames)
+    return (
+        body
+        + "\n| table " + ", ".join(_stored(f) for f in fields)
+        + "\n| streamstats count AS cache_order"
+        + f"\n| outputlookup {cache_collection(dataset)}"
+        + _meta_write(dataset)
+    )
+
+
+def cache_reader(dataset: str, fields: list, where: str = "") -> str:
+    """Cached rows in the order the producer wrote them, with the live field names."""
+    renames = [f"{_stored(f)} AS {f}" for f in fields if f.startswith("_")]
+    return (
+        f"| inputlookup {cache_collection(dataset)}"
+        + (f"\n| search {where}" if where else "")
+        + "\n| sort 0 num(cache_order)"
+        + ("\n| rename " + ", ".join(renames) if renames else "")
+        + "\n| table " + ", ".join(fields)
+    )
+
+
+DQ_CORE_FIELDS = [
+    "issue", "severity", "entity", "evidence", "suggested_fix", "fix_type", "proposed_config",
+    "action", "tool_fwdType", "tool_conn", "tool_err_component", "tool_err_count",
+]
+HEARTBEAT_STATS_FIELDS = ["host", "first_bucket", "last_bucket", "typical_gap", "p95_gap", "samples"]
+
+_DQ_CORE = dq_agent_findings_core()
+assert Q_DQ_AGENT_FINDINGS.startswith(_DQ_CORE)
+DQ_FINDINGS_TAIL = Q_DQ_AGENT_FINDINGS[len(_DQ_CORE):]
+Q_DQ_AGENT_FINDINGS_CACHED = cache_reader("dq_findings", DQ_CORE_FIELDS) + DQ_FINDINGS_TAIL
+
+# The cache holds the 7-day gap statistics. The newest heartbeat comes from a
+# 2-hour tstats on every read, so a host that went quiet after the cache ran
+# is still caught.
+Q_HEARTBEAT_LEARNED_CACHED = (
+    cache_reader("heartbeat", HEARTBEAT_STATS_FIELDS, "host=$host_filter$")
+    + r"""
+| append [
+    | tstats max(_time) AS recent_beat where index=_internal host=$host_filter$ earliest=-2h latest=now by host
+]
+| stats max(first_bucket) AS first_bucket, max(last_bucket) AS last_bucket, max(typical_gap) AS typical_gap, max(p95_gap) AS p95_gap, max(samples) AS samples, max(recent_beat) AS recent_beat by host
+| eval last_bucket=if(isnotnull(recent_beat) AND recent_beat>coalesce(last_bucket, 0), recent_beat, last_bucket)
+| fillnull value=0 samples
+| fields - recent_beat
+"""
+    + HEARTBEAT_BANDS
+    + HEARTBEAT_VIEW
+)
+
+# Knowledge-object usage, one row per object per day: kind (view, app, or ss for
+# a scheduled saved search), app_name, ko_name, day (local midnight epoch),
+# last_epoch, views, users. Each run rescans only its own window (from
+# dispatch.earliest_time), replaces those days, and keeps older days up to 92.
+# A "coverage" row records the first day each run scanned, so the handler knows
+# how many days of history the cache holds.
+KO_USAGE_FIELDS = ["kind", "app_name", "ko_name", "day", "last_epoch", "views", "users"]
+KO_UI_PAGES = "search|reports|dashboards|alerts|home|job_manager|job_management|report|alert|search_job_inspector"
+Q_KO_USAGE_BUILD = (
+    r"""search index=_internal (((sourcetype=splunk_web_access OR sourcetype=splunkd_ui_access) method=GET status=200) OR (sourcetype=scheduler savedsearch_name=*))
+| rex field=uri_path "/app/(?<web_app>[^/]+)/"
+| rex field=uri_path "/app/(?<view_app>[^/]+)/(?<web_view>[^/?]+)$"
+| eval web_view=if(match(web_view, "^("""
+    + KO_UI_PAGES
+    + r""")$"), null(), web_view)
+| eval key=if(sourcetype="scheduler", "ss|".coalesce(app, "-")."|".savedsearch_name, mvappend(if(isnotnull(web_app) AND web_app!="-" AND web_app!="launcher", "app|".web_app."|".web_app, null()), if(isnotnull(web_view), "view|".view_app."|".web_view, null())))
+| where isnotnull(key)
+| eval day=relative_time(_time, "@d")
+| stats max(_time) AS last_epoch, count AS views, values(user) AS users by key day
+| rex field=key "^(?<kind>[^|]+)\|(?<app_name>[^|]*)\|(?<ko_name>.*)$"
+| append [
+    | makeresults
+    | addinfo
+    | eval kind="coverage", app_name="-", ko_name="-", day=relative_time(info_min_time, "@d"), views=0
+]
+| eval fresh=1
+| inputlookup append=true """
+    + cache_collection("ko_usage")
+    + r"""
+| eventstats max(eval(if(fresh=1 AND kind="coverage", day, null()))) AS scan_day
+| where fresh=1 OR (day<scan_day AND day>=relative_time(now(), "-92d@d"))
+| table """
+    + ", ".join(KO_USAGE_FIELDS)
+    + "\n| outputlookup "
+    + cache_collection("ko_usage")
+    + _meta_write("ko_usage", 'stats count AS rows, min(eval(if(kind="coverage", day, null()))) AS covered_from')
+)
+
+_KO_WEB = r"""search index=_internal (sourcetype=splunk_web_access OR sourcetype=splunkd_ui_access) method=GET status=200 earliest=-$tok_ko_window$"""
+_KO_SCHED = r"""search index=_internal sourcetype=scheduler earliest=-$tok_ko_window$ savedsearch_name=*
+    | stats max(_time) AS last_epoch by savedsearch_name
+    | rename savedsearch_name AS ss"""
+_KO_SINCE = r'| where day>=relative_time(now(), "-$tok_ko_window$@d")'
+_KO_USAGE = "| inputlookup " + cache_collection("ko_usage")
+
+
+def _ko_cached(live: str, swaps: list) -> str:
+    out = live
+    for old, new in swaps:
+        if out.count(old) != 1:
+            raise SystemExit(f"knowledge-object cache swap not found once: {old[:60]}")
+        out = out.replace(old, new)
+    return out
+
+
+_KO_SCHED_CACHED = (
+    _KO_USAGE + ' where kind="ss"\n    ' + _KO_SINCE
+    + "\n    | stats max(last_epoch) AS last_epoch by ko_name\n    | rename ko_name AS ss"
+)
+Q_KO_DASHBOARDS_CACHED = _ko_cached(Q_KO_DASHBOARDS, [(
+    _KO_WEB + r"""
+    | rex field=uri_path "/app/(?<app_name>[^/]+)/(?<ko_name>[^/?]+)$"
+    | where isnotnull(app_name) AND isnotnull(ko_name)
+    | where NOT match(ko_name, "^(""" + KO_UI_PAGES + r""")$")
+    | stats max(_time) AS last_epoch, count AS views, dc(user) AS users by app_name ko_name""",
+    _KO_USAGE + ' where kind="view"\n    ' + _KO_SINCE
+    + "\n    | stats max(last_epoch) AS last_epoch, sum(views) AS views, dc(users) AS users by app_name ko_name",
+)])
+Q_KO_APPS_CACHED = _ko_cached(Q_KO_APPS, [(
+    _KO_WEB + r"""
+    | rex field=uri_path "/app/(?<app_name>[^/]+)/"
+    | where isnotnull(app_name) AND app_name!="-" AND app_name!="launcher"
+    | stats max(_time) AS last_epoch, count AS views, dc(user) AS users by app_name""",
+    _KO_USAGE + ' where kind="app"\n    ' + _KO_SINCE
+    + "\n    | stats max(last_epoch) AS last_epoch, sum(views) AS views, dc(users) AS users by app_name",
+)])
+Q_KO_MACROS_CACHED = _ko_cached(Q_KO_MACROS, [(_KO_SCHED, _KO_SCHED_CACHED)])
+Q_KO_LOOKUPS_CACHED = _ko_cached(Q_KO_LOOKUPS, [(_KO_SCHED, _KO_SCHED_CACHED)])
+
+# dataset -> (label, producer SPL, reader fields or None, cron, earliest, latest)
+CACHES = {
+    "areas": ("Executive status by area", cache_producer("areas", exec_area_rollup()),
+              "1-59/5 * * * *", "-15m", "now"),
+    "dq_findings": ("Data quality agent findings",
+                    cache_producer("dq_findings", _DQ_CORE + "\n| table " + ", ".join(DQ_CORE_FIELDS)),
+                    "3-59/15 * * * *", "-24h", "now"),
+    "baseline": ("Host 24-hour volume baseline",
+                 cache_producer("baseline", host_baseline_core() + BASELINE_VIEW),
+                 "6-59/15 * * * *", "-25h@m", "@m"),
+    "heartbeat": ("Host heartbeat pattern",
+                  cache_producer("heartbeat", heartbeat_learned_stats() + "\n| table " + ", ".join(HEARTBEAT_STATS_FIELDS)),
+                  "2 * * * *", "-7d@h", "now"),
+    "host_season": ("Host same-hour volume",
+                    cache_producer("host_season", host_season_core() + HOST_SEASON_VIEW),
+                    "4 * * * *", "-8d@h", "@h"),
+    "index_season": ("Index same-hour volume", cache_producer("index_season", Q_INDEX_SEASON),
+                     "5 * * * *", "-8d@h", "@h"),
+    "empty_hours": ("Feed catalog empty hours", cache_producer("empty_hours", Q_EMPTY_HOURS),
+                    "7 * * * *", "-7d@h", "@h"),
+    "topo_full": ("Data topology map", cache_producer("topo_full", Q_TOPO_FULL),
+                  "9,39 * * * *", "-24h", "now"),
+    "ko_usage": ("Knowledge object usage", Q_KO_USAGE_BUILD, "17 * * * *", "-1d@d", "now"),
+}
+
+CACHE_SAVED_SEARCHES = [
+    (
+        CACHE_SS_PREFIX + label,
+        spl,
+        f"Refreshes the {cache_collection(dataset)} KV Store cache so the {label.lower()} panel loads without rerunning its search. "
+        "Writes only this app's own collections and never alerts. If it is disabled or late, the panel runs the live search instead.",
+        [
+            ("enableSched", "1"),
+            ("cron_schedule", cron),
+            ("dispatch.earliest_time", earliest),
+            ("dispatch.latest_time", latest),
+        ],
+    )
+    for dataset, (label, spl, cron, earliest, latest) in CACHES.items()
+] + [
+    (
+        CACHE_SS_PREFIX + "Knowledge object usage backfill (90 days)",
+        Q_KO_USAGE_BUILD,
+        "Run once by hand after install to load 90 days of knowledge-object usage into the cache, so the 30- and 90-day views read the cache right away. "
+        "Without it, the cache builds up one day at a time and the page uses the live search until it covers the chosen window.",
+        [
+            ("enableSched", "0"),
+            ("dispatch.earliest_time", "-90d@d"),
+            ("dispatch.latest_time", "now"),
+        ],
+    ),
+]
+
+CACHE_COMMON = [
+    ("schedule_window", "auto"),
+    ("allow_skew", "2m"),
+    ("action.email", "0"),
+    ("alert.track", "0"),
+    ("request.ui_dispatch_view", "search"),
+    ("display.general.type", "statistics"),
+    ("display.page.search.tab", "statistics"),
+]
+
+CACHE_COLLECTIONS = {CACHE_META: CACHE_META_FIELDS}
+CACHE_COLLECTIONS.update({
+    cache_collection(dataset): (
+        KO_USAGE_FIELDS if dataset == "ko_usage"
+        else [_stored(f) for f in _table_fields(spl.split("\n| streamstats count AS cache_order")[0])] + ["cache_order"]
+    )
+    for dataset, (label, spl, cron, earliest, latest) in CACHES.items()
+})
+
+
+def cache_spec(dataset: str, spl: str, max_age: int, cover_param: str = "") -> dict:
+    spec = {"dataset": dataset, "spl": spl.strip(), "max_age": max_age, "earliest": "-24h", "latest": "now"}
+    if cover_param:
+        spec["cover_param"] = cover_param
+    return spec
+
+
+def render_cache_conf() -> tuple:
+    """collections.conf and transforms.conf blocks for every cache collection."""
+    coll, trans = [], []
+    for name, fields in CACHE_COLLECTIONS.items():
+        coll.append(f"\n[{name}]\nenforceTypes = false\nreplicate = false")
+        trans.append(
+            f"\n[{name}]\nexternal_type = kvstore\ncollection = {name}\nfields_list = {', '.join(fields)}"
+            "\ncase_sensitive_match = false"
+        )
+    return "\n".join(coll) + "\n", "\n".join(trans) + "\n"
+
+
 def emit_catalog() -> None:
     """Named searches the HTML pages may run. The REST handler only ever runs a
     name from this file, never SPL from the browser, and only the entries marked
     write=True can be triggered by a click."""
 
     def entry(spl: str, earliest: str = "-24h", latest: str = "now", params: list | None = None,
-              count: int = 200, timeout: int = 90, write: bool = False) -> dict:
-        return {"spl": spl.strip(), "earliest": earliest, "latest": latest,
-                "params": params or [], "count": count, "timeout": timeout, "write": write}
+              count: int = 200, timeout: int = 90, write: bool = False, cache: dict | None = None) -> dict:
+        out = {"spl": spl.strip(), "earliest": earliest, "latest": latest,
+               "params": params or [], "count": count, "timeout": timeout, "write": write}
+        if cache:
+            out["cache"] = cache
+        return out
 
     asked = Q_DQ_AGENT_FINDINGS + "\n" + Q_DQ_AGENT_ASK
+    QUEUE_RENAME = "\n| rename _finding_id AS finding_ref, _ai_brief AS ai_brief_text"
     gate = ["tok_ask", "tok_cell", "tok_row_status", "tok_finding_id"]
     catalog = {
-        "areas": entry(exec_area_rollup(), "-15m", "now", count=20),
+        "areas": entry(exec_area_rollup(), "-15m", "now", count=20,
+                       cache=cache_spec("areas", cache_reader("areas", _table_fields(exec_area_rollup())), 900)),
         "license_daily": entry(Q_LICENSE_DAILY, "-15d@d", "@d", count=30),
         "live": entry(Q_LIVE, "-15m", "now", count=5),
         "live_by_index": entry(Q_LIVE_BY_INDEX, "-15m", "now", count=50, timeout=120),
         "indexed_by_index": entry(Q_INDEXED_BY_INDEX, "-4h", "now", count=50, timeout=120),
-        "agent_counts": entry(Q_DQ_AGENT_FINDINGS + "\n" + EXEC_AGENT_COUNTS, "-24h", "now", count=5, timeout=120),
+        "agent_counts": entry(Q_DQ_AGENT_FINDINGS + "\n" + EXEC_AGENT_COUNTS, "-24h", "now", count=5, timeout=120,
+                              cache=cache_spec("dq_findings", Q_DQ_AGENT_FINDINGS_CACHED + "\n" + EXEC_AGENT_COUNTS, 1800)),
         "top_indexes": entry(Q_TOP_INDEXES, "-7d@d", "@d", count=12),
         "state_counts": entry(Q_STATE_COUNTS, "-24h", "now", ["host_filter"], count=10),
         "phone_home": entry(Q_PHONE_HOME, "-24h", "now", ["host_filter"], count=300),
-        "heartbeat_learned": entry(Q_HEARTBEAT_LEARNED, "-7d@h", "@h", ["host_filter"], count=300, timeout=120),
-        "host_season": entry(Q_HOST_SEASON, "-8d@h", "@h", ["host_filter"], count=300, timeout=120),
-        "index_season": entry(Q_INDEX_SEASON, "-8d@h", "@h", count=100, timeout=120),
+        "heartbeat_learned": entry(Q_HEARTBEAT_LEARNED, "-7d@h", "now", ["host_filter"], count=300, timeout=120,
+                                   cache=cache_spec("heartbeat", Q_HEARTBEAT_LEARNED_CACHED, 7800)),
+        "host_season": entry(Q_HOST_SEASON, "-8d@h", "@h", ["host_filter"], count=300, timeout=120,
+                             cache=cache_spec("host_season", cache_reader("host_season", _table_fields(HOST_SEASON_VIEW), "host=$host_filter$"), 3900)),
+        "index_season": entry(Q_INDEX_SEASON, "-8d@h", "@h", count=100, timeout=120,
+                              cache=cache_spec("index_season", cache_reader("index_season", _table_fields(Q_INDEX_SEASON)), 3900)),
         "latency": entry(Q_LATENCY, "-15m@m", "now", ["host_filter"], count=300),
-        "baseline": entry(Q_BASELINE_ALL, "-25h@m", "@m", ["host_filter"], count=300, timeout=120),
+        "baseline": entry(Q_BASELINE_ALL, "-25h@m", "@m", ["host_filter"], count=300, timeout=120,
+                          cache=cache_spec("baseline", cache_reader("baseline", _table_fields(BASELINE_VIEW), "host=$host_filter$"), 1200)),
         "features": entry(Q_HEALTH_FEATURES, "-15m", "now", count=100),
         "introspection": entry(Q_INTROSPECTION, "-4h", "now", count=100),
         "ingest_actions": entry(Q_INGEST_ACTIONS, "-4h", "now", count=300),
@@ -3710,7 +4011,8 @@ def emit_catalog() -> None:
         "parse_linebreak": entry(Q_PARSE_LINEBREAK, "-24h", "now", count=100),
         "parse_time": entry(Q_PARSE_TIME, "-24h", "now", count=50),
         "feed_catalog": entry(Q_FEED_CATALOG, "-30d@d", "now", count=500, timeout=120),
-        "empty_hours": entry(Q_EMPTY_HOURS, "-7d@h", "@h", count=100, timeout=120),
+        "empty_hours": entry(Q_EMPTY_HOURS, "-7d@h", "@h", count=100, timeout=120,
+                             cache=cache_spec("empty_hours", cache_reader("empty_hours", _table_fields(Q_EMPTY_HOURS)), 3900)),
         "quarantine_daily": entry(Q_QUARANTINE_DAILY, "-7d@d", "now", count=200, timeout=120),
         "quarantine_rows": entry(Q_QUARANTINE_ROWS, "-7d@d", "now", count=200, timeout=120),
         "sc4s_time": entry(Q_SC4S_TIME, "-4h", "now", count=400),
@@ -3724,18 +4026,24 @@ def emit_catalog() -> None:
         "indexed": entry(Q_INDEXED_COMPARE, "-4h", "now", count=300),
         "topo_paths": entry(Q_TOPO_PATHS, "-4h", "now", count=100, timeout=120),
         "topo_overview": entry(Q_TOPO_OVERVIEW, "-24h", "now", count=740, timeout=120),
-        "topo_full": entry(Q_TOPO_FULL, "-24h", "now", count=20000, timeout=150),
+        "topo_full": entry(Q_TOPO_FULL, "-24h", "now", count=20000, timeout=150,
+                           cache=cache_spec("topo_full", cache_reader("topo_full", _table_fields(Q_TOPO_FULL)), 3600)),
         "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_environment", "tok_topo_ingest", "tok_topo_family", "tok_topo_endpoint", "tok_topo_index"], count=200, timeout=120),
         "heal_runs": entry(Q_HEAL_RUNS, "-24h", "now", ["tok_heal_window"], count=5000, timeout=120),
-        "ko_dashboards": entry(Q_KO_DASHBOARDS, "-30d", "now", ["tok_ko_window"], count=4000, timeout=150),
-        "ko_apps": entry(Q_KO_APPS, "-30d", "now", ["tok_ko_window"], count=500, timeout=120),
-        "ko_macros": entry(Q_KO_MACROS, "-30d", "now", ["tok_ko_window"], count=4000, timeout=150),
-        "ko_lookups": entry(Q_KO_LOOKUPS, "-30d", "now", ["tok_ko_window"], count=4000, timeout=150),
+        "ko_dashboards": entry(Q_KO_DASHBOARDS, "-30d", "now", ["tok_ko_window"], count=4000, timeout=150,
+                               cache=cache_spec("ko_usage", Q_KO_DASHBOARDS_CACHED, 7800, "tok_ko_window")),
+        "ko_apps": entry(Q_KO_APPS, "-30d", "now", ["tok_ko_window"], count=500, timeout=120,
+                         cache=cache_spec("ko_usage", Q_KO_APPS_CACHED, 7800, "tok_ko_window")),
+        "ko_macros": entry(Q_KO_MACROS, "-30d", "now", ["tok_ko_window"], count=4000, timeout=150,
+                           cache=cache_spec("ko_usage", Q_KO_MACROS_CACHED, 7800, "tok_ko_window")),
+        "ko_lookups": entry(Q_KO_LOOKUPS, "-30d", "now", ["tok_ko_window"], count=4000, timeout=150,
+                            cache=cache_spec("ko_usage", Q_KO_LOOKUPS_CACHED, 7800, "tok_ko_window")),
         "tcpin": entry(Q_TCPIN_PATHS, "-4h", "now", count=80),
         "topo_src_stats": entry(Q_TOPO_SRC_STATS, "-4h", "now", ["tok_data_source"], count=5),
         "topo_src_trend": entry(Q_TOPO_SRC_TREND, "-25h@m", "@m", ["tok_data_source"], count=120),
         "topo_src_outliers": entry(Q_TOPO_SRC_OUTLIERS, "-25h@m", "@m", ["tok_data_source"], count=50),
-        "agent_queue": entry(asked + "\n" + Q_DQ_QUEUE_VIEW + "\n| rename _finding_id AS finding_ref, _ai_brief AS ai_brief_text", "-24h", "now", gate, count=100, timeout=120),
+        "agent_queue": entry(asked + "\n" + Q_DQ_QUEUE_VIEW + QUEUE_RENAME, "-24h", "now", gate, count=100, timeout=120,
+                             cache=cache_spec("dq_findings", Q_DQ_AGENT_FINDINGS_CACHED + "\n" + Q_DQ_AGENT_ASK + "\n" + Q_DQ_QUEUE_VIEW + QUEUE_RENAME, 1800)),
         "agent_sample": entry(Q_DQ_SAMPLE_LOOKUP, "0", "now", ["tok_fix_type", "tok_entity"], count=20, timeout=30),
         "agent_replies": entry(Q_DQ_AI_REPLIES, "0", "now", ["tok_finding_id", "tok_ai_ask"], count=5),
         "agent_list": entry(Q_DQ_AI_LIST, "0", "now", ["tok_ai_list"], count=100),
@@ -3755,9 +4063,50 @@ def emit_catalog() -> None:
         declared = set(item["params"])
         if used != declared:
             raise SystemExit(f"catalog {name}: tokens {sorted(used)} != params {sorted(declared)}")
+        if "cache" in item:
+            cached = set(_re.findall(r"\$([a-z_]+)\$", item["cache"]["spl"]))
+            if not cached <= declared:
+                raise SystemExit(f"catalog {name}: cache tokens {sorted(cached - declared)} not in params")
+            if item["cache"].get("cover_param", "") not in declared | {""}:
+                raise SystemExit(f"catalog {name}: cover_param is not a param")
     path = ROOT / "default" / "health_queries.json"
     path.write_text(json.dumps(catalog, indent=1), encoding="utf-8")
     print(f"wrote {path.relative_to(ROOT)}")
+
+
+CACHE_BEGIN = "# BEGIN result caches (generated by tools/build_dashboards.py)"
+CACHE_END = "# END result caches"
+
+
+def emit_cache_conf() -> None:
+    coll, trans = render_cache_conf()
+    notes = {
+        "collections.conf": "# Cached panel results written by the Exec Health Cache searches. Not replicated to\n"
+                            "# indexers; only the search head reads them. Safe to empty: the next run refills them.\n",
+        "transforms.conf": "",
+    }
+    for filename, block in (("collections.conf", coll), ("transforms.conf", trans)):
+        path = ROOT / "default" / filename
+        head, tail = path.read_text(encoding="utf-8"), ""
+        if CACHE_BEGIN in head:
+            if CACHE_END in head:
+                tail = head[head.index(CACHE_END) + len(CACHE_END):].lstrip("\n")
+            head = head[:head.index(CACHE_BEGIN)]
+        path.write_text(
+            head.rstrip("\n") + "\n\n" + CACHE_BEGIN + "\n" + notes[filename] + block.lstrip("\n")
+            + CACHE_END + "\n" + tail,
+            encoding="utf-8",
+        )
+        print(f"wrote {path.relative_to(ROOT)}")
+
+
+def emit_searches() -> None:
+    """Everything that carries SPL: savedsearches.conf, the cache conf blocks, and the
+    page catalog. Use this instead of main() when the views do not change."""
+    SAVEDSEARCHES.write_text(render_savedsearches(), encoding="utf-8")
+    print(f"wrote {SAVEDSEARCHES.relative_to(ROOT)}")
+    emit_cache_conf()
+    emit_catalog()
 
 
 def main() -> None:
@@ -3788,6 +4137,7 @@ def main() -> None:
         path.write_text(xml_text, encoding="utf-8")
         ET.fromstring(xml_text)
         print(f"wrote {path.relative_to(ROOT)}")
+    emit_cache_conf()
     emit_catalog()
 
 

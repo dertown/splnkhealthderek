@@ -51,8 +51,33 @@ var Health = (function () {
       }
       var body = data.payload !== undefined ? (typeof data.payload === 'string' ? JSON.parse(data.payload) : data.payload) : data;
       if (!response.ok || body.success === false) throw new Error(body.error || ('Request failed (' + response.status + ')'));
-      return body.rows || [];
+      var rows = body.rows || [];
+      if (body.cached_at) rows.cachedAt = body.cached_at;
+      return rows;
     });
+  }
+
+  function liveMode() {
+    return /(?:^|[?&])live=1(?:&|$)/.test(window.location.search || '');
+  }
+
+  // One note per page: the oldest cache any panel was read from, and a link
+  // that reloads the page with every search run live.
+  var oldestCache = null;
+  function noteCache(epoch) {
+    if (!epoch || (oldestCache && oldestCache <= epoch) || !document.body) return;
+    oldestCache = epoch;
+    var note = document.getElementById('cacheNote');
+    if (!note) {
+      note = document.createElement('div');
+      note.id = 'cacheNote';
+      note.className = 'cache-note';
+      document.body.appendChild(note);
+    }
+    var when = new Date(epoch * 1000);
+    var sep = window.location.search ? '&' : '?';
+    note.innerHTML = 'Some panels are from the cache built at ' + esc(when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })) +
+      '. <a href="' + esc(window.location.pathname + window.location.search + sep + 'live=1') + '">Run live</a>';
   }
 
   function query(name, params) {
@@ -60,7 +85,9 @@ var Health = (function () {
     Object.keys(params || {}).forEach(function (key) {
       qs += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
     });
-    return fetch(api('query') + '?' + qs, { credentials: 'same-origin', headers: headers() }).then(handle);
+    if (liveMode()) qs += '&fresh=1';
+    return fetch(api('query') + '?' + qs, { credentials: 'same-origin', headers: headers() }).then(handle)
+      .then(function (rows) { if (rows.cachedAt) noteCache(rows.cachedAt); return rows; });
   }
 
   function act(name, params) {
