@@ -1,6 +1,6 @@
 /* Shared helpers for the Splunk Health Derek+ HTML pages. */
 var Health = (function () {
-  var PILL_GOOD = ['GREEN', 'OK', 'ok', 'Healthy', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no', 'Turned off on purpose', 'ON PATTERN', 'In use'];
+  var PILL_GOOD = ['GREEN', 'OK', 'ok', 'Healthy', 'approved', 'replied', 'PASS', 'LOCAL', 'READY', 'PROVIDER', 'Approve', 'SET', 'no', 'Turned off on purpose', 'ON PATTERN', 'In use', 'Required'];
   var PILL_BAD = ['RED', 'ALERT', 'HOST DOWN', 'DATA SILENT', 'HEARTBEAT ONLY', 'HIGH', 'CLOCK AHEAD', 'FAILED', 'failed', 'FAIL', 'MISCONFIG', 'STALLED', 'MISSING', 'Gone quiet', 'No events in 30 days', 'Wrong sourcetype', 'QUIET', 'BELOW', 'Unused'];
   var PILL_WARN = ['YELLOW', 'DELAYED', 'WARMUP', 'N/A', 'open', 'TESTING', 'WAITING', 'RECURRING', 'Source gone quiet', 'New this week', 'In the catch-all', 'LEARNING', 'DISABLED', 'NOT SCHEDULED', 'Disabled'];
 
@@ -509,5 +509,80 @@ var Health = (function () {
     return { fill: fill, filter: filter, selected: selected, label: label, setAll: setAll };
   }
 
-  return { query: query, act: act, heal: heal, healRun: healRun, koDisable: koDisable, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply, appPicker: appPicker };
+  var KO_KEEP_KEY = 'exec_health_ko_keep';
+  var KO_ADDON = /^(ta-|sa-|da-|splunk_ta_|splunk_sa_|splunk_da_)/i;
+  var KO_EXACT = {
+    search: 1, launcher: 1, learned: 1, splunk_exec_health: 1,
+    introspection_generator: 1, splunk_httpinput: 1, splunk_instrumentation: 1,
+    splunk_monitoring_console: 1
+  };
+  var KO_NEEDLE = [
+    'enterprisesecurity', 'ess_content', 'splunk_sa_cim', 'scientific_python',
+    'splunk_ml_toolkit', 'itsi', 'itoa', 'escu', 'soar', 'phantom', 'uba',
+    'splunk_app_for_', 'db_connect', 'splunk_app_stream', 'splunk_app_aws',
+    'splunk_app_microsoft', 'splunk_app_okta', 'missioncontrol',
+    'splunk_security_essentials', 'splunk_rapid_diag', 'python_upgrade',
+    'metrics_workspace', 'secure_gateway', 'splunk_assist', 'dashboard_studio',
+    'datasets_addon', 'splunk_archiver', '100-whisper', 'splunk_observability',
+    'appinspect', 'splunk_appserver'
+  ];
+  var koKeep = {};
+  try {
+    var storedKeep = JSON.parse(window.localStorage.getItem(KO_KEEP_KEY) || '{}');
+    koKeep = storedKeep.apps && typeof storedKeep.apps === 'object' ? storedKeep.apps : {};
+  } catch (err) { koKeep = {}; }
+
+  function koSaveKeep() {
+    try {
+      window.localStorage.setItem(KO_KEEP_KEY, JSON.stringify({ apps: koKeep, at: Date.now() }));
+    } catch (err) {}
+  }
+
+  function koRuleRequired(app) {
+    if (!app) return false;
+    if (KO_EXACT[app]) return true;
+    if (KO_ADDON.test(app)) return true;
+    var lowered = String(app).toLowerCase();
+    for (var i = 0; i < KO_NEEDLE.length; i++) {
+      if (lowered.indexOf(KO_NEEDLE[i]) >= 0) return true;
+    }
+    return false;
+  }
+
+  function koRequired(app) {
+    return koRuleRequired(app) || !!(koKeep[app]);
+  }
+
+  function koMark(row) {
+    if (!row) return row;
+    if (koRequired(row.app_name || '') && row.usage !== 'Disabled') row.usage = 'Required';
+    return row;
+  }
+
+  function koMarkRows(rows) {
+    return (rows || []).map(koMark);
+  }
+
+  function koRememberKeep(names) {
+    (names || []).forEach(function (name) {
+      if (name && /^[\w.\-]{1,128}$/.test(name)) koKeep[name] = 1;
+    });
+    koSaveKeep();
+  }
+
+  function koParseKeep(reply) {
+    var found = [];
+    String(reply || '').split('\n').forEach(function (line) {
+      var match = line.match(/^\s*KEEP:\s*(.+)$/i);
+      if (!match) return;
+      match[1].split(/[,;]+/).forEach(function (part) {
+        var name = part.replace(/^\s+|\s+$/g, '');
+        if (/^none$/i.test(name) || !name) return;
+        if (/^[\w.\-]{1,128}$/.test(name)) found.push(name);
+      });
+    });
+    return found;
+  }
+
+  return { query: query, act: act, heal: heal, healRun: healRun, koDisable: koDisable, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply, appPicker: appPicker, koMark: koMark, koMarkRows: koMarkRows, koRequired: koRequired, koRuleRequired: koRuleRequired, koRememberKeep: koRememberKeep, koParseKeep: koParseKeep };
 })();

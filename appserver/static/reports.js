@@ -150,6 +150,7 @@
   // a topology view, or the queue health that every queue row carries.
   function shape(job, rows) {
     if (job.apps && picker) rows = picker.filter(rows);
+    if (job.apps) rows = Health.koMarkRows(rows);
     if (job.view) {
       return rows.filter(function (row) { return row.topo_view === job.view; }).map(function (row) {
         var copy = {};

@@ -4,7 +4,7 @@ The browser asks for a search by name. The handler runs only the named searches 
 default/health_queries.json, as the signed-in user, and never SPL sent from the
 browser. A click can only run the searches marked write=True (record a
 decision, ask the AI provider, draft a support ticket, save the AI config, test
-the connection, or ask for knowledge-object cleanup). Those writes change only
+the connection, or ask for knowledge-object cleanup or required-app classification). Those writes change only
 this app's own records; the ticket and cleanup reply are text returned to the page.
 
 The one change to Splunk configuration is the self-heal on Host Heartbeat. Its
@@ -16,8 +16,8 @@ default/savedsearches.conf, and it recomputes the plan itself on apply.
 Knowledge objects can be disabled from that page after a confirmed click.
 That POST only disables a dashboard, app, or macro that already exists, and
 it never deletes anything. Lookup files have no disable in Splunk, so they
-are refused. This app, the search and launcher apps, and this page itself
-cannot be disabled from here.
+are refused. This app, the search and launcher apps, Technology Add-ons,
+supporting add-ons, and Splunk premium apps cannot be disabled from here.
 
 Searches with a "cache" entry are answered from the KV Store collection that
 their scheduled "Exec Health Cache - ..." search fills, when that cache is fresh.
@@ -71,7 +71,7 @@ PARAMS = {
     "tok_ko_confirm": (r"^(yes|no)$", "no"),
 }
 
-WRITES = {"decide", "ask", "ticket", "save_config", "conn_test", "ko_cleanup"}
+WRITES = {"decide", "ask", "ticket", "save_config", "conn_test", "ko_cleanup", "ko_classify"}
 TOKEN_RE = re.compile(r"\$([a-z_]+)\$")
 
 # Self-heal settings. A scheduled slot counts as run if the scheduler logged a run
@@ -100,6 +100,32 @@ KO_PROTECTED_VIEWS = frozenset({
     ("splunk_exec_health", "knowledge_objects"),
     ("splunk_exec_health", "executive_overview"),
 })
+KO_ADDON_PREFIXES = (
+    "ta-", "sa-", "da-", "splunk_ta_", "splunk_sa_", "splunk_da_",
+)
+KO_PREMIUM_NEEDLES = (
+    "enterprisesecurity", "ess_content", "splunk_sa_cim", "scientific_python",
+    "splunk_ml_toolkit", "itsi", "itoa", "escu", "soar", "phantom", "uba",
+    "splunk_app_for_", "db_connect", "splunk_app_stream", "splunk_app_aws",
+    "splunk_app_microsoft", "splunk_app_okta", "missioncontrol",
+    "splunk_security_essentials", "splunk_rapid_diag", "python_upgrade",
+    "metrics_workspace", "secure_gateway", "splunk_assist", "splunk_instrumentation",
+    "splunk_httpinput", "monitoring_console", "introspection", "dashboard_studio",
+    "datasets_addon", "splunk_archiver", "100-whisper", "splunk_observability",
+    "appinspect", "splunk_appserver", "splunk_secure_gateway",
+)
+
+
+def _ko_system_app(name: str) -> bool:
+    """True when this folder is a TA, SA/DA, platform app, or Splunk premium product."""
+    if not name or name == "none":
+        return False
+    if name in KO_PROTECTED_APPS:
+        return True
+    lowered = name.lower()
+    if lowered.startswith(KO_ADDON_PREFIXES):
+        return True
+    return any(needle in lowered for needle in KO_PREMIUM_NEEDLES)
 
 
 class SearchFailed(Exception):
@@ -648,8 +674,11 @@ class HealthDashHandler(PersistentServerConnectionApplication):
             return self._render({"success": False, "error": "Lookup files cannot be disabled. Pick a dashboard, app, or macro."}, 400)
         if kind == "app":
             app = name
-        if kind == "app" and name in KO_PROTECTED_APPS:
-            return self._render({"success": False, "error": "That app is left on so this stack stays usable"}, 400)
+        if _ko_system_app(name if kind == "app" else app):
+            return self._render({
+                "success": False,
+                "error": "That object is part of a Technology Add-on, supporting add-on, or Splunk premium app and stays on",
+            }, 400)
         if kind == "dashboard" and (app, name) in KO_PROTECTED_VIEWS:
             return self._render({"success": False, "error": "That view is left on so this app stays usable"}, 400)
         path = self._ko_entity_path(kind, app, name, owner)

@@ -3127,7 +3127,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.92"
+APP_VERSION = "1.7.93"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3589,7 +3589,36 @@ Q_KO_CLEANUP = r"""
 | eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
 | eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
 | eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
-| eval ai_brief="Role: Derek+ Knowledge Object cleaner. Recommend which unused knowledge objects to disable to improve search-head performance. Do not delete anything. Do not disable splunk_exec_health, search, launcher, or Splunk platform apps. A human must confirm every disable. Use only the inventory facts. If a number is not in the facts, write not measured. Reply in under 500 words. Reply in sections. Start each section with a bold heading in the form **Heading:** and use: Priority actions, Leave alone, Estimated savings. In Estimated savings, give qualitative search-head CPU, scheduled-search, and memory ranges (low, medium, or high) and a rough percent of knowledge-object load, labeled as estimates not measurements. End with exactly two lines and nothing after them. CONFIDENCE: high, medium, or low, then a short reason. SAVINGS: one sentence with the estimated range. Facts: "+facts+". Do not request secrets or HEC token values."
+| eval ai_brief="Role: Derek+ Knowledge Object cleaner. Recommend which unused knowledge objects to disable to improve search-head performance. Do not delete anything. Do not disable splunk_exec_health, search, launcher, Technology Add-ons, SA or DA add-ons, CIM, ES, ITSI, SOAR, UBA, ESCU, or other Required objects. A human must confirm every disable. Use only the inventory facts. If a number is not in the facts, write not measured. Reply in under 500 words. Reply in sections. Start each section with a bold heading in the form **Heading:** and use: Priority actions, Leave alone, Estimated savings. In Estimated savings, give qualitative search-head CPU, scheduled-search, and memory ranges (low, medium, or high) and a rough percent of knowledge-object load, labeled as estimates not measurements. End with exactly two lines and nothing after them. CONFIDENCE: high, medium, or low, then a short reason. SAVINGS: one sentence with the estimated range. Facts: "+facts+". Do not request secrets or HEC token values."
+| eval is_ping=0
+| derekaiping
+| eval status=if(ai_result="replied", "replied", "failed")
+| eval reply=if(ai_result="replied", ai_reply, "none")
+| eval cleanup_error=if(ai_result="replied", "none", coalesce(ai_error, "no reply"))
+| fields - api_key
+| eval _color_rank=if(status="replied", 3, 1)
+| table status, reply, cleanup_error, provider, model, _color_rank
+""".strip()
+
+# Classify leftover unused app folders as KEEP (TA / premium / system) or REVIEW.
+# The page already hid known prefixes; this pass catches odd folder names.
+Q_KO_CLASSIFY = r"""
+| makeresults
+| eval facts="$tok_ai_brief$", stanza="default"
+| lookup dq_agent_ai_config stanza OUTPUT mode, provider, model, endpoint, api_key, updated_at
+| eval _updated=coalesce(tostring(updated_at), "0")
+| eval used_ui=if(_updated="0" OR _updated="", 0, 1)
+| eval mode=if(used_ui=0, "`exec_health_ai_mode`", coalesce(mode, "off"))
+| eval provider=if(used_ui=0, "`exec_health_ai_provider`", coalesce(provider, "none"))
+| eval model=if(used_ui=0, "`exec_health_ai_model`", coalesce(model, "none"))
+| eval endpoint=if(used_ui=0, "`exec_health_ai_endpoint`", coalesce(endpoint, "none"))
+| eval key_ok=if(isnotnull(api_key) AND api_key!="" AND api_key!="none", 1, 0)
+| where mode="provider" AND provider!="none" AND provider!="" AND key_ok=1 AND len(coalesce(facts, ""))>40
+| lookup dq_agent_ai_providers provider OUTPUT default_endpoint
+| eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
+| eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
+| eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
+| eval ai_brief="Role: Derek+ knowledge-object classifier. Decide which Splunk app folders must stay enabled for the platform, a Technology Add-on, a supporting add-on, or a premium product (ES, ITSI, SOAR, UBA, ESCU, CIM, DB Connect, Stream). KEEP those. REVIEW custom unused content. Reply with exactly two lines and nothing else. KEEP: comma-separated app folder names, or none. REVIEW: comma-separated app folder names, or none. Use only names from the facts. Facts: "+facts+". Do not request secrets."
 | eval is_ping=0
 | derekaiping
 | eval status=if(ai_result="replied", "replied", "failed")
@@ -4098,6 +4127,7 @@ def emit_catalog() -> None:
         "save_config": entry(Q_DQ_AI_SAVE_CONFIG, "0", "now", ["tok_cfg_save", "tok_cfg_provider", "tok_cfg_model", "tok_cfg_key"], count=5, timeout=60, write=True),
         "conn_test": entry(Q_DQ_AI_CONN_WRITE, "0", "now", ["tok_cfg_save", "tok_cfg_provider", "tok_cfg_model", "tok_cfg_key"], count=5, timeout=150, write=True),
         "ko_cleanup": entry(Q_KO_CLEANUP, "0", "now", ["tok_ai_brief"], count=5, timeout=150, write=True),
+        "ko_classify": entry(Q_KO_CLASSIFY, "0", "now", ["tok_ai_brief"], count=5, timeout=150, write=True),
     }
     import re as _re
     for name, item in catalog.items():

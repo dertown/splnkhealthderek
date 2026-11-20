@@ -184,6 +184,8 @@ body.topomap-lock { overflow: hidden; }
 .check { white-space: pre-line; margin: 0 0 12px; }
 .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }
 label.fld { display: flex; flex-direction: column; gap: 4px; font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+label.fld.chk { flex-direction: row; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 0.8rem; color: var(--text); }
+label.fld.chk input { margin: 0; }
 .app-filter { position: relative; min-width: 220px; }
 .app-filter-btn {
   display: block; width: 100%; text-align: left; background: var(--bg); color: var(--text);
