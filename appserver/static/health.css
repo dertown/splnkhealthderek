@@ -184,6 +184,26 @@ body.topomap-lock { overflow: hidden; }
 .check { white-space: pre-line; margin: 0 0 12px; }
 .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 16px; }
 label.fld { display: flex; flex-direction: column; gap: 4px; font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.app-filter { position: relative; min-width: 220px; }
+.app-filter-btn {
+  display: block; width: 100%; text-align: left; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 0.875rem; cursor: pointer;
+}
+.app-filter-btn:hover { border-color: var(--accent); }
+.app-filter-menu {
+  position: absolute; left: 0; top: calc(100% + 4px); z-index: 30; width: min(360px, 80vw);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px;
+  box-shadow: 0 8px 24px #0008;
+}
+.app-filter-menu input[type="search"] { width: 100%; min-width: 0; margin-bottom: 8px; }
+.app-filter-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.app-filter-actions .btn { padding: 4px 10px; font-size: 0.8rem; }
+.app-filter-item {
+  display: flex; align-items: center; gap: 8px; font-size: 0.85rem; text-transform: none;
+  letter-spacing: 0; color: var(--text); padding: 4px 2px; cursor: pointer;
+}
+.app-filter-item input { min-width: 0; width: auto; margin: 0; accent-color: var(--accent); }
+#appFilterList { max-height: 240px; overflow: auto; }
 input, select {
   background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
   padding: 7px 10px; font-size: 0.875rem; min-width: 180px;
