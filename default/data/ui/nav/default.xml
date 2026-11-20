@@ -4,6 +4,7 @@
   <view name="hec_performance" />
   <view name="sc4s_edge" />
   <view name="data_topology" />
+  <view name="knowledge_objects" />
   <view name="data_quality_agent" />
   <view name="health_reports" />
   <collection label="Configure">

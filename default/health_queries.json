@@ -424,6 +424,50 @@
   "timeout": 120,
   "write": false
  },
+ "ko_dashboards": {
+  "spl": "| rest `exec_health_ko_rest` /servicesNS/-/-/data/ui/views\n| rename title AS ko_name, \"eai:acl.app\" AS app_name, \"eai:acl.owner\" AS owner, \"eai:acl.sharing\" AS sharing\n| eval label=coalesce(label, ko_name)\n| eval enabled=if((disabled=\"1\" OR disabled=\"true\") OR (isVisible=\"0\" OR isVisible=\"false\"), 0, 1)\n| eval src=\"inv\"\n| fields app_name ko_name label owner sharing enabled src\n| append [\n    search index=_internal (sourcetype=splunk_web_access OR sourcetype=splunkd_ui_access) method=GET status=200 earliest=-$tok_ko_window$\n    | rex field=uri_path \"/app/(?<app_name>[^/]+)/(?<ko_name>[^/?]+)$\"\n    | where isnotnull(app_name) AND isnotnull(ko_name)\n    | where NOT match(ko_name, \"^(search|reports|dashboards|alerts|home|job_manager|job_management|report|alert|search_job_inspector)$\")\n    | stats max(_time) AS last_epoch, count AS views, dc(user) AS users by app_name ko_name\n    | eval src=\"use\"\n]\n| stats latest(label) AS label, latest(owner) AS owner, latest(sharing) AS sharing, max(enabled) AS enabled, max(last_epoch) AS last_epoch, max(views) AS views, max(users) AS users, values(src) AS src by app_name ko_name\n| eval src=mvjoin(src, \"|\")\n| where match(src, \"inv\")\n| eval last_used=if(isnotnull(last_epoch), strftime(last_epoch, \"%Y-%m-%d %H:%M\"), \"never\")\n| eval views=coalesce(views, 0), users=coalesce(users, 0), enabled=if(enabled=0, 0, 1)\n| eval usage=case(enabled=0, \"Disabled\", isnull(last_epoch), \"Unused\", 1=1, \"In use\")\n| eval _color_rank=case(usage=\"Unused\", 1, usage=\"Disabled\", 2, 1=1, 3)\n| sort 0 _color_rank app_name ko_name\n| table app_name, label, ko_name, owner, sharing, last_used, views, users, usage",
+  "earliest": "-30d",
+  "latest": "now",
+  "params": [
+   "tok_ko_window"
+  ],
+  "count": 4000,
+  "timeout": 150,
+  "write": false
+ },
+ "ko_apps": {
+  "spl": "| rest `exec_health_ko_rest` /services/apps/local\n| rename title AS app_name\n| eval label=coalesce(label, app_name)\n| eval enabled=if(disabled=\"1\" OR disabled=\"true\", 0, 1)\n| eval visible=if(visible=\"1\" OR visible=\"true\", 1, 0)\n| eval src=\"inv\"\n| fields app_name label owner enabled visible src version\n| append [\n    search index=_internal (sourcetype=splunk_web_access OR sourcetype=splunkd_ui_access) method=GET status=200 earliest=-$tok_ko_window$\n    | rex field=uri_path \"/app/(?<app_name>[^/]+)/\"\n    | where isnotnull(app_name) AND app_name!=\"-\" AND app_name!=\"launcher\"\n    | stats max(_time) AS last_epoch, count AS views, dc(user) AS users by app_name\n    | eval src=\"use\"\n]\n| stats latest(label) AS label, latest(owner) AS owner, max(enabled) AS enabled, max(visible) AS visible, latest(version) AS version, max(last_epoch) AS last_epoch, max(views) AS views, max(users) AS users, values(src) AS src by app_name\n| eval src=mvjoin(src, \"|\")\n| where match(src, \"inv\")\n| eval last_used=if(isnotnull(last_epoch), strftime(last_epoch, \"%Y-%m-%d %H:%M\"), \"never\")\n| eval views=coalesce(views, 0), users=coalesce(users, 0), enabled=if(enabled=0, 0, 1)\n| eval usage=case(enabled=0, \"Disabled\", isnull(last_epoch), \"Unused\", 1=1, \"In use\")\n| eval _color_rank=case(usage=\"Unused\", 1, usage=\"Disabled\", 2, 1=1, 3)\n| sort 0 _color_rank app_name\n| table app_name, label, version, owner, visible, last_used, views, users, usage",
+  "earliest": "-30d",
+  "latest": "now",
+  "params": [
+   "tok_ko_window"
+  ],
+  "count": 500,
+  "timeout": 120,
+  "write": false
+ },
+ "ko_macros": {
+  "spl": "| rest `exec_health_ko_rest` /servicesNS/-/-/admin/macros\n| rename title AS ko_name, \"eai:acl.app\" AS app_name, \"eai:acl.owner\" AS owner, \"eai:acl.sharing\" AS sharing\n| eval enabled=if(disabled=\"1\" OR disabled=\"true\", 0, 1)\n| eval simple=replace(ko_name, \"\\(.*\", \"\")\n| eval src=\"inv\"\n| fields app_name ko_name simple owner sharing enabled src\n| append [\n    | rest `exec_health_ko_rest` /servicesNS/-/-/saved/searches\n    | fields title search\n    | rex field=search max_match=0 \"`(?<simple>[A-Za-z0-9_]+)\"\n    | mvexpand simple\n    | eval ss=title, src=\"ref\"\n    | fields simple ss src\n]\n| append [\n    search index=_internal sourcetype=scheduler earliest=-$tok_ko_window$ savedsearch_name=*\n    | stats max(_time) AS last_epoch by savedsearch_name\n    | rename savedsearch_name AS ss\n    | eval src=\"run\"\n    | fields ss last_epoch src\n]\n| eventstats max(last_epoch) AS ss_last by ss\n| stats latest(app_name) AS app_name, latest(ko_name) AS ko_name, latest(owner) AS owner, latest(sharing) AS sharing, max(enabled) AS enabled, dc(eval(if(src=\"ref\", ss, null()))) AS refs, max(ss_last) AS last_epoch, values(src) AS src by simple\n| eval src=mvjoin(src, \"|\")\n| where match(src, \"inv\")\n| eval last_used=if(isnotnull(last_epoch), strftime(last_epoch, \"%Y-%m-%d %H:%M\"), \"never\")\n| eval refs=coalesce(refs, 0), enabled=if(enabled=0, 0, 1)\n| eval usage=case(enabled=0, \"Disabled\", refs=0, \"Unused\", 1=1, \"In use\")\n| eval _color_rank=case(usage=\"Unused\", 1, usage=\"Disabled\", 2, 1=1, 3)\n| sort 0 _color_rank app_name ko_name\n| table app_name, ko_name, owner, sharing, last_used, refs, usage",
+  "earliest": "-30d",
+  "latest": "now",
+  "params": [
+   "tok_ko_window"
+  ],
+  "count": 4000,
+  "timeout": 150,
+  "write": false
+ },
+ "ko_lookups": {
+  "spl": "| rest `exec_health_ko_rest` /servicesNS/-/-/data/lookup-table-files\n| rename title AS ko_name, \"eai:acl.app\" AS app_name, \"eai:acl.owner\" AS owner, \"eai:acl.sharing\" AS sharing\n| eval enabled=1, src=\"inv\"\n| fields app_name ko_name owner sharing enabled src\n| append [\n    | rest `exec_health_ko_rest` /servicesNS/-/-/saved/searches\n    | fields title search\n    | rex field=search max_match=0 \"(?i)(?:inputlookup|outputlookup|lookup)\\s+(?:(?:local|append|update|override|dedup|maxmatches|minmatches)=\\S+\\s+)*(?<file>[A-Za-z0-9_.-]+)\"\n    | mvexpand file\n    | eval ss=title, ko_name=if(match(file, \"\\.(csv|kmz)$\"), file, file.\".csv\"), src=\"ref\"\n    | fields ko_name ss src\n]\n| append [\n    search index=_internal sourcetype=scheduler earliest=-$tok_ko_window$ savedsearch_name=*\n    | stats max(_time) AS last_epoch by savedsearch_name\n    | rename savedsearch_name AS ss\n    | eval src=\"run\"\n    | fields ss last_epoch src\n]\n| eventstats max(last_epoch) AS ss_last by ss\n| stats latest(app_name) AS app_name, latest(owner) AS owner, latest(sharing) AS sharing, max(enabled) AS enabled, dc(eval(if(src=\"ref\", ss, null()))) AS refs, max(ss_last) AS last_epoch, values(src) AS src by ko_name\n| eval src=mvjoin(src, \"|\")\n| where match(src, \"inv\")\n| eval last_used=if(isnotnull(last_epoch), strftime(last_epoch, \"%Y-%m-%d %H:%M\"), \"never\")\n| eval refs=coalesce(refs, 0), enabled=if(enabled=0, 0, 1)\n| eval usage=case(enabled=0, \"Disabled\", refs=0, \"Unused\", 1=1, \"In use\")\n| eval _color_rank=case(usage=\"Unused\", 1, usage=\"Disabled\", 2, 1=1, 3)\n| sort 0 _color_rank app_name ko_name\n| table app_name, ko_name, owner, sharing, last_used, refs, usage",
+  "earliest": "-30d",
+  "latest": "now",
+  "params": [
+   "tok_ko_window"
+  ],
+  "count": 4000,
+  "timeout": 150,
+  "write": false
+ },
  "tcpin": {
   "spl": "search index=_internal sourcetype=splunkd source=*metrics.log group=tcpin_connections\n| eval data_source=coalesce(sourceHost, hostname)\n| eval receiver=host\n| eval fwd=lower(trim(coalesce(fwdType, \"\")))\n| eval connection=case(\n    match(fwd, \"^(uf|lwf)$\"), \"UF\",\n    match(fwd, \"^(full|hf|hwf)$\"), \"HF\",\n    match(lower(coalesce(connectionType, \"\")), \"raw\"), \"TCP raw\",\n    1=1, coalesce(fwdType, connectionType, \"s2s\"))\n| where isnotnull(data_source) AND isnotnull(receiver)\n| stats sum(kb) as kb, sum(tcp_eps) as eps by data_source, connection, receiver\n| eval kb=round(kb, 1), eps=round(eps, 2)\n| sort 0 -kb\n| head 80\n| eval _color_rank=3\n| table data_source, connection, receiver, kb, eps, _color_rank",
   "earliest": "-4h",

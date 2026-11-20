@@ -3105,7 +3105,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.85"
+APP_VERSION = "1.7.87"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3535,6 +3535,129 @@ search index=_internal sourcetype=splunkd component=DateParserVerbose log_level=
 """.strip()
 
 
+# Knowledge objects on this search head. Inventory is REST. Last used for
+# dashboards and apps is UI access in _internal. Macros and lookup files are
+# unused when no saved search in the look-back references them; last used is
+# the latest scheduler run of a search that does.
+Q_KO_DASHBOARDS = r"""
+| rest `exec_health_ko_rest` /servicesNS/-/-/data/ui/views
+| rename title AS ko_name, "eai:acl.app" AS app_name, "eai:acl.owner" AS owner, "eai:acl.sharing" AS sharing
+| eval label=coalesce(label, ko_name)
+| eval enabled=if((disabled="1" OR disabled="true") OR (isVisible="0" OR isVisible="false"), 0, 1)
+| eval src="inv"
+| fields app_name ko_name label owner sharing enabled src
+| append [
+    search index=_internal (sourcetype=splunk_web_access OR sourcetype=splunkd_ui_access) method=GET status=200 earliest=-$tok_ko_window$
+    | rex field=uri_path "/app/(?<app_name>[^/]+)/(?<ko_name>[^/?]+)$"
+    | where isnotnull(app_name) AND isnotnull(ko_name)
+    | where NOT match(ko_name, "^(search|reports|dashboards|alerts|home|job_manager|job_management|report|alert|search_job_inspector)$")
+    | stats max(_time) AS last_epoch, count AS views, dc(user) AS users by app_name ko_name
+    | eval src="use"
+]
+| stats latest(label) AS label, latest(owner) AS owner, latest(sharing) AS sharing, max(enabled) AS enabled, max(last_epoch) AS last_epoch, max(views) AS views, max(users) AS users, values(src) AS src by app_name ko_name
+| eval src=mvjoin(src, "|")
+| where match(src, "inv")
+| eval last_used=if(isnotnull(last_epoch), strftime(last_epoch, "%Y-%m-%d %H:%M"), "never")
+| eval views=coalesce(views, 0), users=coalesce(users, 0), enabled=if(enabled=0, 0, 1)
+| eval usage=case(enabled=0, "Disabled", isnull(last_epoch), "Unused", 1=1, "In use")
+| eval _color_rank=case(usage="Unused", 1, usage="Disabled", 2, 1=1, 3)
+| sort 0 _color_rank app_name ko_name
+| table app_name, label, ko_name, owner, sharing, last_used, views, users, usage
+""".strip()
+
+Q_KO_APPS = r"""
+| rest `exec_health_ko_rest` /services/apps/local
+| rename title AS app_name
+| eval label=coalesce(label, app_name)
+| eval enabled=if(disabled="1" OR disabled="true", 0, 1)
+| eval visible=if(visible="1" OR visible="true", 1, 0)
+| eval src="inv"
+| fields app_name label owner enabled visible src version
+| append [
+    search index=_internal (sourcetype=splunk_web_access OR sourcetype=splunkd_ui_access) method=GET status=200 earliest=-$tok_ko_window$
+    | rex field=uri_path "/app/(?<app_name>[^/]+)/"
+    | where isnotnull(app_name) AND app_name!="-" AND app_name!="launcher"
+    | stats max(_time) AS last_epoch, count AS views, dc(user) AS users by app_name
+    | eval src="use"
+]
+| stats latest(label) AS label, latest(owner) AS owner, max(enabled) AS enabled, max(visible) AS visible, latest(version) AS version, max(last_epoch) AS last_epoch, max(views) AS views, max(users) AS users, values(src) AS src by app_name
+| eval src=mvjoin(src, "|")
+| where match(src, "inv")
+| eval last_used=if(isnotnull(last_epoch), strftime(last_epoch, "%Y-%m-%d %H:%M"), "never")
+| eval views=coalesce(views, 0), users=coalesce(users, 0), enabled=if(enabled=0, 0, 1)
+| eval usage=case(enabled=0, "Disabled", isnull(last_epoch), "Unused", 1=1, "In use")
+| eval _color_rank=case(usage="Unused", 1, usage="Disabled", 2, 1=1, 3)
+| sort 0 _color_rank app_name
+| table app_name, label, version, owner, visible, last_used, views, users, usage
+""".strip()
+
+Q_KO_MACROS = r"""
+| rest `exec_health_ko_rest` /servicesNS/-/-/admin/macros
+| rename title AS ko_name, "eai:acl.app" AS app_name, "eai:acl.owner" AS owner, "eai:acl.sharing" AS sharing
+| eval enabled=if(disabled="1" OR disabled="true", 0, 1)
+| eval simple=replace(ko_name, "\(.*", "")
+| eval src="inv"
+| fields app_name ko_name simple owner sharing enabled src
+| append [
+    | rest `exec_health_ko_rest` /servicesNS/-/-/saved/searches
+    | fields title search
+    | rex field=search max_match=0 "`(?<simple>[A-Za-z0-9_]+)"
+    | mvexpand simple
+    | eval ss=title, src="ref"
+    | fields simple ss src
+]
+| append [
+    search index=_internal sourcetype=scheduler earliest=-$tok_ko_window$ savedsearch_name=*
+    | stats max(_time) AS last_epoch by savedsearch_name
+    | rename savedsearch_name AS ss
+    | eval src="run"
+    | fields ss last_epoch src
+]
+| eventstats max(last_epoch) AS ss_last by ss
+| stats latest(app_name) AS app_name, latest(ko_name) AS ko_name, latest(owner) AS owner, latest(sharing) AS sharing, max(enabled) AS enabled, dc(eval(if(src="ref", ss, null()))) AS refs, max(ss_last) AS last_epoch, values(src) AS src by simple
+| eval src=mvjoin(src, "|")
+| where match(src, "inv")
+| eval last_used=if(isnotnull(last_epoch), strftime(last_epoch, "%Y-%m-%d %H:%M"), "never")
+| eval refs=coalesce(refs, 0), enabled=if(enabled=0, 0, 1)
+| eval usage=case(enabled=0, "Disabled", refs=0, "Unused", 1=1, "In use")
+| eval _color_rank=case(usage="Unused", 1, usage="Disabled", 2, 1=1, 3)
+| sort 0 _color_rank app_name ko_name
+| table app_name, ko_name, owner, sharing, last_used, refs, usage
+""".strip()
+
+Q_KO_LOOKUPS = r"""
+| rest `exec_health_ko_rest` /servicesNS/-/-/data/lookup-table-files
+| rename title AS ko_name, "eai:acl.app" AS app_name, "eai:acl.owner" AS owner, "eai:acl.sharing" AS sharing
+| eval enabled=1, src="inv"
+| fields app_name ko_name owner sharing enabled src
+| append [
+    | rest `exec_health_ko_rest` /servicesNS/-/-/saved/searches
+    | fields title search
+    | rex field=search max_match=0 "(?i)(?:inputlookup|outputlookup|lookup)\s+(?:(?:local|append|update|override|dedup|maxmatches|minmatches)=\S+\s+)*(?<file>[A-Za-z0-9_.-]+)"
+    | mvexpand file
+    | eval ss=title, ko_name=if(match(file, "\.(csv|kmz)$"), file, file.".csv"), src="ref"
+    | fields ko_name ss src
+]
+| append [
+    search index=_internal sourcetype=scheduler earliest=-$tok_ko_window$ savedsearch_name=*
+    | stats max(_time) AS last_epoch by savedsearch_name
+    | rename savedsearch_name AS ss
+    | eval src="run"
+    | fields ss last_epoch src
+]
+| eventstats max(last_epoch) AS ss_last by ss
+| stats latest(app_name) AS app_name, latest(owner) AS owner, latest(sharing) AS sharing, max(enabled) AS enabled, dc(eval(if(src="ref", ss, null()))) AS refs, max(ss_last) AS last_epoch, values(src) AS src by ko_name
+| eval src=mvjoin(src, "|")
+| where match(src, "inv")
+| eval last_used=if(isnotnull(last_epoch), strftime(last_epoch, "%Y-%m-%d %H:%M"), "never")
+| eval refs=coalesce(refs, 0), enabled=if(enabled=0, 0, 1)
+| eval usage=case(enabled=0, "Disabled", refs=0, "Unused", 1=1, "In use")
+| eval _color_rank=case(usage="Unused", 1, usage="Disabled", 2, 1=1, 3)
+| sort 0 _color_rank app_name ko_name
+| table app_name, ko_name, owner, sharing, last_used, refs, usage
+""".strip()
+
+
 # Scheduler log rows for the app's own Exec Health searches. The heal panel uses
 # these to find scheduled slots that never ran. One row per run, not a list(),
 # because list() is capped at 100 values and a */5 search has 288 runs a day.
@@ -3604,6 +3727,10 @@ def emit_catalog() -> None:
         "topo_full": entry(Q_TOPO_FULL, "-24h", "now", count=20000, timeout=150),
         "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_environment", "tok_topo_ingest", "tok_topo_family", "tok_topo_endpoint", "tok_topo_index"], count=200, timeout=120),
         "heal_runs": entry(Q_HEAL_RUNS, "-24h", "now", ["tok_heal_window"], count=5000, timeout=120),
+        "ko_dashboards": entry(Q_KO_DASHBOARDS, "-30d", "now", ["tok_ko_window"], count=4000, timeout=150),
+        "ko_apps": entry(Q_KO_APPS, "-30d", "now", ["tok_ko_window"], count=500, timeout=120),
+        "ko_macros": entry(Q_KO_MACROS, "-30d", "now", ["tok_ko_window"], count=4000, timeout=150),
+        "ko_lookups": entry(Q_KO_LOOKUPS, "-30d", "now", ["tok_ko_window"], count=4000, timeout=150),
         "tcpin": entry(Q_TCPIN_PATHS, "-4h", "now", count=80),
         "topo_src_stats": entry(Q_TOPO_SRC_STATS, "-4h", "now", ["tok_data_source"], count=5),
         "topo_src_trend": entry(Q_TOPO_SRC_TREND, "-25h@m", "@m", ["tok_data_source"], count=120),
@@ -3643,6 +3770,7 @@ def main() -> None:
         ("hec_performance.xml", "HEC Token Performance", "hec.html"),
         ("sc4s_edge.xml", "SC4S Syslog & Edge/Ingest Processors", "sc4s.html"),
         ("data_topology.xml", "Data Topology", "topology.html"),
+        ("knowledge_objects.xml", "Knowledge objects", "knowledge.html"),
         ("data_quality_agent.xml", "Derek+ Data Quality Agent", "agent.html"),
         ("health_reports.xml", "Reports", "reports.html"),
         ("ai_provider_setup.xml", "AI provider setup", "setup.html"),
