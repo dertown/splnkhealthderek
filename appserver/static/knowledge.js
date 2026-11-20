@@ -59,72 +59,21 @@
   }
 
   var cache = { dash: [], apps: [], macros: [], lookups: [] };
+  var picker = Health.appPicker({
+    wrap: 'appFilter', button: 'appFilterBtn', menu: 'appFilterMenu',
+    search: 'appFilterSearch', list: 'appFilterList', all: 'appFilterAll', none: 'appFilterNone'
+  }, paintAll);
 
   function appNames() {
     var seen = {};
     [cache.dash, cache.apps, cache.macros, cache.lookups].forEach(function (rows) {
       rows.forEach(function (row) { if (row.app_name) seen[row.app_name] = 1; });
     });
-    return Object.keys(seen).sort(function (a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
-  }
-
-  function checkedApps() {
-    var chosen = {};
-    var count = 0;
-    Array.prototype.forEach.call(document.querySelectorAll('#appFilterList input[type="checkbox"]'), function (box) {
-      if (box.checked) { chosen[box.value] = 1; count += 1; }
-    });
-    return { set: chosen, count: count, total: document.querySelectorAll('#appFilterList input[type="checkbox"]').length };
+    return Object.keys(seen);
   }
 
   function forApps(rows) {
-    var pick = checkedApps();
-    if (!pick.total || pick.count === pick.total) return rows;
-    if (!pick.count) return [];
-    return rows.filter(function (row) { return pick.set[row.app_name]; });
-  }
-
-  function updateAppButton() {
-    var pick = checkedApps();
-    var btn = document.getElementById('appFilterBtn');
-    if (!pick.total || pick.count === pick.total) btn.textContent = 'All apps';
-    else if (!pick.count) btn.textContent = 'No apps';
-    else if (pick.count === 1) btn.textContent = Object.keys(pick.set)[0];
-    else btn.textContent = pick.count + ' of ' + pick.total + ' apps';
-  }
-
-  function fillAppList() {
-    var list = document.getElementById('appFilterList');
-    var prev = {};
-    var had = false;
-    Array.prototype.forEach.call(list.querySelectorAll('input[type="checkbox"]'), function (box) {
-      had = true;
-      if (box.checked) prev[box.value] = 1;
-    });
-    var names = appNames();
-    list.innerHTML = names.map(function (name) {
-      var on = !had || !!prev[name];
-      return '<label class="app-filter-item"><input type="checkbox" value="' + Health.esc(name) + '"'
-        + (on ? ' checked' : '') + '> ' + Health.esc(name) + '</label>';
-    }).join('') || '<p class="note">No apps in this look-back.</p>';
-    filterAppList();
-    updateAppButton();
-  }
-
-  function filterAppList() {
-    var q = (document.getElementById('appFilterSearch').value || '').toLowerCase();
-    Array.prototype.forEach.call(document.querySelectorAll('#appFilterList .app-filter-item'), function (item) {
-      var name = (item.textContent || '').toLowerCase();
-      item.style.display = !q || name.indexOf(q) >= 0 ? '' : 'none';
-    });
-  }
-
-  function setAppChecks(on) {
-    Array.prototype.forEach.call(document.querySelectorAll('#appFilterList input[type="checkbox"]'), function (box) {
-      box.checked = !!on;
-    });
-    updateAppButton();
-    paintAll();
+    return picker ? picker.filter(rows) : rows;
   }
 
   function paint(chartId, statsId, tableId, rows, columns, filter, kind) {
@@ -138,10 +87,6 @@
       { val: summary[1].count, lbl: 'Disabled', kind: summary[1].count ? 'warn' : '' },
       { val: summary[2].count, lbl: 'Unused', kind: summary[2].count ? 'bad' : '' }
     ]);
-    if (!checkedApps().count && checkedApps().total) {
-      document.getElementById(tableId).innerHTML = '<p class="note">Tick at least one app, or click All.</p>';
-      return;
-    }
     Health.table(document.getElementById(tableId), filtered, columns, kind ? function (row, col) {
       if (col === 'disable') disable(kind, row);
     } : null);
@@ -170,6 +115,12 @@
     });
   }
 
+  function loadNames() {
+    Health.query('ko_app_names').then(function (rows) {
+      if (picker) picker.fill((rows || []).map(function (row) { return row.app_name; }));
+    }).catch(function () {});
+  }
+
   function load() {
     var params = { tok_ko_window: document.getElementById('koWindow').value || '30d' };
     Promise.all([
@@ -179,7 +130,7 @@
       Health.query('ko_lookups', params)
     ]).then(function (res) {
       cache.dash = res[0]; cache.apps = res[1]; cache.macros = res[2]; cache.lookups = res[3];
-      fillAppList();
+      if (picker) picker.fill(appNames());
       paintAll();
     }).catch(failAll);
   }
@@ -212,22 +163,6 @@
 
   document.getElementById('apply').addEventListener('click', load);
   document.getElementById('koFilter').addEventListener('change', paintAll);
-  document.getElementById('appFilterBtn').addEventListener('click', function () {
-    var menu = document.getElementById('appFilterMenu');
-    var open = menu.hasAttribute('hidden');
-    if (open) menu.removeAttribute('hidden'); else menu.setAttribute('hidden', '');
-    document.getElementById('appFilterBtn').setAttribute('aria-expanded', open ? 'true' : 'false');
-  });
-  document.getElementById('appFilterAll').addEventListener('click', function () { setAppChecks(true); });
-  document.getElementById('appFilterNone').addEventListener('click', function () { setAppChecks(false); });
-  document.getElementById('appFilterSearch').addEventListener('input', filterAppList);
-  document.getElementById('appFilterList').addEventListener('change', function () { updateAppButton(); paintAll(); });
-  document.addEventListener('click', function (event) {
-    var wrap = document.getElementById('appFilter');
-    if (wrap && !wrap.contains(event.target)) {
-      document.getElementById('appFilterMenu').setAttribute('hidden', '');
-      document.getElementById('appFilterBtn').setAttribute('aria-expanded', 'false');
-    }
-  });
+  loadNames();
   load();
 })();

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.90">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.91">
 </head>
 <body>
 <div class="page">
@@ -20,6 +20,7 @@
         <option value="hec">HEC Tokens</option>
         <option value="sc4s">SC4S &amp; Edge</option>
         <option value="topology">Data Topology</option>
+        <option value="knowledge">Knowledge objects</option>
         <option value="agent">Data Quality Agent</option>
         <option value="each">One report per dashboard</option>
       </select>
@@ -27,19 +28,32 @@
     <label class="fld">Host filter
       <input id="host" value="*" maxlength="128" pattern="[\w.:*\-]{1,128}">
     </label>
+    <div class="fld" id="appFilterWrap">Apps
+      <div class="app-filter" id="appFilter">
+        <button type="button" class="app-filter-btn" id="appFilterBtn" aria-expanded="false">All apps</button>
+        <div class="app-filter-menu" id="appFilterMenu" hidden>
+          <input type="search" id="appFilterSearch" placeholder="Find an app" autocomplete="off">
+          <div class="app-filter-actions">
+            <button type="button" class="btn secondary" id="appFilterAll">Check all</button>
+            <button type="button" class="btn secondary" id="appFilterNone">Clear</button>
+          </div>
+          <div id="appFilterList"></div>
+        </div>
+      </div>
+    </div>
     <button class="btn" id="go" type="button">Generate report</button>
     <button class="btn secondary" id="download" type="button" disabled>Download HTML</button>
     <button class="btn secondary" id="print" type="button" disabled>Print</button>
     <span class="note" id="status"></span>
   </div>
-  <p class="note">The host filter applies to Host Heartbeat. Leave it as * for every host.</p>
+  <p class="note">The host filter applies to Host Heartbeat. Leave it as * for every host. App names fill as soon as the page opens. Tick apps to limit the Knowledge objects sections; leave them clear to include every app.</p>
   <div class="section">
-    <h2 class="section-title" data-help="A read-only copy of the dashboard numbers, stamped with the time you generated it. Pick one dashboard, all of them, or one report per dashboard. The host filter applies only to Host Heartbeat. Download or print when the report is ready. Nothing is changed in Splunk.">Generated report</h2>
+    <h2 class="section-title" data-help="A read-only copy of the dashboard numbers, stamped with the time you generated it. Pick one dashboard, all of them, or one report per dashboard. The host filter applies only to Host Heartbeat. The app checkboxes apply to Knowledge objects. Download or print when the report is ready. Nothing is changed in Splunk.">Generated report</h2>
     <div id="output"></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.90"></script>
-<script src="../../static/app/splunk_exec_health/reports.js?v=1.7.90"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.91"></script>
+<script src="../../static/app/splunk_exec_health/reports.js?v=1.7.91"></script>
 
 </body>
 </html>

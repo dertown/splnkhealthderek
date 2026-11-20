@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.90">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.91">
 </head>
 <body>
 <div class="page">
@@ -21,8 +21,8 @@
         <div class="app-filter-menu" id="appFilterMenu" hidden>
           <input type="search" id="appFilterSearch" placeholder="Find an app" autocomplete="off">
           <div class="app-filter-actions">
-            <button type="button" class="btn secondary" id="appFilterAll">All</button>
-            <button type="button" class="btn secondary" id="appFilterNone">None</button>
+            <button type="button" class="btn secondary" id="appFilterAll">Check all</button>
+            <button type="button" class="btn secondary" id="appFilterNone">Clear</button>
           </div>
           <div id="appFilterList"></div>
         </div>
@@ -30,7 +30,7 @@
     </div>
     <button class="btn" id="apply">Apply</button>
   </div>
-  <p class="note" id="koNote">Tick one or more apps to limit every section to those apps. Disable turns off a dashboard, an app, or a macro after you confirm. Lookup files cannot be disabled. This app and the search and launcher apps stay on.</p>
+  <p class="note" id="koNote">App names fill as soon as the page opens. Tick the apps you want to view; leave them clear to see every app. Disable turns off a dashboard, an app, or a macro after you confirm. Lookup files cannot be disabled. This app and the search and launcher apps stay on.</p>
   <div class="stats-row" id="stats"><div class="stat"><div class="val">…</div><div class="lbl">Loading</div></div></div>
   <div class="section">
     <h2 class="section-title" data-help="Views on this search head from REST. Last used is the last GET of that view in the UI access log during the look-back. Hidden or disabled views are Disabled. A view with no GET in the look-back is Unused.">Dashboards</h2>
@@ -65,8 +65,8 @@
     <div id="lookupTable"><p class="note">Loading lookup list.</p></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.90"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.90"></script>
-<script src="../../static/app/splunk_exec_health/knowledge.js?v=1.7.90"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.91"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.91"></script>
+<script src="../../static/app/splunk_exec_health/knowledge.js?v=1.7.91"></script>
 </body>
 </html>

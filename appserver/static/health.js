@@ -432,5 +432,82 @@ var Health = (function () {
 
   mountNav(0);
   help(document);
-  return { query: query, act: act, heal: heal, healRun: healRun, koDisable: koDisable, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply };
+  function appPicker(ids, onChange) {
+    var list = document.getElementById(ids.list);
+    var btn = document.getElementById(ids.button);
+    var menu = document.getElementById(ids.menu);
+    var search = ids.search ? document.getElementById(ids.search) : null;
+    var wrap = document.getElementById(ids.wrap);
+    if (!list || !btn || !menu) return null;
+    function boxes() { return list.querySelectorAll('input[type="checkbox"]'); }
+    function selected() {
+      var set = {}, n = 0, t = 0;
+      Array.prototype.forEach.call(boxes(), function (box) {
+        t += 1;
+        if (box.checked) { set[box.value] = 1; n += 1; }
+      });
+      return { set: set, count: n, total: t };
+    }
+    function label() {
+      var pick = selected();
+      if (!pick.count || pick.count === pick.total) btn.textContent = 'All apps';
+      else if (pick.count === 1) btn.textContent = Object.keys(pick.set)[0];
+      else btn.textContent = pick.count + ' of ' + pick.total + ' apps';
+    }
+    function filter(rows) {
+      var pick = selected();
+      if (!pick.count || pick.count === pick.total) return rows || [];
+      return (rows || []).filter(function (row) { return pick.set[row.app_name]; });
+    }
+    function applySearch() {
+      var q = ((search && search.value) || '').toLowerCase();
+      Array.prototype.forEach.call(list.querySelectorAll('.app-filter-item'), function (item) {
+        item.style.display = !q || (item.textContent || '').toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+      });
+    }
+    function fill(names) {
+      var prev = {};
+      Array.prototype.forEach.call(boxes(), function (box) { if (box.checked) prev[box.value] = 1; });
+      var seen = {};
+      var ordered = [];
+      (names || []).forEach(function (name) {
+        if (!name || seen[name]) return;
+        seen[name] = 1;
+        ordered.push(name);
+      });
+      ordered.sort(function (a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
+      list.innerHTML = ordered.map(function (name) {
+        return '<label class="app-filter-item"><input type="checkbox" value="' + esc(name) + '"'
+          + (prev[name] ? ' checked' : '') + '> ' + esc(name) + '</label>';
+      }).join('') || '<p class="note">No apps yet.</p>';
+      applySearch();
+      label();
+    }
+    function setAll(on) {
+      Array.prototype.forEach.call(boxes(), function (box) { box.checked = !!on; });
+      label();
+      if (onChange) onChange();
+    }
+    btn.addEventListener('click', function (event) {
+      event.stopPropagation();
+      var open = menu.hasAttribute('hidden');
+      if (open) menu.removeAttribute('hidden'); else menu.setAttribute('hidden', '');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    list.addEventListener('change', function () { label(); if (onChange) onChange(); });
+    if (search) search.addEventListener('input', applySearch);
+    var allBtn = ids.all ? document.getElementById(ids.all) : null;
+    var noneBtn = ids.none ? document.getElementById(ids.none) : null;
+    if (allBtn) allBtn.addEventListener('click', function () { setAll(true); });
+    if (noneBtn) noneBtn.addEventListener('click', function () { setAll(false); });
+    document.addEventListener('click', function (event) {
+      if (wrap && !wrap.contains(event.target)) {
+        menu.setAttribute('hidden', '');
+        btn.setAttribute('aria-expanded', 'false');
+      }
+    });
+    return { fill: fill, filter: filter, selected: selected, label: label, setAll: setAll };
+  }
+
+  return { query: query, act: act, heal: heal, healRun: healRun, koDisable: koDisable, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply, appPicker: appPicker };
 })();

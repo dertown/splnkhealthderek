@@ -3127,7 +3127,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.90"
+APP_VERSION = "1.7.91"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3559,6 +3559,16 @@ search index=_internal sourcetype=splunkd component=DateParserVerbose log_level=
 | table context count _color_rank
 """.strip()
 
+
+# Installed app names only. The Knowledge objects filter fills from this so
+# you can tick apps before the heavier inventory searches finish.
+Q_KO_APP_NAMES = r"""
+| rest `exec_health_ko_rest` /services/apps/local
+| rename title AS app_name
+| eval label=coalesce(label, app_name)
+| table app_name, label
+| sort 0 app_name
+""".strip()
 
 # Knowledge objects on this search head. Inventory is REST. Last used for
 # dashboards and apps is UI access in _internal. Macros and lookup files are
@@ -4030,6 +4040,7 @@ def emit_catalog() -> None:
                            cache=cache_spec("topo_full", cache_reader("topo_full", _table_fields(Q_TOPO_FULL)), 3600)),
         "topo_focus_trend": entry(Q_TOPO_FOCUS_TREND, "-25h@m", "@m", ["tok_topo_environment", "tok_topo_ingest", "tok_topo_family", "tok_topo_endpoint", "tok_topo_index"], count=200, timeout=120),
         "heal_runs": entry(Q_HEAL_RUNS, "-24h", "now", ["tok_heal_window"], count=5000, timeout=120),
+        "ko_app_names": entry(Q_KO_APP_NAMES, "-1m", "now", count=500, timeout=60),
         "ko_dashboards": entry(Q_KO_DASHBOARDS, "-30d", "now", ["tok_ko_window"], count=4000, timeout=150,
                                cache=cache_spec("ko_usage", Q_KO_DASHBOARDS_CACHED, 7800, "tok_ko_window")),
         "ko_apps": entry(Q_KO_APPS, "-30d", "now", ["tok_ko_window"], count=500, timeout=120,

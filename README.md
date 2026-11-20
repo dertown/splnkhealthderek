@@ -16,10 +16,10 @@ Inside the app, **Help → README** is the operator guide and **Help → About**
 | **Host Heartbeat & Instance Health** | Fleet-wide liveness: last indexed data vs last `_internal` heartbeat, each host's own heartbeat gap once it has a day of history, ingestion latency, the 24-hour 2σ baseline, and the last hour versus that same hour on earlier days. Also splunkd health, CPU/memory, and blocked queues. Self-heal lists the app's Exec Health searches that are off or missed a run, and after a confirmed click turns them on and re-runs the newest missed check |
 | **HEC Token Performance** | Events per HEC token, 1-hour rolling window, flag if a ~100 eps token sits at 0 for 5+ minutes. Handler errors list the client, token, index, and sourcetype. A flow shows client → HEC token → index, with the sourcetype on the index step. Also lists HEC token configuration load failures, line-breaking truncation, and timestamp parse warnings |
 | **SC4S Syslog & Edge/Ingest Processors** | Events per syslog source, Edge Processor in vs out, filter efficiency, dropped / queue metrics |
-| **Knowledge objects** | A simple inventory of dashboards, apps, macros, and lookup files on this search head. Each section charts In use vs Disabled vs Unused, and lists last used. Disable turns off a dashboard, app, or macro after you confirm. Lookup files cannot be disabled. Dashboard and app last used come from the UI access log. Macro and lookup last used come from scheduled searches that reference them |
+| **Knowledge objects** | A simple inventory of dashboards, apps, macros, and lookup files on this search head. App names fill the filter as soon as the page opens; tick the apps you want to view. Each section charts In use vs Disabled vs Unused, and lists last used. Disable turns off a dashboard, app, or macro after you confirm. Lookup files cannot be disabled. Dashboard and app last used come from the UI access log. Macro and lookup last used come from scheduled searches that reference them |
 | **Data Topology** | The map opens as a summary: site (a shared domain, or an IPv4 /16) → ingestion path → sourcetype family → index. The busiest eight of each are named, and the rest is one Other node whose count still includes that tail. Hover a node to light its path through the map. Click a site, path, family, or index to open the hosts and sourcetypes inside it. Windows stays one family on the summary. Opening it lists the sourcetypes in the index; WinEventLog and XmlWinEventLog are split by the event-log channel in the source. Click Overview to return. Feeds you expect are a list in `lookups/feed_catalog.csv`: gone quiet, wrong sourcetype, and sources new this week. A catch-all index is any row whose state is catchall. The starting names are quarantine, lastchance, and main. Delete the ones this stack does not use. Click a host for its first/latest event and its own 24h trend (liveness stays on Host Heartbeat) |
 | **Derek+ Data Quality Agent** | Agentic loop over health tiles and learned ingest bounds (instance features, silent hosts, each host's heartbeat gap, same-hour ingest, search CPU, HEC, SC4S, Edge). A host still on its usual heartbeat whose hour is below that hour's level is a stopped input. When an AI provider is saved, it also checks the sample config and the fix check. If the suggestion is to open a Splunk support ticket, Generate fills a ticket you can copy. A human must click APPROVE or DISMISS before anything is recorded. Nothing is applied, and no ticket is filed. |
-| **Reports** | Timestamped HTML report: one compilation of the statistics collected across the health pages, or a targeted report for a single dashboard. Indexed events are listed by the index being written, with events per second, hosts, and sourcetypes |
+| **Reports** | Timestamped HTML report: one compilation of the statistics collected across the health pages, or a targeted report for a single dashboard, including Knowledge objects. Tick apps to limit that section. Indexed events are listed by the index being written, with events per second, hosts, and sourcetypes |
 | **AI provider setup** | Set AI provider, model, and key in the UI, then SAVE to the search-head config lookup |
 
 Saved searches (all **disabled** on install):
@@ -54,8 +54,8 @@ The viewing role needs search access to `_internal` and `_introspection` (HEC pe
 The installable Cloud package lives in [`dist/`](dist/). GitHub keeps `latest.spl` plus the **last two versions**:
 
 - **[latest.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/latest.spl)** — always the current build
-- **[splunk_exec_health-1.7.90.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/splunk_exec_health-1.7.90.spl)** — 1.7.90
-- **[splunk_exec_health-1.7.89.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/splunk_exec_health-1.7.89.spl)** — previous
+- **[splunk_exec_health-1.7.91.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/splunk_exec_health-1.7.91.spl)** — 1.7.91
+- **[splunk_exec_health-1.7.90.spl](https://github.com/dertown/splnkhealthderek/raw/main/dist/splunk_exec_health-1.7.90.spl)** — previous
 
 Browse the folder: https://github.com/dertown/splnkhealthderek/tree/main/dist
 
@@ -67,7 +67,7 @@ Use the packaged `.spl` (search-head only, no `local/`, no `tools/`, no `.git`):
 
 1. Sign in as **sc_admin**.
 2. **Apps → Manage apps → Install app from file**.
-3. Upload `dist/latest.spl` (or `dist/splunk_exec_health-1.7.90.spl`).
+3. Upload `dist/latest.spl` (or `dist/splunk_exec_health-1.7.91.spl`).
 4. Splunk Cloud runs AppInspect automatically. The report must show 0 failures, 0 errors, and 0 manual checks for self-service install.
 5. Open **Splunk Health Derek+** from the app menu.
 
@@ -242,5 +242,5 @@ bash tools/package.sh
 `tools/package.sh` writes `dist/splunk_exec_health-<version>.spl` with 644 file modes, `bin/derekaiping.py` as the only Python, and no `local/`. Validate Cloud self-service install with AppInspect 4.x:
 
 ```bash
-splunk-appinspect inspect dist/splunk_exec_health-1.7.90.spl --included-tags private_app
+splunk-appinspect inspect dist/splunk_exec_health-1.7.91.spl --included-tags private_app
 ```

@@ -82,6 +82,29 @@
         { title: 'Catch-all indexes by sourcetype and source', query: 'quarantine_rows' }
       ]
     },
+    knowledge: {
+      title: 'Knowledge objects',
+      sections: [
+        { title: 'Dashboards', query: 'ko_dashboards', params: { tok_ko_window: '30d' }, apps: true, columns: [
+          { key: 'app_name', label: 'App' }, { key: 'label', label: 'Title' }, { key: 'ko_name', label: 'Name' },
+          { key: 'owner', label: 'Owner' }, { key: 'last_used', label: 'Last used' }, { key: 'views', label: 'Views' },
+          { key: 'users', label: 'Users' }, { key: 'usage', label: 'Status' }
+        ] },
+        { title: 'Apps', query: 'ko_apps', params: { tok_ko_window: '30d' }, apps: true, columns: [
+          { key: 'app_name', label: 'App' }, { key: 'label', label: 'Title' }, { key: 'version', label: 'Version' },
+          { key: 'last_used', label: 'Last used' }, { key: 'views', label: 'Views' }, { key: 'users', label: 'Users' },
+          { key: 'usage', label: 'Status' }
+        ] },
+        { title: 'Macros', query: 'ko_macros', params: { tok_ko_window: '30d' }, apps: true, columns: [
+          { key: 'app_name', label: 'App' }, { key: 'ko_name', label: 'Name' }, { key: 'owner', label: 'Owner' },
+          { key: 'last_used', label: 'Last used' }, { key: 'refs', label: 'Saved searches' }, { key: 'usage', label: 'Status' }
+        ] },
+        { title: 'Lookup files', query: 'ko_lookups', params: { tok_ko_window: '30d' }, apps: true, columns: [
+          { key: 'app_name', label: 'App' }, { key: 'ko_name', label: 'Name' }, { key: 'owner', label: 'Owner' },
+          { key: 'last_used', label: 'Last used' }, { key: 'refs', label: 'Saved searches' }, { key: 'usage', label: 'Status' }
+        ] }
+      ]
+    },
     agent: {
       title: 'Data Quality Agent',
       sections: [
@@ -91,7 +114,7 @@
       ]
     }
   };
-  var ORDER = ['summary', 'host', 'hec', 'sc4s', 'topology', 'agent'];
+  var ORDER = ['summary', 'host', 'hec', 'sc4s', 'topology', 'knowledge', 'agent'];
   var running = false;
   var fileName = '';
 
@@ -118,7 +141,7 @@
         var params = {};
         Object.keys(section.params || {}).forEach(function (name) { params[name] = section.params[name]; });
         if (section.host) params.host_filter = filter;
-        jobs.push({ book: key, title: section.title, query: section.query, params: params, columns: section.columns, view: section.view, health: section.health });
+        jobs.push({ book: key, title: section.title, query: section.query, params: params, columns: section.columns, view: section.view, health: section.health, apps: section.apps });
       });
     });
     return jobs;
@@ -126,6 +149,7 @@
   // Sections that ask for the same search share one request, then take their part:
   // a topology view, or the queue health that every queue row carries.
   function shape(job, rows) {
+    if (job.apps && picker) rows = picker.filter(rows);
     if (job.view) {
       return rows.filter(function (row) { return row.topo_view === job.view; }).map(function (row) {
         var copy = {};
@@ -235,6 +259,23 @@
     anchor.remove();
     URL.revokeObjectURL(url);
   }
+
+  var picker = Health.appPicker({
+    wrap: 'appFilter', button: 'appFilterBtn', menu: 'appFilterMenu',
+    search: 'appFilterSearch', list: 'appFilterList', all: 'appFilterAll', none: 'appFilterNone'
+  });
+  function usesApps(scope) {
+    return scope === 'overall' || scope === 'each' || scope === 'knowledge';
+  }
+  function showAppFilter() {
+    var wrap = document.getElementById('appFilterWrap');
+    if (wrap) wrap.style.display = usesApps(document.getElementById('scope').value) ? '' : 'none';
+  }
+  Health.query('ko_app_names').then(function (rows) {
+    if (picker) picker.fill((rows || []).map(function (row) { return row.app_name; }));
+  }).catch(function () {});
+  document.getElementById('scope').addEventListener('change', showAppFilter);
+  showAppFilter();
 
   document.getElementById('go').addEventListener('click', function () {
     if (running) return;
