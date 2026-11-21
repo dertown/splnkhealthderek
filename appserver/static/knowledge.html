@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <script>window.i18n_register=window.i18n_register||function(){};</script>
-  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.95">
+  <link rel="stylesheet" href="../../static/app/splunk_exec_health/health.css?v=1.7.97">
 </head>
 <body>
 <div class="page">
@@ -35,7 +35,7 @@
   <p class="note" id="koNote">App names fill as soon as the page opens. Tick the apps you want to view; leave them clear to see every app. TAs, SA/DA add-ons, and Splunk premium apps are hidden by default so they are not listed as unused. If an AI provider is saved, the page asks it to mark any remaining system apps. Ask AI to clean up uses only the leftover unused objects. Nothing is disabled until you confirm a Disable button. Lookup files cannot be disabled.</p>
   <div class="stats-row" id="stats"><div class="stat"><div class="val">…</div><div class="lbl">Loading</div></div></div>
   <div class="section">
-    <h2 class="section-title" data-help="The saved AI provider ranks unused dashboards, apps, macros, and lookup files to disable, and estimates search-head CPU, scheduled-search, and memory savings as ranges. Those numbers are estimates, not measurements. The app never disables anything from this reply.">AI cleanup suggestions</h2>
+    <h2 class="section-title" data-help="The saved AI provider ranks the apps to clean up. Before asking, the page measures 7 days of search-head load by app: CPU and memory from _introspection (per search process, sampled every 10 seconds) and runs and skips from the scheduler log. Each tile shows the measured share of search-head CPU, scheduler run time, or memory that the named apps use now, which is the most disabling them could save, next to the AI's estimate. Confidence comes from the measurement: high with 5 or more days of _introspection (or any scheduler runs for scheduled searches), medium with less, low when nothing was measured. The table lists each app the AI named, with the unused counts measured on this page. Show here filters the lists below to that app's unused objects. Search opens every knowledge object in that app in Splunk search. The app never disables anything from this reply.">AI cleanup suggestions</h2>
     <p class="note" id="koCleanupNote">Save an AI provider under Configure, then click Ask AI to clean up. The ask uses the apps currently ticked in the filter.</p>
     <div id="koCleanupOut"></div>
   </div>
@@ -72,8 +72,8 @@
     <div id="lookupTable"><p class="note">Loading lookup list.</p></div>
   </div>
 </div>
-<script src="../../static/app/splunk_exec_health/health.js?v=1.7.95"></script>
-<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.95"></script>
-<script src="../../static/app/splunk_exec_health/knowledge.js?v=1.7.95"></script>
+<script src="../../static/app/splunk_exec_health/health.js?v=1.7.97"></script>
+<script src="../../static/app/splunk_exec_health/charts.js?v=1.7.97"></script>
+<script src="../../static/app/splunk_exec_health/knowledge.js?v=1.7.97"></script>
 </body>
 </html>

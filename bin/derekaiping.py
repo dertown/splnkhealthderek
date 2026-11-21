@@ -60,7 +60,7 @@ RETRY_WAIT = 3
 # Output token budgets. Reasoning models (OpenAI o-series and gpt-5) spend part of
 # the budget on hidden reasoning before any answer text, so they get more room and
 # use max_completion_tokens, which those models require instead of max_tokens.
-ASK_TOKENS = 1400
+ASK_TOKENS = 2000
 PING_TOKENS = 16
 REASONING_ASK_TOKENS = 6000
 REASONING_PING_TOKENS = 512

@@ -488,6 +488,13 @@ var Health = (function () {
       label();
       if (onChange) onChange();
     }
+    function only(names) {
+      var want = {};
+      (names || []).forEach(function (name) { want[name] = 1; });
+      Array.prototype.forEach.call(boxes(), function (box) { box.checked = !!want[box.value]; });
+      label();
+      if (onChange) onChange();
+    }
     btn.addEventListener('click', function (event) {
       event.stopPropagation();
       var open = menu.hasAttribute('hidden');
@@ -506,7 +513,7 @@ var Health = (function () {
         btn.setAttribute('aria-expanded', 'false');
       }
     });
-    return { fill: fill, filter: filter, selected: selected, label: label, setAll: setAll };
+    return { fill: fill, filter: filter, selected: selected, label: label, setAll: setAll, only: only };
   }
 
   var KO_KEEP_KEY = 'exec_health_ko_keep';
@@ -584,5 +591,5 @@ var Health = (function () {
     return found;
   }
 
-  return { query: query, act: act, heal: heal, healRun: healRun, koDisable: koDisable, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply, appPicker: appPicker, koMark: koMark, koMarkRows: koMarkRows, koRequired: koRequired, koRuleRequired: koRuleRequired, koRememberKeep: koRememberKeep, koParseKeep: koParseKeep };
+  return { root: root, query: query, act: act, heal: heal, healRun: healRun, koDisable: koDisable, table: table, stats: stats, num: num, fail: fail, link: link, esc: esc, page: page, help: help, sections: sections, reply: reply, appPicker: appPicker, koMark: koMark, koMarkRows: koMarkRows, koRequired: koRequired, koRuleRequired: koRuleRequired, koRememberKeep: koRememberKeep, koParseKeep: koParseKeep };
 })();

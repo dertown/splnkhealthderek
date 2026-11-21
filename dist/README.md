@@ -5,7 +5,7 @@ Download the packaged app from this folder. `latest.spl` is always the current b
 | File | What it is |
 | --- | --- |
 | [latest.spl](latest.spl) | Current Splunk Health Derek+ Cloud package |
-| [splunk_exec_health-1.7.93.spl](splunk_exec_health-1.7.93.spl) | Version 1.7.93 |
 | [splunk_exec_health-1.7.95.spl](splunk_exec_health-1.7.95.spl) | Version 1.7.95 |
+| [splunk_exec_health-1.7.97.spl](splunk_exec_health-1.7.97.spl) | Version 1.7.97 |
 
 Install: **Apps → Manage apps → Install app from file**, then upload the `.spl`.
