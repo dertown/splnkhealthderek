@@ -263,37 +263,61 @@ def _latch(params: dict) -> None:
     params["tok_cfg_save"] = f"save|{provider}|{model}|{len(_clean_key(params))}"
 
 
+class CredentialError(RuntimeError):
+    """storage/passwords answered with an HTTP status other than success."""
+
+    def __init__(self, action: str, status: int):
+        super().__init__(f"credential {action} returned HTTP {status}")
+        self.status = int(status or 0)
+
+
+def _cred_request(path: str, session_key: str, **kwargs):
+    """simpleRequest that returns (status, body) for every HTTP status.
+
+    splunk.rest.simpleRequest raises for some statuses (404 ResourceNotFound and
+    403 AuthorizationFailed) even with raiseAllErrors=False, so read the status
+    from the exception instead of letting it end the save.
+    """
+    try:
+        resp, content = rest.simpleRequest(path, sessionKey=session_key, raiseAllErrors=False, **kwargs)
+        return int(resp.status), content or b""
+    except Exception as exc:  # noqa: BLE001 - splunk.RESTException and subclasses carry statusCode
+        status = getattr(exc, "statusCode", None)
+        if isinstance(status, int) and status >= 400:
+            return status, str(exc).encode("utf-8", "replace")
+        raise
+
+
 def _store_key(session_key: str, params: dict) -> None:
     """Save the typed key in storage/passwords, or remove it when the provider is none.
 
-    A blank key keeps whatever is stored. Raises on any failure so the search,
-    which would otherwise record the key as stored, does not run.
+    A blank key keeps whatever is stored. Creates the credential first and updates
+    it only when it already exists (409), so a first save works. Raises on any
+    failure so the search, which would otherwise record the key as stored, does not run.
     """
     key = _clean_key(params)
     provider = str(params.get("tok_cfg_provider") or "none")
     entity = CRED_PATH + "/" + quote(f"{CRED_REALM}:{CRED_NAME}:", safe="")
     if provider == "none":
-        resp, unused = rest.simpleRequest(entity, sessionKey=session_key, method="DELETE", raiseAllErrors=False)
-        if resp.status not in (200, 404):
-            raise RuntimeError(f"credential delete returned HTTP {resp.status}")
+        status, unused = _cred_request(entity, session_key, method="DELETE")
+        if status not in (200, 404):
+            raise CredentialError("delete", status)
         return
     if not key:
         return
     if len(key) < 8:
         raise ValueError("rejected tok_cfg_key")
-    resp, unused = rest.simpleRequest(
-        entity, sessionKey=session_key, method="POST",
-        postargs={"password": key, "output_mode": "json"}, raiseAllErrors=False,
+    status, body = _cred_request(
+        CRED_PATH, session_key, method="POST",
+        postargs={"name": CRED_NAME, "realm": CRED_REALM, "password": key, "output_mode": "json"},
     )
-    if resp.status == 404:
-        resp, unused = rest.simpleRequest(
-            CRED_PATH, sessionKey=session_key, method="POST",
-            postargs={"name": CRED_NAME, "realm": CRED_REALM, "password": key, "output_mode": "json"},
-            raiseAllErrors=False,
-        )
-    if resp.status not in (200, 201):
+    exists = status == 409 or (status == 400 and b"already exists" in (body if isinstance(body, bytes) else str(body).encode()))
+    if exists:
+        status, unused = _cred_request(entity, session_key, method="POST",
+                                       postargs={"password": key, "output_mode": "json"})
+    if status not in (200, 201):
         # 403 means the user lacks list_storage_passwords or write on [passwords].
-        raise RuntimeError(f"credential save returned HTTP {resp.status}")
+        raise CredentialError("save", status)
 
 
 class HealthDashHandler(PersistentServerConnectionApplication):
@@ -450,10 +474,19 @@ class HealthDashHandler(PersistentServerConnectionApplication):
             except ValueError:
                 raise KeyNotSaved("The API key must be 8 to 512 characters: "
                                   "letters, digits, and . _ / = + -", 400) from None
+            except CredentialError as exc:
+                logger.warning("save_config credential store failed: HTTP %s", exc.status)
+                if exc.status == 403:
+                    raise KeyNotSaved("The API key could not be saved to the credential store (HTTP 403). "
+                                      "Saving needs the list_storage_passwords capability and write "
+                                      "access to this app's passwords.", 403) from None
+                raise KeyNotSaved("The API key could not be saved to the credential store "
+                                  f"(HTTP {exc.status}). Check splunkd.log for storage/passwords errors.",
+                                  502) from None
             except Exception as exc:  # noqa: BLE001 - the message never contains the key
                 logger.warning("save_config credential store failed: %s", type(exc).__name__)
-                raise KeyNotSaved("The API key could not be saved to the credential store. "
-                                  "Saving needs the list_storage_passwords capability.", 403) from None
+                raise KeyNotSaved("The API key could not be saved to the credential store "
+                                  f"({type(exc).__name__}). Check splunkd.log.", 502) from None
         spl = spec["spl"]
         for key in sorted(values, key=len, reverse=True):
             spl = spl.replace(f"${key}$", values[key])
