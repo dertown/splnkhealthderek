@@ -3130,7 +3130,7 @@ def ai_provider_setup() -> dict:
     }
 
 
-APP_VERSION = "1.7.95"
+APP_VERSION = "1.7.97"
 APP_ID = "splunk_exec_health"
 APP_LABEL = "Splunk Health Derek+"
 
@@ -3592,7 +3592,7 @@ Q_KO_CLEANUP = r"""
 | eval endpoint=if(endpoint="none" OR isnull(endpoint) OR endpoint="", coalesce(default_endpoint, "none"), endpoint)
 | eval endpoint=if(provider="anthropic" AND NOT match(lower(coalesce(endpoint, "")), "anthropic"), "https://api.anthropic.com/v1/messages", endpoint)
 | eval model=if(provider="anthropic" AND (NOT match(lower(coalesce(model, "")), "^claude") OR lower(coalesce(model, ""))="claude-opus-4" OR match(lower(coalesce(model, "")), "^claude-3-")), "claude-haiku-5-5", model)
-| eval ai_brief="Role: Derek+ Knowledge Object cleaner. Recommend which unused knowledge objects to disable to improve search-head performance. Do not delete anything. Do not disable splunk_exec_health, search, launcher, Technology Add-ons, SA or DA add-ons, CIM, ES, ITSI, SOAR, UBA, ESCU, or other Required objects. A human must confirm every disable. Use only the inventory facts. If a number is not in the facts, write not measured. Reply in under 500 words. Reply in sections. Start each section with a bold heading in the form **Heading:** and use: Priority actions, Leave alone, Estimated savings. In Estimated savings, give qualitative search-head CPU, scheduled-search, and memory ranges (low, medium, or high) and a rough percent of knowledge-object load, labeled as estimates not measurements. End with exactly two lines and nothing after them. CONFIDENCE: high, medium, or low, then a short reason. SAVINGS: one sentence with the estimated range. Facts: "+facts+". Do not request secrets or HEC token values."
+| eval ai_brief="Role: Derek+ Knowledge Object cleaner. Recommend which unused knowledge objects to disable to improve search-head performance. Do not delete anything. Do not disable splunk_exec_health, search, launcher, Technology Add-ons, SA or DA add-ons, CIM, ES, ITSI, SOAR, UBA, ESCU, or other Required objects. A human must confirm every disable. Use only the inventory facts. If a number is not in the facts, write not measured. When the facts include measured search-head load, base every savings range on it: disabling an app cannot save more than that app's measured share, unused dashboards save almost nothing because nobody opens them, and most savings come from scheduled searches and accelerations that still run. Name the measured numbers in each savings reason. Reply in under 600 words. Reply in sections. Start each section with a bold heading in the form **Heading:** and use: Priority actions, Leave alone. Then end with these lines and nothing after them, each on its own line, with fields separated by a semicolon. First exactly three savings lines, labeled as estimates not measurements: SAVE_CPU: low, medium, or high; rough percent range of search-head CPU such as 2-5%; confidence high, medium, or low; short reason. SAVE_SCHEDULED: low, medium, or high; rough percent range of scheduled-search load; confidence high, medium, or low; short reason. SAVE_MEMORY: low, medium, or high; rough percent range of search-head memory; confidence high, medium, or low; short reason. Then CONFIDENCE: high, medium, or low, then a short reason. Then SAVINGS: one sentence with the overall estimated range. Then one APP line for each app you recommend acting on, most important first, up to 15, using only app folder names from the facts: APP: app folder name; action (disable app, disable dashboards, disable macros, or review); short reason. Facts: "+facts+". Do not request secrets or HEC token values."
 | eval is_ping=0
 | derekaiping
 | eval status=if(ai_result="replied", "replied", "failed")
@@ -3630,6 +3630,47 @@ Q_KO_CLASSIFY = r"""
 | fields - api_key
 | eval _color_rank=if(status="replied", 3, 1)
 | table status, reply, cleanup_error, provider, model, _color_rank
+""".strip()
+
+# Measured search-head load by app over the last 7 days, used to ground the AI
+# cleanup estimates and to rate their confidence. Platform instrumentation logs
+# every search process every 10 seconds (component=PerProcess, with
+# data.search_props app, type, provenance, role, sid), and the host every 10
+# seconds (component=Hostwide: cpu_count, cpu_user_pct, cpu_system_pct, mem).
+# pct_cpu is percent of one core, so one sample is pct_cpu/100*10 CPU-seconds.
+# Only search heads count (role=head, and the Hostwide rows of those hosts).
+# The ALL row holds the totals: capacity, busy percent, and coverage.
+Q_KO_LOAD = r"""
+search index=_introspection sourcetype=splunk_resource_usage ((component=PerProcess data.search_props.role=head data.search_props.sid=*) OR component=Hostwide)
+| eval app=if(component="Hostwide", "ALL", coalesce('data.search_props.app', "unknown")), sid='data.search_props.sid'
+| eval stype=lower(coalesce('data.search_props.type', "")), prov=lower(coalesce('data.search_props.provenance', ""))
+| eval kind=case(component="Hostwide", "host", match(stype, "scheduled|summary"), "scheduled", match(stype, "acceleration"), "acceleration", match(prov, "^ui:"), "dashboard", 1=1, "adhoc")
+| eval cpu_sec=if(kind!="host", tonumber('data.pct_cpu')/100*10, null()), mem_mb_sec=if(kind!="host", tonumber('data.mem_used')*10, null())
+| eval busy=if(kind="host", tonumber('data.cpu_user_pct')+tonumber('data.cpu_system_pct'), null()), cores=if(kind="host", tonumber('data.cpu_count'), null()), host_mem=if(kind="host", tonumber('data.mem'), null())
+| stats sum(cpu_sec) AS cpu_sec, sum(mem_mb_sec) AS mem_mb_sec, dc(sid) AS searches, sum(eval(if(kind="scheduled", cpu_sec, 0))) AS sched_cpu_sec, sum(eval(if(kind="acceleration", cpu_sec, 0))) AS accel_cpu_sec, sum(eval(if(kind="dashboard", cpu_sec, 0))) AS dash_cpu_sec, sum(eval(if(kind="adhoc", cpu_sec, 0))) AS adhoc_cpu_sec, avg(busy) AS busy, max(cores) AS cores, max(host_mem) AS host_mem, min(_time) AS t0, max(_time) AS t1 by host, app
+| eventstats max(eval(if(app!="ALL", 1, 0))) AS is_head by host
+| where is_head=1
+| eval span_sec=if(app="ALL", t1-t0+10, null()), cap_cpu_sec=if(app="ALL", cores*span_sec, null()), used_cpu_sec=if(app="ALL", cores*span_sec*busy/100, null()), host_mem=if(app="ALL", host_mem, null())
+| stats sum(cpu_sec) AS cpu_sec, sum(mem_mb_sec) AS mem_mb_sec, sum(searches) AS searches, sum(sched_cpu_sec) AS sched_cpu_sec, sum(accel_cpu_sec) AS accel_cpu_sec, sum(dash_cpu_sec) AS dash_cpu_sec, sum(adhoc_cpu_sec) AS adhoc_cpu_sec, sum(cap_cpu_sec) AS cap_cpu_sec, sum(used_cpu_sec) AS used_cpu_sec, sum(host_mem) AS host_mem, max(span_sec) AS span_sec, dc(host) AS hosts by app
+| append [
+    search index=_internal sourcetype=scheduler savedsearch_name=*
+    | stats count(eval(status="success" OR status="completed")) AS sched_runs, count(eval(status="skipped")) AS skipped, sum(run_time) AS sched_run_sec, dc(savedsearch_name) AS sched_searches by app
+    | appendpipe [ stats sum(sched_runs) AS sched_runs, sum(skipped) AS skipped, sum(sched_run_sec) AS sched_run_sec, sum(sched_searches) AS sched_searches | eval app="ALL" ]
+]
+| stats max(*) AS * by app
+| eventstats max(eval(if(app="ALL", cap_cpu_sec, null()))) AS cap_all, max(eval(if(app="ALL", span_sec, null()))) AS span_all, max(eval(if(app="ALL", host_mem, null()))) AS mem_all, max(eval(if(app="ALL", sched_run_sec, null()))) AS sched_all, sum(eval(if(app!="ALL", cpu_sec, 0))) AS search_cpu_all
+| fillnull value=0 cpu_sec mem_mb_sec searches sched_cpu_sec accel_cpu_sec dash_cpu_sec adhoc_cpu_sec sched_runs skipped sched_run_sec sched_searches
+| eval cpu_sec=if(app="ALL", search_cpu_all, cpu_sec)
+| eval cpu_pct=if(app="ALL", round(used_cpu_sec/cap_all*100, 2), round(cpu_sec/cap_all*100, 3))
+| eval cpu_share=round(cpu_sec/search_cpu_all*100, 2)
+| eval sched_cpu_pct=round(sched_cpu_sec/cap_all*100, 3), accel_cpu_pct=round(accel_cpu_sec/cap_all*100, 3), dash_cpu_pct=round(dash_cpu_sec/cap_all*100, 3), adhoc_cpu_pct=round(adhoc_cpu_sec/cap_all*100, 3)
+| eval avg_mem_mb=round(mem_mb_sec/span_all, 1), mem_pct=round(mem_mb_sec/span_all/mem_all*100, 3)
+| eval sched_share=round(sched_run_sec/sched_all*100, 2), sched_run_sec=round(sched_run_sec, 0), cpu_sec=round(cpu_sec, 0)
+| eval coverage_days=round(span_all/86400, 1), hosts=if(app="ALL", hosts, null())
+| eval _order=if(app="ALL", 0, 1)
+| sort 0 _order -cpu_sec -sched_run_sec
+| head 400
+| table app, cpu_sec, cpu_pct, cpu_share, sched_cpu_pct, accel_cpu_pct, dash_cpu_pct, adhoc_cpu_pct, avg_mem_mb, mem_pct, searches, sched_runs, skipped, sched_run_sec, sched_searches, sched_share, hosts, coverage_days
 """.strip()
 
 # Knowledge objects on this search head. Inventory is REST. Last used for
@@ -3963,6 +4004,7 @@ CACHES = {
     "topo_full": ("Data topology map", cache_producer("topo_full", Q_TOPO_FULL),
                   "9,39 * * * *", "-24h", "now"),
     "ko_usage": ("Knowledge object usage", Q_KO_USAGE_BUILD, "17 * * * *", "-1d@d", "now"),
+    "ko_load": ("Knowledge object load", cache_producer("ko_load", Q_KO_LOAD), "21 */4 * * *", "-7d@h", "now"),
 }
 
 CACHE_SAVED_SEARCHES = [
@@ -4131,6 +4173,8 @@ def emit_catalog() -> None:
         # never a search parameter. tools/validate_keys.py fails if it comes back.
         "save_config": entry(Q_DQ_AI_SAVE_CONFIG, "0", "now", ["tok_cfg_save", "tok_cfg_provider", "tok_cfg_model"], count=5, timeout=60, write=True),
         "conn_test": entry(Q_DQ_AI_CONN_WRITE, "0", "now", ["tok_cfg_save", "tok_cfg_provider", "tok_cfg_model"], count=5, timeout=150, write=True),
+        "ko_load": entry(Q_KO_LOAD, "-7d@h", "now", count=500, timeout=300,
+                         cache=cache_spec("ko_load", cache_reader("ko_load", _table_fields(Q_KO_LOAD)), 16200)),
         "ko_cleanup": entry(Q_KO_CLEANUP, "0", "now", ["tok_ai_brief"], count=5, timeout=150, write=True),
         "ko_classify": entry(Q_KO_CLASSIFY, "0", "now", ["tok_ai_brief"], count=5, timeout=150, write=True),
     }

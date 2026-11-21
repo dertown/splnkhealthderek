@@ -251,3 +251,18 @@ code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 0
 pre { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 0.8rem; }
 .cache-note { position: fixed; right: 16px; bottom: 12px; z-index: 20; max-width: 360px; padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 0.8rem; }
 .cache-note a { color: var(--accent); }
+
+/* Knowledge objects: AI savings tiles and the apps-to-act-on table. */
+.save-tiles { margin-bottom: 16px; }
+.save-tile { text-align: left; }
+.save-tile .val { margin-top: 6px; }
+.save-tile .range { font-size: 0.85rem; color: var(--text); margin-top: 4px; }
+.save-tile .range.ai { color: var(--muted); font-size: 0.78rem; }
+.save-tile .conf { display: inline-block; margin-top: 8px; padding: 2px 8px; border-radius: 10px; font-size: 0.72rem; font-weight: 600; border: 1px solid var(--border); color: var(--muted); }
+.save-tile .conf-high { color: var(--success); border-color: var(--success); }
+.save-tile .conf-medium { color: var(--warn); border-color: var(--warn); }
+.save-tile .conf-low { color: var(--error); border-color: var(--error); }
+.save-tile .why { font-size: 0.78rem; color: var(--muted); margin-top: 8px; line-height: 1.45; }
+.sub-title { font-size: 0.9rem; font-weight: 600; color: var(--text); margin: 18px 0 8px; }
+.ko-app-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.ko-app-actions a.btn { text-decoration: none; display: inline-flex; align-items: center; }
